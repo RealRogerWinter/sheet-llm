@@ -444,6 +444,11 @@ export type ChatErrorCode =
   // The anonymous recovery path is closed for claimed accounts; the client
   // branches on this to prompt a sign-in instead of clearing its backup.
   | 'account_claimed'
+  // Credit paywall (PR-7b; off by default behind SL_PAID_GENERATION). The
+  // authenticated Pro user has too few credits to reserve this generation —
+  // 402, with a plain `error`; the buy-credits CTA card lands with the wallet
+  // UI (PR-12).
+  | 'insufficient_credits'
 
 /**
  * A structured call-to-action attached to a quota/login error so the chat UI can

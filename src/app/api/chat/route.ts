@@ -34,7 +34,11 @@ import type {
 import { summarizeScore } from '@/lib/shared/scoreSummary'
 import { run as runOrchestrator } from '@/lib/orchestrator'
 import { getOrchestratorMode } from '@/lib/orchestrator/flags'
-import { logShadowDivergence, updateTurnUsageByRequestId } from '@/lib/orchestrator/observability'
+import {
+  logShadowDivergence,
+  readTurnCostByRequestId,
+  updateTurnUsageByRequestId,
+} from '@/lib/orchestrator/observability'
 import type { OrchestratorMode } from '@/lib/orchestrator/flags'
 import type {
   OrchestratorConverseStream,
@@ -45,11 +49,19 @@ import { isOrchestratorConverseStream, isOrchestratorScoreStream } from '@/lib/o
 import { summarizeAction } from '@/lib/orchestrator/summarizeAction'
 import { recordUsage } from '@/lib/orchestrator/budget'
 import { currentMeterTotals, runWithUsageMeter, toMicroUsd } from '@/lib/billing/usageMeter'
+import { isPaidGenerationEnabled } from '@/lib/auth/account'
+import { ensureWallet, placeHold, refund, releaseHold, settleHold } from '@/lib/billing/wallet'
+import {
+  costToCredits,
+  fallbackCreditsForKind,
+  markupForKind,
+  worstCaseHoldCredits,
+} from '@/lib/billing/valueTier'
 import { checkRequestIp, extractClientIp } from '@/lib/orchestrator/requestRateLimit'
 import { hasClearance } from '@/lib/security/turnstile'
 import { scoreHash } from '@/lib/orchestrator/scoreVersion'
 import { computeDeadlineAt } from '@/lib/orchestrator/deadline'
-import { resolveGenerationTier, BOUNDED_EMIT_CEILING } from '@/lib/orchestrator/generationTier'
+import { resolveGenerationTier, policyFor, BOUNDED_EMIT_CEILING } from '@/lib/orchestrator/generationTier'
 import type { GenerationTier } from '@/lib/orchestrator/generationTier'
 import { evaluateRequestQuota, isDailyQuotaEnabled } from '@/lib/orchestrator/dailyQuota'
 import { quotaErrorBody } from '@/lib/chat/quotaMessages'
@@ -515,6 +527,72 @@ async function handleChat(
     return errorResponse(body.code, body.httpStatus, body.message, chatId, body.cta)
   }
 
+  // ── Credit paywall (PR-7b-1): atomic PRE-DISPATCH hold, fail-CLOSED. DARK
+  // until SL_PAID_GENERATION. Slotted AFTER the request-quota gate and BEFORE
+  // any orchestrator/LLM dispatch — the ordering is origin → bot-gate → quota
+  // (fail-OPEN) → balance/hold (fail-CLOSED) → run → settle. Only an
+  // authenticated Pro request touches money; free tier + anon stay off the
+  // money path entirely. The hold is sized to the PROVABLE worst case so the
+  // cost-plus settle is always ≤ the hold; it is settled in
+  // respondWithOrchestratorResult (non-streaming) and released on every other
+  // outcome — streaming settle is PR-7b-2. A crashed request self-heals via
+  // reapExpiredHolds.
+  const paidGeneration = isPaidGenerationEnabled() && authenticated && generationTier === 'pro'
+  let holdId: string | undefined
+  if (paidGeneration) {
+    try {
+      ensureWallet(userId)
+      const hold = placeHold({
+        userId,
+        requestId,
+        idempotencyKey: `gen:${requestId}`,
+        credits: worstCaseHoldCredits(policyFor('pro').maxOutputTokens),
+      })
+      if (!hold.ok) {
+        return errorResponse(
+          'insufficient_credits',
+          402,
+          "You're out of credits for Pro generation. Top up to keep going.",
+          chatId,
+        )
+      }
+      if (hold.reused && hold.status !== 'active') {
+        // A reused TERMINAL (settled/released) hold means this exact request
+        // already completed — never run a second uncharged generation off it.
+        console.error('[paywall] placeHold returned a reused TERMINAL hold — refusing', {
+          requestId,
+          status: hold.status,
+        })
+        return errorResponse(
+          'internal_error',
+          500,
+          'Something went wrong starting your generation. Please try again.',
+          chatId,
+        )
+      }
+      holdId = hold.holdId
+    } catch (e) {
+      // FAIL-CLOSED: a wallet / DB error on the paid path REFUSES rather than
+      // serving an uncharged generation.
+      console.error('[paywall] hold placement failed — refusing (fail-closed)', {
+        requestId,
+        error: e instanceof Error ? e.message : String(e),
+      })
+      return errorResponse(
+        'internal_error',
+        500,
+        'Billing is temporarily unavailable. Please try again in a moment.',
+        chatId,
+      )
+    }
+  }
+  // Release the (still-active) hold without charging. A no-op once the hold has
+  // settled (settleHold flips it to 'settled'; releaseHold only touches
+  // 'active'), so it is safe to call on any non-settle exit, even redundantly.
+  const releaseGenHold = (): void => {
+    if (holdId) safeReleaseHold(holdId, requestId)
+  }
+
   let orchestratorOutcome: Awaited<ReturnType<typeof runOrchestrator>> = null
   const tOrchStart = Date.now()
   try {
@@ -533,6 +611,9 @@ async function handleChat(
       })
     }
   } catch (e) {
+    // Paid path: any orchestrator throw means nothing settled — release the
+    // reservation (no-op off the paid path).
+    releaseGenHold()
     if (mode === 'shadow') {
       const errMsg = e instanceof Error ? e.message : 'Unknown orchestrator error'
       logShadowDivergence({
@@ -577,21 +658,44 @@ async function handleChat(
 
   if (mode === 'primary' && orchestratorOutcome) {
     if ('refused' in orchestratorOutcome) {
+      releaseGenHold() // a refusal carries no Score and never charges.
       return errorResponse('refused', 422, orchestratorOutcome.reason, chatId)
     }
     if (isOrchestratorConverseStream(orchestratorOutcome)) {
+      // PR-7b-1 does not charge streamed turns yet — release the hold and let
+      // the stream through. TODO(PR-7b-2): settle at message-stop off the
+      // backfilled cost_micro_usd instead of releasing here.
+      releaseGenHold()
       return await respondWithConverseStream(userId, chatId, orchestratorOutcome, mode, generationTier, requestId)
     }
     if (isOrchestratorScoreStream(orchestratorOutcome)) {
+      // PR-7b-1: as above — released now, settled-at-done in PR-7b-2.
+      releaseGenHold()
       return await respondWithScoreStream(userId, chatId, orchestratorOutcome, mode, generationTier, requestId)
     }
     if (!('fellThrough' in orchestratorOutcome)) {
-      return await respondWithOrchestratorResult(userId, chatId, orchestratorOutcome, mode, generationTier)
+      // Non-streaming result: respondWithOrchestratorResult OWNS the hold's
+      // fate — it settles (charge cost-plus) on success or releases on a
+      // validation failure — so we must NOT releaseGenHold() here.
+      return await respondWithOrchestratorResult(
+        userId,
+        chatId,
+        orchestratorOutcome,
+        mode,
+        generationTier,
+        requestId,
+        holdId,
+      )
     }
     // fellThrough — drop through to the legacy path below; the
     // outcome's classification + reason is captured into the debug
     // payload after the legacy call.
   }
+
+  // Everything below is the fall-through / legacy single-shot path, which
+  // PR-7b-1 does not meter or charge — release any paid hold now. No-op off the
+  // paid path, or if it was already released/settled above.
+  releaseGenHold()
 
   // Capture the orchestrator's fall-through outcome (if any) so the
   // debug payload can surface WHY the legacy path served this turn.
@@ -849,6 +953,24 @@ export function forkSeedToolUseId(): string {
 }
 
 /**
+ * Release a credit hold without charging, logging (never throwing) on failure —
+ * a stranded hold self-heals via reapExpiredHolds. No-op once the hold has
+ * settled (settleHold flips it to 'settled'; releaseHold only acts on 'active'),
+ * so it is safe to call on any non-settle exit, even redundantly. (PR-7b-1.)
+ */
+function safeReleaseHold(holdId: string, requestId: string): void {
+  try {
+    releaseHold(holdId)
+  } catch (e) {
+    console.error('[paywall] hold release failed (reaper will recover)', {
+      requestId,
+      holdId,
+      error: e instanceof Error ? e.message : String(e),
+    })
+  }
+}
+
+/**
  * Wrap an orchestrator-produced Score in the same response/persistence
  * shape as the legacy LLM path: validate it, transpile ABC, persist a
  * synthetic assistant turn so future refinements can anchor against
@@ -867,10 +989,14 @@ async function respondWithOrchestratorResult(
   result: OrchestratorResult,
   mode: OrchestratorMode,
   generationTier: GenerationTier,
+  requestId?: string,
+  holdId?: string,
 ) {
   try {
     validateScore(result.score)
   } catch (e) {
+    // Not delivering a result → release the paid hold (nothing to charge for).
+    if (holdId && requestId) safeReleaseHold(holdId, requestId)
     if (e instanceof ValidationError) {
       return errorResponse('validation_failed', 422, `Orchestrator emitted an invalid score: ${e.message}`, chatId)
     }
@@ -882,6 +1008,7 @@ async function respondWithOrchestratorResult(
     abc = scoreToAbc(result.score)
     await validateAbc(abc)
   } catch (e) {
+    if (holdId && requestId) safeReleaseHold(holdId, requestId)
     if (e instanceof ValidationError) {
       return errorResponse('validation_failed', 422, e.message, chatId)
     }
@@ -915,13 +1042,111 @@ async function respondWithOrchestratorResult(
   // `result.proposal` is set the orchestrator sets `requiresConfirmation`
   // too, so the head-bump skip + candidate-row creation Just Work. The
   // response payload below branches on which field is populated.
+  // ── PR-7b-1 paywall settle (non-streaming). A hold was placed pre-dispatch;
+  // charge the ACTUAL metered cost (cost-plus) BEFORE persisting/delivering so
+  // we never deliver an uncharged generation. (Validation failures above
+  // released the hold instead — nothing was produced to charge for.)
+  let settledCredits = 0
+  if (holdId && requestId) {
+    const turn = readTurnCostByRequestId(requestId)
+    const kind = result.classification.kind
+    const microUsd = turn?.costMicroUsd ?? null
+    let creditsCharged: number
+    if (microUsd != null && microUsd > 0) {
+      creditsCharged = costToCredits(microUsd, markupForKind(kind))
+    } else {
+      // FAIL-CLOSED: a delivered result with no readable cost (a recordTurn DB
+      // miss, or 0-with-output) is NOT free — charge the flat fallback anchor
+      // and page an alert. NULL ≠ free.
+      creditsCharged = fallbackCreditsForKind(kind)
+      console.error('[paywall] metered cost unreadable on a delivered turn — charging flat fallback', {
+        requestId,
+        chatId,
+        kind,
+        costMicroUsd: microUsd,
+        fallbackCredits: creditsCharged,
+      })
+    }
+    const settle = settleHold({
+      holdId,
+      creditsCharged,
+      ...(microUsd != null ? { costMicroUsd: microUsd } : {}),
+      kind: `chat:${kind}`,
+      ...(result.model ? { model: result.model } : {}),
+      generationTier,
+      requestId,
+      sessionId: chatId,
+      idempotencyKey: `settle:${requestId}`,
+      ...(turn?.inputTokens != null ? { inputTokens: turn.inputTokens } : {}),
+      ...(turn?.cachedInputTokens != null ? { cachedInputTokens: turn.cachedInputTokens } : {}),
+      ...(turn?.cacheCreationInputTokens != null
+        ? { cacheCreationInputTokens: turn.cacheCreationInputTokens }
+        : {}),
+      ...(turn?.outputTokens != null ? { outputTokens: turn.outputTokens } : {}),
+    })
+    if (!settle.ok) {
+      // hold_not_active — the hold was already settled/released (impossible for
+      // a non-streaming turn). Never deliver an uncharged generation: refuse. We
+      // absorb the raw cost; this is a paging bug, not the business model.
+      console.error('[paywall] settle refused (hold_not_active) — refusing delivery', {
+        requestId,
+        chatId,
+        holdId,
+      })
+      return errorResponse(
+        'internal_error',
+        500,
+        'We hit a billing error finishing your generation. Please try again.',
+        chatId,
+      )
+    }
+    if (settle.overHold) {
+      // Charge exceeded the worst-case reservation (capped — never overdrafts);
+      // a hold-sizing bug to investigate, NOT the business model.
+      console.error('[paywall] OVER-HOLD: charge exceeded the reservation (capped) — hold-sizing alert', {
+        requestId,
+        chatId,
+        holdId,
+        creditsCharged: settle.creditsCharged,
+      })
+    }
+    settledCredits = settle.creditsCharged
+  }
+
   const gateFired = result.requiresConfirmation === true
-  const { newScoreVersionId } = await appendMessages(
-    userId,
-    chatId,
-    [{ role: 'assistant', content: assistantContent }],
-    gateFired ? { skipHeadVersionBump: true } : undefined,
-  )
+  let newScoreVersionId: string | null = null
+  try {
+    ;({ newScoreVersionId } = await appendMessages(
+      userId,
+      chatId,
+      [{ role: 'assistant', content: assistantContent }],
+      gateFired ? { skipHeadVersionBump: true } : undefined,
+    ))
+  } catch (e) {
+    // Charged but failed to persist/deliver → refund OUR failure so the user
+    // isn't billed for a generation they never received. refund() is namespaced
+    // (refund:* vs settle:*), idempotent, and abuse-bounded.
+    if (holdId && requestId && settledCredits > 0) {
+      try {
+        refund({
+          userId,
+          requestId,
+          holdId,
+          credits: settledCredits,
+          reason: 'error',
+          sessionId: chatId,
+          idempotencyKey: `refund:${requestId}:persist_failed`,
+        })
+      } catch (re) {
+        console.error('[paywall] refund after persist failure FAILED — manual reconcile', {
+          requestId,
+          chatId,
+          error: re instanceof Error ? re.message : String(re),
+        })
+      }
+    }
+    throw e
+  }
 
   const keyConfigured = !!process.env.ANTHROPIC_API_KEY
   const debug: ChatDebugPayload = {
