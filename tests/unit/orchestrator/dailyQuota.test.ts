@@ -171,6 +171,33 @@ describe('checkDailyQuota', () => {
     expect(checkDailyQuota(input({ request: noCdn })).ok).toBe(true)
     expect(await keys()).toHaveLength(0)
   })
+
+  it('FAILS OPEN (returns ok) when the quota store is unavailable', async () => {
+    const { getDb } = await import('@/lib/db')
+    const { sql } = await import('drizzle-orm')
+    getDb().run(sql`DROP TABLE request_quota`) // every quota query now throws
+    const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
+    expect(checkDailyQuota(input({ ip: '9.9.9.9' })).ok).toBe(true)
+  })
+
+  it('commits BOTH the instance-ceiling row and the per-key row on a passing request', async () => {
+    vi.stubEnv('SL_DAILY_QUOTA_ANON_GLOBAL', '5')
+    const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
+    expect(checkDailyQuota(input({ ip: '9.9.9.9' })).ok).toBe(true)
+    const k = await keys()
+    expect(k).toContain('*')
+    expect(k.some((x) => x.startsWith('a:'))).toBe(true)
+  })
+
+  it('reports ~24h (not 25) for a fresh full-window denial', async () => {
+    vi.stubEnv('SL_DAILY_QUOTA_ANON', '1')
+    const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
+    const i = input({ ip: '9.9.9.9' })
+    expect(checkDailyQuota(i).ok).toBe(true)
+    const r = checkDailyQuota(i)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.resetsInHours).toBe(24)
+  })
 })
 
 describe('normalizeQuotaIp', () => {

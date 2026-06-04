@@ -23,8 +23,10 @@ import type { GenerationTier } from '@/lib/orchestrator/generationTier'
  * Counting is COUNT-ON-ADMISSION with NO refunds: the increment happens here,
  * before the LLM dispatch, and is never returned on a downstream failure
  * (refunds are an abuse oracle and race the open stream). The whole check is one
- * synchronous better-sqlite3 transaction (writes serialize through the WAL lock,
- * so there is no cross-request TOCTOU) and FAILS OPEN on any DB error.
+ * synchronous better-sqlite3 transaction: within the single Node process it runs
+ * to completion without interleaving, and a guard-in-the-write UPDATE (WHERE
+ * count < limit) prevents overshoot even across connections. FAILS OPEN on any
+ * DB error.
  */
 
 // ---------------------------------------------------------------------------
@@ -94,10 +96,12 @@ export function normalizeQuotaIp(rawIp: string): string | null {
  */
 function hashIp(normalized: string): string {
   const secret = process.env.SESSION_SECRET
-  const h = secret
-    ? crypto.createHmac('sha256', secret).update('quota-ip:' + normalized)
-    : crypto.createHash('sha256').update('quota-ip:' + normalized)
-  return h.digest('base64url').slice(0, 24)
+  // A functioning deployment always has SESSION_SECRET (session.ts hard-throws at
+  // boot without a >=32-byte secret). If it is somehow absent, refuse to store an
+  // unkeyed, brute-forceable IP hash — throw, so checkDailyQuota fails OPEN rather
+  // than persisting weak PII.
+  if (!secret) throw new Error('SESSION_SECRET required to key the quota IP hash')
+  return crypto.createHmac('sha256', secret).update('quota-ip:' + normalized).digest('base64url').slice(0, 24)
 }
 
 function anonKeyForRequest(request: Request): string | null {
@@ -182,7 +186,14 @@ function evaluate(tx: Tx, key: string, limit: number, now: number, win: number):
 
 function apply(tx: Tx, key: string, userId: string | null, d: Decision, limit: number, now: number): void {
   if (d.mode === 'insert') {
-    if (cachedRowCount >= maxRows()) return // admission cap: admit WITHOUT inserting (fail-open)
+    if (cachedRowCount >= maxRows()) {
+      // Admission cap: bound table bloat from distinct-key spray by admitting
+      // WITHOUT inserting (fail-OPEN — availability over enforcement). Logged
+      // (rate-limited) so an operator can react; SL_DAILY_QUOTA_ANON_GLOBAL is the
+      // true aggregate backstop when this trips.
+      logIpRisk('quota_admission_cap_failopen', { rows: cachedRowCount, cap: maxRows() }, true)
+      return
+    }
     tx.insert(requestQuota).values({ quotaKey: key, userId, windowStart: now, count: 1, updatedAt: now }).run()
     cachedRowCount++
   } else if (d.mode === 'reset') {
@@ -221,7 +232,8 @@ function resetInfo(windowStart: number, now: number): { retryAfterSec: number; r
   // to-the-second boundary for timing the window reset.
   const resetsAt = Math.ceil((windowStart + windowSec()) / 60) * 60
   const retryAfterSec = Math.max(60, resetsAt - now)
-  return { retryAfterSec, resetsAt, resetsInHours: Math.max(1, Math.ceil(retryAfterSec / 3600)) }
+  // round (not ceil) so a fresh full window reads "about 24h", not 25h.
+  return { retryAfterSec, resetsAt, resetsInHours: Math.max(1, Math.round(retryAfterSec / 3600)) }
 }
 
 /**
@@ -245,7 +257,9 @@ export function checkDailyQuota(input: QuotaInput): QuotaResult {
 
     // Evaluate BOTH the instance ceiling and the per-key bucket, then commit both
     // only if both allow — so a per-key reject never burns a global slot and vice
-    // versa. One synchronous transaction = atomic, no cross-request TOCTOU.
+    // versa. The callback is synchronous (no await): within this Node process it
+    // runs to completion before any other request's, and the guard-in-the-write
+    // UPDATE prevents overshoot even across connections.
     const outcome = db.transaction((tx): { ok: true } | { ok: false; which: 'global' | 'key'; windowStart: number } => {
       const gDec = globalLimit != null ? evaluate(tx, '*', globalLimit, now, win) : null
       if (gDec && !gDec.allow) return { ok: false, which: 'global', windowStart: gDec.windowStart }

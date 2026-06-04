@@ -68,6 +68,13 @@ function safeEqual(a: string, b: string): boolean {
  * the CF Transform Rule SETs — an independent control beyond the CF-IP firewall
  * (closes the "direct-to-origin / CF forwards to a second origin forges
  * cf-connecting-ip" gaps). Used by BOTH this module and the daily-quota IP key.
+ *
+ * WITHOUT SL_EDGE_AUTH_SECRET this falls back to cf-connecting-ip + cf-ray
+ * presence — both client-settable off-CF — so it is trustworthy ONLY behind the
+ * hosted origin lock (origin firewalled to Cloudflare IP ranges + Authenticated
+ * Origin Pulls/mTLS). Self-hosters without that lock must leave SL_IP_RISK_ENABLED
+ * off (the default); set SL_EDGE_AUTH_SECRET to make the check independent of the
+ * firewall.
  */
 export function isCfRequest(request: Request): boolean {
   const h = request.headers
@@ -91,7 +98,7 @@ export function parseAsnHeader(raw: string | null | undefined): number | null {
   const s = raw.trim()
   if (!/^\d{1,10}$/.test(s)) return null
   const n = Number(s)
-  return Number.isInteger(n) && n > 0 ? n : null
+  return Number.isInteger(n) && n > 0 && n <= 4_294_967_295 ? n : null // 32-bit ASN max
 }
 
 function csvParts(name: string): string[] {
@@ -201,11 +208,6 @@ export function logIpRisk(event: string, detail: Record<string, unknown>, always
     return
   }
   if (process.env.SL_IP_RISK_DEBUG === '1') console.warn(`[ip-risk] ${event}`, JSON.stringify(detail))
-}
-
-/** A short, non-reversible tag for an IP, for debug logs only. Never log the raw IP. */
-export function hashIpForLog(ip: string): string {
-  return crypto.createHash('sha256').update(ip).digest('base64url').slice(0, 12)
 }
 
 /** Test-only: drop the denylist-file cache so a fresh file is re-read. */
