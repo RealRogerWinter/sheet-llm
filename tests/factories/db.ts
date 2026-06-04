@@ -9,7 +9,12 @@ import * as schema from '@/lib/db/schema'
  * test (or describe block). Each call yields a brand-new connection — no
  * shared state between callers.
  */
-export function makeTestDb(): BetterSQLite3Database<typeof schema> {
+// drizzle()'s return value is the query builder intersected with `$client`
+// (the raw better-sqlite3 handle), e.g. for PRAGMA introspection in tests.
+// Expose it in the signature so callers don't need an `as unknown` cast.
+export function makeTestDb(): BetterSQLite3Database<typeof schema> & {
+  $client: Database.Database
+} {
   const sqlite = new Database(':memory:')
   sqlite.pragma('foreign_keys = ON')
   const db = drizzle(sqlite, { schema })

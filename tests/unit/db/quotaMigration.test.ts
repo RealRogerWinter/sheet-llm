@@ -10,8 +10,7 @@ import { makeTestDb } from '../../factories/db'
 // this fails fast with a clear message instead of a mysterious boot crash.
 describe('0007_daily_quota migration', () => {
   // The raw better-sqlite3 handle, for PRAGMA introspection.
-  const raw = (db: ReturnType<typeof makeTestDb>): Database.Database =>
-    (db as unknown as { $client: Database.Database }).$client
+  const raw = (db: ReturnType<typeof makeTestDb>): Database.Database => db.$client
 
   it('applies cleanly and creates request_quota with the expected shape', () => {
     const db = makeTestDb() // throws here if any migration fails to apply
