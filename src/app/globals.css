@@ -118,6 +118,7 @@
    * intent without altering order. (Pre-existing quirks such as the resume
    * toast at 850 sitting below the ghost overlay at 900 are preserved as-is.) */
   --z-score-overlay: 2;
+  --z-header: 20;
   --z-transport: 30;
   --z-transport-menu: 31;
   --z-sidebar: 40;

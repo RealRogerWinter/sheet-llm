@@ -1,4 +1,14 @@
 .hero {
+  grid-area: main;
+  /* min-width:0 lets the main column shrink inside the grid instead of being
+   * forced wide by content (prevents overflow when a panel docks in PR-8).
+   * NOTE: container-type is intentionally NOT set here. Hero is the DOM parent
+   * of the fixed/absolute editor overlays (NoteFloatingMenu, ContextMenu,
+   * modals, toasts), and `container-type` would apply layout containment that
+   * makes Hero their containing block — mis-anchoring them and shrinking
+   * `inset:0` backdrops. PR-8 adds a query container scoped to just the editor
+   * toolbar instead. */
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: stretch;

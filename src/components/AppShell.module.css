@@ -1,0 +1,26 @@
+/*
+ * App-shell grid. Replaces the implicit "every component position:fixed" soup
+ * with an explicit layout container. The header spans the top; the body row
+ * holds the main editing column (1fr) and a right-hand `panel` track (auto —
+ * zero until a side panel docks into it; see ChatHistoryPanel/GhostPreviewPanel
+ * in PR-8). The session sidebar deliberately stays a fixed overlay (it keeps
+ * its slide-in drawer animation), so it is NOT a grid column here.
+ *
+ * In-flow members place themselves via `grid-area` on their own root class
+ * (AppHeader → header, Hero → main, docked panels → panel). Fixed/overlay
+ * members (sidebar, drawers, modals, toasts) are still direct children but,
+ * being out of flow, don't size any track.
+ */
+.shell {
+  display: grid;
+  /* minmax(0, 1fr) — NOT 1fr — so the main column can shrink below its content's
+   * min-content width. A bare `1fr` track has a min-content floor, which lets
+   * wide content (the header spanning both columns, or a wide score) blow the
+   * track past the viewport and produce horizontal overflow. */
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    'header header'
+    'main panel';
+  min-height: 100dvh;
+}

@@ -6,6 +6,7 @@ import DebugPanel from './DebugPanel'
 import ChatHistoryPanel from './ChatHistoryPanel'
 import SessionSidebar from './SessionSidebar'
 import AuthModal from './auth/AuthModal'
+import styles from './AppShell.module.css'
 import { useChatIdSession, useFollowPlaybackSync, useReduceMotionSync } from '@/lib/chat/state'
 import { useTranscriptSync } from '@/lib/chat/useTranscriptSync'
 import { useChatHistoryShortcut } from '@/lib/chat/useChatHistoryShortcut'
@@ -27,13 +28,13 @@ export default function HomeClient() {
   useEditPersistence()
   useAuthSync()
   return (
-    <>
+    <div className={styles.shell}>
       <SessionSidebar />
       <AppHeader />
       <Hero />
       <ChatHistoryPanel />
       <DebugPanel />
       <AuthModal />
-    </>
+    </div>
   )
 }

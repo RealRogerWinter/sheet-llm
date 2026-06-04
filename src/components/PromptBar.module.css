@@ -24,6 +24,10 @@
 
 .input {
   flex: 1;
+  /* min-width:0 lets the flex input shrink below its intrinsic content width on
+   * narrow viewports; without it the row stays too wide and the send button
+   * overflows the screen at ~320px. */
+  min-width: 0;
   border: none;
   outline: none;
   padding: 10px 12px;
