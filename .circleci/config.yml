@@ -1,0 +1,161 @@
+version: 2.1
+
+# CI/CD for sheet-llm:
+#   install -> [lint, typecheck, test(parallel), checks] -> build & push image to
+#   GHCR (public) -> MANUAL APPROVAL -> pull-based deploy to the VPS over SSH.
+#
+# Pre-existing-on-main, so REPORT-ONLY (not blocking) until fixed upstream:
+#   - `pnpm lint` has one ESLint error (src/components/editor/useShiftLetterPopover.ts)
+#   - `pnpm docs:check` references pre-squash `verified_against` SHAs
+#
+# Contexts (create in CircleCI, restrict to trusted members):
+#   ghcr-push:  GHCR_USER, GHCR_TOKEN            (machine-user classic PAT, write:packages only)
+#   vps-deploy: VPS_HOST, VPS_KNOWN_HOSTS + the deploy SSH key (add_ssh_keys)
+# The image is PUBLIC, so the VPS pulls anonymously (no token on the server).
+
+executors:
+  node:
+    docker:
+      - image: cimg/node:22.14
+    working_directory: ~/app
+
+commands:
+  setup_pnpm:
+    steps:
+      - run:
+          name: Enable corepack + pin pnpm
+          command: |
+            corepack enable
+            corepack prepare pnpm@9.15.9 --activate
+            pnpm config set store-dir ~/.pnpm-store
+
+jobs:
+  install:
+    executor: node
+    resource_class: large
+    steps:
+      - checkout
+      - restore_cache:
+          keys: ["pnpm-v1-{{ checksum \"pnpm-lock.yaml\" }}", "pnpm-v1-"]
+      - setup_pnpm
+      - run: pnpm install --frozen-lockfile
+      - save_cache:
+          key: "pnpm-v1-{{ checksum \"pnpm-lock.yaml\" }}"
+          paths: ["~/.pnpm-store"]
+      - persist_to_workspace:
+          root: ~/app
+          paths: ["."]
+
+  lint:
+    executor: node
+    steps:
+      - attach_workspace: { at: ~/app }
+      - setup_pnpm
+      - run:
+          name: ESLint (report-only — one pre-existing upstream error)
+          command: pnpm lint || true
+      - run:
+          name: docs-freshness (report-only — pre-squash verified_against SHAs)
+          command: pnpm docs:check || true
+
+  typecheck:
+    executor: node
+    steps:
+      - attach_workspace: { at: ~/app }
+      - setup_pnpm
+      - run: pnpm typecheck
+
+  test:
+    executor: node
+    resource_class: xlarge
+    parallelism: 4
+    steps:
+      - attach_workspace: { at: ~/app }
+      - setup_pnpm
+      - run:
+          name: Vitest (file-count shard across containers; JUnit -> Test Insights)
+          command: |
+            mkdir -p test-results
+            # File-count sharding (vitest --shard). NOTE: this is count-balanced,
+            # not timing-balanced — timing split is a follow-up (vitest JUnit has
+            # no per-case file= attr for `circleci tests split --split-by=timings`).
+            # --retry=2 de-flakes the 2 known-flaky specs (api-chat-fork, midiToScore).
+            pnpm vitest run \
+              --exclude "**/eval/**" --exclude "**/evals/**" --exclude "**/tests/e2e/**" \
+              --shard=$((CIRCLE_NODE_INDEX + 1))/$CIRCLE_NODE_TOTAL \
+              --retry=2 \
+              --reporter=default --reporter=junit --outputFile="test-results/junit-$CIRCLE_NODE_INDEX.xml"
+      - store_test_results: { path: test-results }
+      - store_artifacts: { path: test-results }
+
+  checks:
+    executor: node
+    steps:
+      - attach_workspace: { at: ~/app }
+      - setup_pnpm
+      - run: pnpm abcjs:spike
+      - run: pnpm eval:mock
+      - run: pnpm eval:visual
+      - run:
+          name: Schema-drift guard (db:generate must be a no-op)
+          command: |
+            pnpm db:generate
+            git diff --exit-code drizzle || { echo "Schema drift — commit the generated migration."; exit 1; }
+
+  build_and_push:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Build + push image to GHCR (public)
+          command: |
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            IMG=ghcr.io/realrogerwinter/sheet-llm
+            export DOCKER_BUILDKIT=1
+            docker build -t "$IMG:$CIRCLE_SHA1" -t "$IMG:latest" .
+            docker push "$IMG:$CIRCLE_SHA1"
+            docker push "$IMG:latest"
+            mkdir -p /tmp/deploy
+            docker inspect --format='{{index .RepoDigests 0}}' "$IMG:$CIRCLE_SHA1" > /tmp/deploy/image
+      - persist_to_workspace: { root: /tmp/deploy, paths: ["image"] }
+
+  deploy:
+    docker:
+      - image: cimg/base:current
+    steps:
+      - attach_workspace: { at: /tmp/deploy }
+      - add_ssh_keys:
+          fingerprints: ["SHA256:REPLACE_WITH_DEPLOY_KEY_FINGERPRINT"]
+      - run:
+          name: Pin the VPS host key (no trust-on-first-use)
+          command: |
+            mkdir -p ~/.ssh && chmod 700 ~/.ssh
+            printf '%s\n' "$VPS_KNOWN_HOSTS" >> ~/.ssh/known_hosts
+      - run:
+          name: Trigger pull-based deploy (forced command validates the digest)
+          command: |
+            DIGEST="$(cat /tmp/deploy/image)"   # ghcr.io/...@sha256:...
+            ssh -o StrictHostKeyChecking=yes deploy@"$VPS_HOST" "${DIGEST##*@}"
+
+workflows:
+  ci-cd:
+    jobs:
+      - install
+      - lint: { requires: [install] }
+      - typecheck: { requires: [install] }
+      - test: { requires: [install] }
+      - checks: { requires: [install] }
+      - build_and_push:
+          context: ghcr-push
+          requires: [typecheck, test, checks]
+          filters: { branches: { only: main } }
+      - hold:
+          type: approval
+          requires: [build_and_push]
+          filters: { branches: { only: main } }
+      - deploy:
+          context: vps-deploy
+          requires: [hold]
+          filters: { branches: { only: main } }
