@@ -13,8 +13,24 @@ import { issueCsrfToken } from '@/lib/auth/httpGuards'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
+// The PUBLIC base origin to redirect users to. Behind the reverse proxy,
+// `request.url`'s host is the app's internal bind (e.g. http://0.0.0.0:3000) —
+// redirecting there sends the user to a dead localhost URL after login. Prefer
+// APP_BASE_URL, then OAUTH_REDIRECT_BASE_URL, then the request origin (dev).
+function appBaseOrigin(request: Request): string {
+  const configured = process.env.APP_BASE_URL || process.env.OAUTH_REDIRECT_BASE_URL
+  if (configured) {
+    try {
+      return new URL(configured).origin
+    } catch {
+      /* malformed env → fall through to the request origin */
+    }
+  }
+  return new URL(request.url).origin
+}
+
 function appRedirect(request: Request, returnTo: string, params: Record<string, string>): NextResponse {
-  const url = new URL(sanitizeReturnTo(returnTo), new URL(request.url).origin)
+  const url = new URL(sanitizeReturnTo(returnTo), appBaseOrigin(request))
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v)
   return NextResponse.redirect(url, { status: 302 })
 }
