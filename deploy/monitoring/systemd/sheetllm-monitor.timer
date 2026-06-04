@@ -1,0 +1,14 @@
+# Runs the monitoring checks every 10 minutes (cheap checks; alert throttling in
+# lib/common.sh prevents spam, so a single cadence covers fast and slow checks).
+[Unit]
+Description=Run sheet-llm host monitoring checks periodically
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=10min
+RandomizedDelaySec=30
+Persistent=true
+Unit=sheetllm-monitor.service
+
+[Install]
+WantedBy=timers.target
