@@ -99,6 +99,9 @@ export default function TurnstileGate() {
       try {
         widgetIdRef.current = window.turnstile.render(containerRef.current, {
           sitekey: siteKey,
+          // Stay invisible unless Cloudflare actually needs an interactive
+          // challenge; a managed auto-pass leaves nothing lingering on screen.
+          appearance: 'interaction-only',
           callback: (token: string) => clear(token),
           'error-callback': (code?: string) => {
             // Surfaces e.g. 110200 (domain not allowed) / 110100 (invalid sitekey)
