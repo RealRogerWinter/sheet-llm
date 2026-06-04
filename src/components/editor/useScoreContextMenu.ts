@@ -44,6 +44,9 @@ function targetFromStore(store: Store): ContextTarget | null {
  * no items (caller leaves the native menu alone).
  */
 function openForTarget(store: Store, target: ContextTarget, anchorX: number, anchorY: number): boolean {
+  // Opening the menu through ANY path (mouse right-click, keyboard, or a
+  // long-press on a note) ends any touch range-select session.
+  touchGestureBus.disarmRange()
   if (contextMenuSections(target).length === 0) return false
   if (target.kind === 'note' || target.kind === 'rest' || target.kind === 'chordNote') {
     store.select(target.selection)
@@ -78,10 +81,12 @@ export function useScoreContextMenu(scoreRef: RefObject<HTMLDivElement | null>, 
 
     function onContextMenu(e: MouseEvent) {
       if (!container) return
-      // Android fires a native `contextmenu` on long-press in ADDITION to our
-      // pointer-timer detector. If the long-press already handled this gesture
-      // (opened the menu or armed range-select), swallow the native one.
-      if (touchGestureBus.isContextMenuSuppressed()) {
+      // A native `contextmenu` that follows a touch/pen pointerdown is the
+      // platform's own long-press menu (Android) — defer it to our pointer
+      // timer, which fires regardless of platform and handles bars (arm range)
+      // vs notes (open menu) uniformly. Mouse right-click never sets this
+      // window, so desktop is unaffected.
+      if (touchGestureBus.isTouchContextMenuPending()) {
         e.preventDefault()
         return
       }
@@ -142,35 +147,44 @@ export function useScoreContextMenu(scoreRef: RefObject<HTMLDivElement | null>, 
         store.selectMeasureRange({ fromStart: target.measureIdx, fromEnd: target.measureIdx })
         store.select(undefined)
         touchGestureBus.armRange()
-        touchGestureBus.suppressContextMenu()
         store.showStatusMessage(`Bar ${target.measureIdx + 1} — tap bars to extend the range`)
         return
       }
 
+      // Note / rest / empty hold → behave like a right-click (flag-gated).
+      // openForTarget disarms any prior range session.
       if (!isContextMenuEnabled()) return
-      if (openForTarget(store, target, e.clientX, e.clientY)) {
-        touchGestureBus.suppressContextMenu()
-      }
+      openForTarget(store, target, e.clientX, e.clientY)
     }
 
     const longPress = createLongPress({ onLongPress })
 
-    container.addEventListener('contextmenu', onContextMenu)
     // Capture phase so the timer starts even for holds on a notehead, where
     // useNoteDrag stop-propagates the bubbling pointerdown (a hold that then
-    // moves >tolerance cancels and lets the drag proceed).
-    container.addEventListener('pointerdown', longPress.onPointerDown, true)
+    // moves >tolerance cancels and lets the drag proceed). The pointerdown also
+    // opens the "context-menu came from touch" window so a native contextmenu
+    // (Android) is deferred to this timer — see onContextMenu.
+    function onPointerDownCapture(e: PointerEvent) {
+      if (e.pointerType !== 'mouse') touchGestureBus.markTouchContextMenu()
+      longPress.onPointerDown(e)
+    }
+
+    container.addEventListener('contextmenu', onContextMenu)
+    container.addEventListener('pointerdown', onPointerDownCapture, true)
     container.addEventListener('pointermove', longPress.onPointerMove, true)
     container.addEventListener('pointerup', longPress.onPointerUp, true)
     container.addEventListener('pointercancel', longPress.onPointerCancel, true)
     document.addEventListener('keydown', onKeyDown, true)
     return () => {
       container.removeEventListener('contextmenu', onContextMenu)
-      container.removeEventListener('pointerdown', longPress.onPointerDown, true)
+      container.removeEventListener('pointerdown', onPointerDownCapture, true)
       container.removeEventListener('pointermove', longPress.onPointerMove, true)
       container.removeEventListener('pointerup', longPress.onPointerUp, true)
       container.removeEventListener('pointercancel', longPress.onPointerCancel, true)
       longPress.dispose()
+      // End any touch range-select session when the interactive layer unmounts
+      // so a module-global armed flag can't survive into a remount.
+      touchGestureBus.disarmRange()
       document.removeEventListener('keydown', onKeyDown, true)
     }
   }, [scoreRef, enabled])

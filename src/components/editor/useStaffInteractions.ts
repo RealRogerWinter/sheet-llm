@@ -85,9 +85,10 @@ export function useStaffInteractions(scoreRef: RefObject<HTMLDivElement | null>)
       }
 
       // Touch measure-range mode (armed by a long-press on a bar via
-      // useScoreContextMenu): a tap on a bar extends the range; a tap off the
-      // staff finishes the session. Never falls through to note insertion
-      // while armed.
+      // useScoreContextMenu): a tap resolves to its containing bar and extends
+      // the range — tapping a notehead counts as tapping its bar, which is the
+      // intent while selecting bars. A tap off the staff finishes the session.
+      // Never falls through to note insertion while armed.
       if (touchGestureBus.isRangeArmed()) {
         const svg = container.querySelector('svg') as SVGSVGElement | null
         const store = useChatStore.getState()
