@@ -42,6 +42,9 @@ does not).
 - [Adding an Edit Operation](guides/adding-an-edit-operation.md): recipe to wire a new edit op through transforms, validation, orchestrator.
 - [Adding a Notation Feature](guides/adding-a-notation-feature.md): end-to-end recipe — type → ABC → render → tool → MusicXML → palette.
 - [Adding an LLM Provider](guides/adding-a-provider.md): recipe to register a provider, selection tiers, failover, system blocks.
+- [Self-Hosted VPS Deployment](guides/deploy-vps.md): production topology (Cloudflare → Caddy → Docker → Litestream/R2), image build, container start, pull-based deploy.
+- [Security Hardening & Threat Model](guides/security-hardening.md): origin lock (ufw CF-IP + AOP mTLS), host hardening, secret hygiene, LLM cost-abuse controls (rate limit + Turnstile).
+- [CI/CD Pipeline & Build-in-Public](guides/ci-cd-pipeline.md): CircleCI gate (timing-split, schema-drift), build→approve→deploy, build-in-public philosophy.
 - [Local models (Ollama)](local-models.md): run sheet-llm against a local Ollama LLM for offline/zero-cost dev.
 
 ### Reference
