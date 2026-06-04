@@ -35,11 +35,30 @@ declare global {
 
 type GateStatus = 'loading' | 'ready' | 'cleared' | 'error'
 
-export default function TurnstileGate({ siteKey }: { siteKey: string }) {
+export default function TurnstileGate() {
   const containerRef = useRef<HTMLDivElement>(null)
   const widgetIdRef = useRef<string | null>(null)
+  const [siteKey, setSiteKey] = useState<string>('')
   const [status, setStatus] = useState<GateStatus>('loading')
   const [detail, setDetail] = useState<string>('')
+
+  // The root layout is statically prerendered, so the site key can't come from
+  // a server-rendered prop (it would freeze the empty build-time env). Fetch the
+  // runtime config from the API instead. The site key is public.
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/turnstile', { method: 'GET' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((cfg: { enabled?: boolean; siteKey?: string } | null) => {
+        if (!cancelled && cfg?.enabled && cfg.siteKey) setSiteKey(cfg.siteKey)
+      })
+      .catch(() => {
+        /* Turnstile not reachable → stay ungated (server still enforces) */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     if (!siteKey) return

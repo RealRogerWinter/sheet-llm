@@ -42,7 +42,7 @@ export default function RootLayout({
       </head>
       <body>
         <RecoveryBoot />
-        <TurnstileGate siteKey={process.env.TURNSTILE_SITE_KEY ?? ""} />
+        <TurnstileGate />
         {children}
       </body>
     </html>
