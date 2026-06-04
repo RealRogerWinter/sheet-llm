@@ -134,7 +134,7 @@ describe('AnthropicProvider', () => {
     expect(call.system[2].cache_control).toBeUndefined()
   })
 
-  it('honors multiple cache markers up to the per-request budget', async () => {
+  it('marks only the last cache block, caching the whole static prefix', async () => {
     anthropicCreateMock.mockResolvedValue(toolUseResponse({ x: 'hi', y: 1 }))
     await provider.toolCall(
       { name: 'test_tool', inputSchema: SimpleSchema, inputSchemaJson: {} },
@@ -148,9 +148,40 @@ describe('AnthropicProvider', () => {
         toolChoice: 'required',
       },
     )
-    const call = anthropicCreateMock.mock.calls[0][0]
-    const cached = call.system.filter((b: { cache_control?: unknown }) => b.cache_control)
-    expect(cached).toHaveLength(3)
+    const system = anthropicCreateMock.mock.calls[0][0].system
+    // One breakpoint on the LAST cache block caches the whole prefix (a+b+c).
+    expect(system[2].cache_control).toMatchObject({ type: 'ephemeral' })
+    expect(system[0].cache_control).toBeUndefined()
+    expect(system[1].cache_control).toBeUndefined()
+    expect(
+      system.filter((b: { cache_control?: unknown }) => b.cache_control),
+    ).toHaveLength(1)
+  })
+
+  it('caches the FULL static prefix by marking the LAST cache block (>budget layout)', async () => {
+    anthropicCreateMock.mockResolvedValue(toolUseResponse({ x: 'hi', y: 1 }))
+    await provider.toolCall(
+      { name: 'test_tool', inputSchema: SimpleSchema, inputSchemaJson: {} },
+      {
+        systemPrompt: [
+          { text: 'base', cache: true },
+          { text: 'ref-1', cache: true },
+          { text: 'ref-2', cache: true },
+          { text: 'ref-3', cache: true },
+          { text: 'ref-4-last', cache: true },
+        ],
+        userText: 'usr',
+        toolChoice: 'required',
+      },
+    )
+    const system = anthropicCreateMock.mock.calls[0][0].system
+    // A breakpoint caches the cumulative prefix, so ONE marker on the LAST
+    // static block caches the whole reference prefix (the fix). The unmarked
+    // earlier blocks (system[0..3]) are still cached via it.
+    expect(system[4]).toMatchObject({ text: 'ref-4-last', cache_control: { type: 'ephemeral' } })
+    const marked = system.filter((b: { cache_control?: unknown }) => b.cache_control)
+    expect(marked).toHaveLength(1)
+    expect(system[0].cache_control).toBeUndefined()
   })
 
   it('drops cache markers entirely when cacheControl: "none"', async () => {

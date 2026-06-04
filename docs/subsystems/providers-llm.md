@@ -4,7 +4,7 @@ subsystem: providers-llm
 audience: [contributor, ai-agent]
 status: current
 last_verified: 2026-06-03
-verified_against: 150cb15
+verified_against: c078040
 source_paths:
   - src/lib/providers/types.ts
   - src/lib/providers/registry.ts
@@ -172,10 +172,12 @@ omits one (`openaiCompatible.ts:163`).
 ### Per-block prompt caching
 
 `ProviderCallOptions.systemPrompt` is `string | SystemBlock[]`.
-The module-level `buildSystemBlocks` helper in `anthropic.ts` emits one ephemeral
-`cache_control` marker per block flagged `cache: true`, but **caps the budget
-at 3** — the tool definition consumes the 4th of Anthropic's per-request limit
-of 4 markers. Non-caching providers flatten via `flattenSystemPrompt`.
+A `cache_control` breakpoint caches the cumulative **prefix**, so the
+`buildSystemBlocks` helper in `anthropic.ts` marks the **last** `cache: true`
+block — that single breakpoint caches the whole static system prefix (all
+reference blocks; the whole system prompt is byte-frozen, with dynamic data in
+the user message). The tool definition takes a second breakpoint (Anthropic
+allows 4 per request). Non-caching providers flatten via `flattenSystemPrompt`.
 
 ### Two-layer error taxonomy
 

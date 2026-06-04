@@ -4,7 +4,7 @@ subsystem: providers-llm
 audience: [ai-agent, contributor]
 status: current
 last_verified: 2026-06-03
-verified_against: 150cb15
+verified_against: c078040
 source_paths:
   - src/lib/providers/types.ts
   - src/lib/providers/registry.ts
@@ -34,7 +34,7 @@ Multi-provider tool-call abstraction: tier→model routing + sticky-per-chat + s
 - `providers/degradation.ts` — failure tracker `${chatId}:${tier}:${provider}`; `DEGRADATION_THRESHOLD=2`; `reportProviderFailure`/`isProviderDegraded`/`clearDegradationForChat`/`_resetDegradation`.
 - `providers/sticky.ts` — per-chat per-tier memory; `getSticky`/`setSticky`/`clearStickyForChat`/`_resetSticky`.
 - `providers/types.ts` — `LLMProvider`, `ProviderTool<T>` (optional `strict`), `ProviderCallOptions` (+`effort`/`thinking`/`abortSignal`/`outputTokenBudget`/`streamDeadlineAt`), `ProviderToolResult<T>` (carries `stopReason`), `SystemBlock`, `Tier`, `Effort` (`'low'..'max'`), `ProviderName`; errors `ProviderSchemaError`/`ProviderRefusalError`/`OutputTruncatedError`.
-- `providers/anthropic.ts` — native `tool_use` (pre-parsed input), per-block ephemeral cache (cap 3), memoized client + `apiKeyOverride`, `maxRetries:2`, `DEFAULT_MAX_TOKENS=8000`; `toolCall`+`textStream`. `tuningParams` forwards per-model: `temperature` (dropped on Opus 4.7+), `effort` via `output_config.effort` (Sonnet 4.6 / Opus 4.5+ only), `thinking` `disabled`/`adaptive`, and `strict` tools. Throws `OutputTruncatedError` (not `ProviderSchemaError`) when `stop_reason==='max_tokens'` before the zod parse; populates `stopReason`. M26 PR-2 kill-switch: `abortSignal` + `makeOutputBudgetGuard` (`streamGuard.ts`) abort mid-stream on `outputTokenBudget`/`streamDeadlineAt` → clean `message-stop`; `APIUserAbortError` → `OutputTruncatedError` (precedes the `APIError` branch, so it does NOT 502 / trip degradation).
+- `providers/anthropic.ts` — native `tool_use` (pre-parsed input), ephemeral cache breakpoint on the last `cache: true` block (caches the whole static prefix), memoized client + `apiKeyOverride`, `maxRetries:2`, `DEFAULT_MAX_TOKENS=8000`; `toolCall`+`textStream`. `tuningParams` forwards per-model: `temperature` (dropped on Opus 4.7+), `effort` via `output_config.effort` (Sonnet 4.6 / Opus 4.5+ only), `thinking` `disabled`/`adaptive`, and `strict` tools. Throws `OutputTruncatedError` (not `ProviderSchemaError`) when `stop_reason==='max_tokens'` before the zod parse; populates `stopReason`. M26 PR-2 kill-switch: `abortSignal` + `makeOutputBudgetGuard` (`streamGuard.ts`) abort mid-stream on `outputTokenBudget`/`streamDeadlineAt` → clean `message-stop`; `APIUserAbortError` → `OutputTruncatedError` (precedes the `APIError` branch, so it does NOT 502 / trip degradation).
 - `providers/openaiCompatible.ts` — `fetch` `${baseUrl}/chat/completions`; args are JSON STRING → `JSON.parse` → zod. Base for Groq/Ollama. Throws on `history`.
 - `providers/groq.ts` / `providers/ollama.ts` — subclasses; Ollama keyless + `extendRequestBody` sets `body.format=inputSchemaJson`.
 - `llm/errors.ts` — `RateLimitedError`(429), `UpstreamError(status=502)`. Shared by both stacks.
