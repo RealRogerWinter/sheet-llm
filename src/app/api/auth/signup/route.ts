@@ -17,6 +17,7 @@ import { isDisposableEmail } from '@/lib/auth/disposableDomains'
 import { createAuthToken } from '@/lib/auth/authTokens'
 import { resolveAppBaseUrl, sendVerificationEmail } from '@/lib/auth/email'
 import { issueCsrfToken } from '@/lib/auth/httpGuards'
+import { hasClearance } from '@/lib/security/turnstile'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -35,6 +36,15 @@ const BodySchema = z.object({
 export async function POST(request: Request) {
   const blocked = await guardAuthMutation(request)
   if (blocked) return blocked
+
+  // Bot-gate account creation like /api/chat — scripted signups are the main way
+  // to multiply the free daily quota (account-farming). Pairs with the quota-side
+  // rule that treats unverified accounts as the anon tier. Fail-OPEN when
+  // Turnstile keys are unset (dev / self-host), so this is inert unless the
+  // operator runs Turnstile; the app-wide widget (root layout) supplies clearance.
+  if (!(await hasClearance(request))) {
+    return authError('bot_check_required', 403, 'Please complete the bot check and try again.')
+  }
 
   const ip = extractClientIp(request)
   const ipCheck = checkAuthIp(ip)

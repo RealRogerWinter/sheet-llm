@@ -5,6 +5,7 @@ import {
   authTokens,
   messages,
   oauthAccounts,
+  requestQuota,
   scoreVersions,
   sessions,
   users,
@@ -113,6 +114,17 @@ export interface UserExport {
     expiresAt: number
     consumedAt: number | null
     createdAt: number
+  }>
+  /**
+   * Hosted daily-quota counters keyed to this account ('u:<userId>' rows). Only
+   * userId-linked rows are exported; anonymous 'a:' rows carry no subject and are
+   * unlinkable (covered by short retention). Empty unless the quota feature is on.
+   */
+  dailyQuota: Array<{
+    quotaKey: string
+    windowStart: number
+    count: number
+    updatedAt: number
   }>
 }
 
@@ -245,6 +257,18 @@ export async function buildUserExport(
     .from(authTokens)
     .where(eq(authTokens.userId, userId))
 
+  // Hosted daily-quota rows for this account (userId-scoped; anon 'a:' rows are
+  // subject-less and excluded). Empty when the quota feature is off.
+  const dailyQuotaRows = await db
+    .select({
+      quotaKey: requestQuota.quotaKey,
+      windowStart: requestQuota.windowStart,
+      count: requestQuota.count,
+      updatedAt: requestQuota.updatedAt,
+    })
+    .from(requestQuota)
+    .where(eq(requestQuota.userId, userId))
+
   return {
     schemaVersion: EXPORT_SCHEMA_VERSION,
     exportedAt: Math.floor(Date.now() / 1000),
@@ -255,6 +279,7 @@ export async function buildUserExport(
     authSessions: authSessionRows,
     oauthAccounts: oauthAccountRows,
     authTokens: authTokenRows,
+    dailyQuota: dailyQuotaRows,
   }
 }
 
@@ -270,7 +295,7 @@ export async function buildUserExport(
  * delete is still erased by the cascade, just not reflected in the receipt).
  * Cascade chain (SQLite FK definitions, all ON DELETE CASCADE):
  *   users → sessions → messages, scoreVersions
- *   users → auth_sessions, oauth_accounts, auth_tokens
+ *   users → auth_sessions, oauth_accounts, auth_tokens, request_quota
  */
 export async function hardDeleteUser(
   db: Db,
