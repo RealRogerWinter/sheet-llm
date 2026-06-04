@@ -112,11 +112,16 @@ const SECTION_INPUT_TOKENS = 12_000
  * is a rare paging-alert backstop, never the model. Never below
  * {@link VALUE_TIERS}.standard.
  *
- * NOTE: an UNBOUNDED sectional (adaptive split beyond MAX_SECTIONS, or many
- * uncached calls) is still backstopped by overHold (capped, never overdrafts) —
- * a true fix is per-section debiting + abort-before-overspend (red-team #3),
- * deferred to a follow-up. The cap ($5) exceeds any maxDuration-bounded raw cost,
- * so even that tail does not lose money.
+ * NOTE (LAUNCH GATE — PR-7b-2c): this fixed pre-run hold does NOT fully cover a
+ * LARGE sectional, whose per-call input GROWS (the full score is re-sent each
+ * section) with no call cap (only maxDuration). Such a piece can settle ABOVE the
+ * hold → settleHold caps the debit (overHold; never overdrafts) and we UNDER-EARN;
+ * and if it runs past maxDuration before `done` it is killed → the hold is reaped
+ * → free (we eat the raw cost). These are LAUNCH GATES, not at-merge issues (the
+ * flag is dark): the operator must enable the streaming wall-clock abort so a long
+ * stream ends cleanly at `done` (→ settle), AND per-section debiting +
+ * abort-before-overspend (red-team #3) must land — tracked as PR-7b-2c. Do NOT
+ * flip SL_PAID_GENERATION until both are in place.
  */
 export function worstCaseHoldCredits(maxOutputTokens: number): number {
   const nonStreamingUsd =

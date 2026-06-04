@@ -20,9 +20,10 @@ import { recordProviderCall } from '@/lib/billing/usageMeter'
  *
  * run() is mocked to return a stream outcome whose async-generator `events` are
  * canned and call recordProviderCall (inside the route's pump meter scope, like
- * a real provider call) so the settle reads a real cost. The mock deliberately
- * writes NO orchestrator_turns row — mirroring the SECTIONAL prod path, where a
- * row-based settle would NULL-fallback and undercharge below cost.
+ * a real provider call) so the settle reads a real cost. The mock writes NO
+ * orchestrator_turns row, proving the settle reads the in-memory METER (not the
+ * row) — robust even if the turn row or its best-effort cost-backfill is absent
+ * or silently fails in prod.
  */
 
 const cfg = vi.hoisted(() => ({

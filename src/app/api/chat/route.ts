@@ -1039,13 +1039,15 @@ function turnRowCost(requestId: string): SettleCost {
 
 /**
  * The settle cost for a STREAMING turn: the request-scoped usage meter snapshot,
- * read INSIDE the pump scope at `done`. The meter is the authoritative record of
- * the streamed generation's cost (recordProviderCall fires for every section /
- * delta) and — unlike orchestrator_turns — it exists even on the SECTIONAL path,
- * where run() returns the stream WITHOUT writing a turn row (so a row-based read
- * would NULL-fallback and undercharge a ~$0.30–1.00 sectional piece below cost).
- * It omits the small in-run pre-call (classifier/dispatcher) cost, which the
- * route never sees; that ~1–5 credit undercount is deliberate and bounded.
+ * read INSIDE the pump scope at `done`. run() DOES write an orchestrator_turns
+ * row for a stream outcome (index.ts ~948/967) and backfillStreamedTurnCost adds
+ * the streamed cost to it — but that backfill is a BEST-EFFORT DB UPDATE that can
+ * silently fail (and the route never sees the pre-call cost regardless). The
+ * in-memory meter is the robust source: always populated in-scope by
+ * recordProviderCall for every section/delta, immune to a backfill DB failure, so
+ * a streamed turn never NULL-fallbacks to a flat charge on a transient DB hiccup.
+ * It omits the in-run pre-call (classifier/dispatcher) cost — a deliberate,
+ * bounded ~1–5 credit undercount.
  */
 function meterStreamCost(): SettleCost {
   const m = currentMeterTotals()
@@ -1558,6 +1560,14 @@ async function respondWithConverseStream(
       // Client closed the connection. Finalize as errored (client_abort)
       // instead of complete — the model never said stop, so the next-turn
       // refinement-vs-retry decision should treat this as a failure.
+      //
+      // PR-7b-2 MONEY INVARIANT: this does NOT cancel the pump — the converse
+      // call runs to message-stop server-side (no AbortSignal is threaded into
+      // the orchestrator), so a paid hold is SETTLED at message-stop even on
+      // disconnect (a real user abort is charged, never refunded). If anyone
+      // later wires this cancel() → an AbortSignal that STOPS the generation, the
+      // pump exits before settling and the `finally` RELEASES the hold → a
+      // delivered-but-free paid generation. Re-derive the settle path first.
       if (keepalive) clearInterval(keepalive)
       void finalize('errored', 'client_abort')
     },
@@ -1792,6 +1802,11 @@ async function respondWithScoreStream(
       })
     },
     cancel() {
+      // PR-7b-2 MONEY INVARIANT (see respondWithConverseStream.cancel): the pump
+      // is NOT cancelled here, so a paid sectional settles at `done` even on
+      // disconnect. Do NOT wire this to an AbortSignal that stops generation
+      // without first moving settle off the done-only path — else the `finally`
+      // releases the hold → a delivered-but-free paid generation.
       if (keepalive) clearInterval(keepalive)
     },
   })
