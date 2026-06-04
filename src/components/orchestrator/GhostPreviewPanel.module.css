@@ -10,7 +10,9 @@
   position: fixed;
   top: 0;
   right: 0;
-  width: var(--panel-w);
+  /* Cap at the viewport so the fixed-overlay variant (below xl, where this
+   * panel has no drawer/sheet fallback) doesn't overflow a ~320px phone. */
+  width: min(var(--panel-w), 100vw);
   height: 100dvh;
   z-index: var(--z-ghost-panel);
   background: var(--paper, #fff);

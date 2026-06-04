@@ -67,6 +67,9 @@ export default function ChatHistoryPanel() {
   const retryTranscriptSync = useChatStore((s) => s.retryTranscriptSync)
   const reset = useChatStore((s) => s.reset)
 
+  // True while the docked AI-diff panel is showing — it shares the dock track.
+  const ghostDiffActive = useChatStore((s) => s.pendingProposal?.presentation === 'diff-panel')
+
   const mode = usePanelMode()
 
   // The panel is permanently visible in docked mode (>=1280px) once a
@@ -76,6 +79,11 @@ export default function ChatHistoryPanel() {
 
   // No score yet (the hero / landing state) → never render the panel.
   if (!abc) return null
+  // The docked AI-diff panel (GhostPreviewPanel) occupies the SAME `panel`
+  // grid track. When it's active, yield the dock to it so two panels don't
+  // both mount into the track (the docked chat panel otherwise ignores
+  // panelOpen and would overlap underneath it).
+  if (isDocked && ghostDiffActive) return null
   // In the narrow modes the panel is a toggled overlay; respect panelOpen.
   // In docked mode it's permanent and ignores panelOpen.
   if (!isDocked && !open) return null
