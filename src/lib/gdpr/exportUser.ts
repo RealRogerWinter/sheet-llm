@@ -309,6 +309,7 @@ export async function hardDeleteUser(
       deletedAuthSessions: number
       deletedOauthAccounts: number
       deletedAuthTokens: number
+      deletedRequestQuota: number
     }
   | { ok: false; reason: 'user_not_found' }
 > {
@@ -357,6 +358,10 @@ export async function hardDeleteUser(
     .select({ id: authTokens.id })
     .from(authTokens)
     .where(eq(authTokens.userId, userId))
+  const requestQuotaCount = await db
+    .select({ quotaKey: requestQuota.quotaKey })
+    .from(requestQuota)
+    .where(eq(requestQuota.userId, userId))
 
   // Delete the user; FK cascades sweep the rest.
   const result = await db
@@ -372,5 +377,6 @@ export async function hardDeleteUser(
     deletedAuthSessions: authSessionCount.length,
     deletedOauthAccounts: oauthAccountCount.length,
     deletedAuthTokens: authTokenCount.length,
+    deletedRequestQuota: requestQuotaCount.length,
   }
 }

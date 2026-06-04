@@ -93,6 +93,7 @@ export async function DELETE(request: Request) {
       deletedAuthSessions: result.deletedAuthSessions,
       deletedOauthAccounts: result.deletedOauthAccounts,
       deletedAuthTokens: result.deletedAuthTokens,
+      deletedRequestQuota: result.deletedRequestQuota,
       clearLocalStorage: ['sheet-llm:recovery'],
     },
     {

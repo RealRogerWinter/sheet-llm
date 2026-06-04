@@ -42,6 +42,7 @@ describe('GDPR — request_quota', () => {
     const { requestQuota } = await import('@/lib/db/schema')
     const res = await hardDeleteUser(getDb(), 'u1')
     expect(res.ok).toBe(true)
+    if (res.ok) expect(res.deletedRequestQuota).toBe(1) // receipt counts the erased row
     const remaining = getDb()
       .select()
       .from(requestQuota)
