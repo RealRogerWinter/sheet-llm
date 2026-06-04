@@ -87,3 +87,65 @@ describe('0009_credit_tables migration', () => {
     expect(idx).toContain('credit_holds_expires')
   })
 })
+
+// 0010 hardened the wallet solvency invariant + linked the ledger to holds;
+// 0011 added the refund engine's column + ceiling table. Assert the facts the
+// money code depends on so a future snapshot edit can't silently drop them.
+describe('0010 + 0011 refinements migration', () => {
+  const raw = (db: ReturnType<typeof makeTestDb>): Database.Database => db.$client
+
+  it('0010: credit_wallets CHECK forbids held > balance (no over-reservation at rest)', () => {
+    const client = raw(makeTestDb())
+    client.pragma('foreign_keys = OFF')
+    const insert = client.prepare(
+      'INSERT INTO credit_wallets (user_id, balance, held, version, updated_at) VALUES (?,?,?,?,?)',
+    )
+    expect(() => insert.run('u-overheld', 10, 20, 0, 0)).toThrow(/CHECK/i) // held > balance
+    expect(() => insert.run('u-solvent', 20, 10, 0, 0)).not.toThrow()
+  })
+
+  it('0010: usage_ledger.hold_id FK-references credit_holds', () => {
+    const client = raw(makeTestDb())
+    const fks = client.pragma('foreign_key_list(usage_ledger)') as Array<{ table: string }>
+    expect(fks.some((f) => f.table === 'credit_holds')).toBe(true)
+  })
+
+  it('0010: credit_holds.idempotency_key is UNIQUE (hold placement is idempotent)', () => {
+    const client = raw(makeTestDb())
+    const uniques = (client.pragma('index_list(credit_holds)') as Array<{ name: string; unique: number }>)
+      .filter((i) => i.unique === 1)
+      .map((i) => i.name)
+    expect(uniques.some((n) => n.includes('idempotency_key'))).toBe(true)
+  })
+
+  it('0011: usage_ledger gains a nullable reason column (refund audit)', () => {
+    const client = raw(makeTestDb())
+    const cols = client.pragma('table_info(usage_ledger)') as Array<{ name: string; notnull: number }>
+    const reason = cols.find((c) => c.name === 'reason')
+    expect(reason, 'usage_ledger.reason missing').toBeDefined()
+    expect(reason!.notnull).toBe(0) // nullable — NULL on a normal charge
+  })
+
+  it('0011: refund_counters has a composite (user_id, day) PK and a users FK cascade', () => {
+    const client = raw(makeTestDb())
+    const cols = client.pragma('table_info(refund_counters)') as Array<{ name: string; pk: number }>
+    expect(cols.length, 'refund_counters table missing').toBeGreaterThan(0)
+    const pkCols = cols.filter((c) => c.pk > 0).map((c) => c.name).sort()
+    expect(pkCols).toEqual(['day', 'user_id'])
+    const userFk = (client.pragma('foreign_key_list(refund_counters)') as Array<{
+      table: string
+      on_delete: string
+    }>).find((f) => f.table === 'users')
+    expect(userFk?.on_delete).toBe('CASCADE')
+  })
+
+  it('0011: refund_counters CHECK forbids negative counters', () => {
+    const client = raw(makeTestDb())
+    client.pragma('foreign_keys = OFF')
+    const insert = client.prepare(
+      'INSERT INTO refund_counters (user_id, day, refund_count, refund_credits, updated_at) VALUES (?,?,?,?,?)',
+    )
+    expect(() => insert.run('u-neg', 0, -1, 0, 0)).toThrow(/CHECK/i)
+    expect(() => insert.run('u-ok', 0, 1, 5, 0)).not.toThrow()
+  })
+})

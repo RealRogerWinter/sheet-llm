@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { and, eq, lt, sql } from 'drizzle-orm'
 import { getDb } from '@/lib/db'
-import { creditHolds, creditPurchases, creditWallets, usageLedger } from '@/lib/db/schema'
+import { creditHolds, creditPurchases, creditWallets, refundCounters, usageLedger } from '@/lib/db/schema'
 
 /**
  * Prepaid-credit WALLET ENGINE — the atomic money primitives.
@@ -191,6 +191,15 @@ export function settleHold(
       .where(eq(usageLedger.idempotencyKey, input.idempotencyKey))
       .get()
     if (existingLedger) {
+      // The idempotency_key namespace is SHARED with refund() but the two write
+      // opposite signs (charge >= 0, refund < 0). A negative row here means a
+      // refund key was reused as a settle key — a caller bug that would
+      // otherwise return a charge of a negative amount. Fail loud.
+      if (existingLedger.creditsCharged < 0) {
+        throw new Error(
+          `settleHold: idempotencyKey ${input.idempotencyKey} already names a REFUND row — settle/refund keys must be namespaced`,
+        )
+      }
       return {
         ok: true,
         ledgerId: existingLedger.id,
@@ -371,6 +380,154 @@ export function creditWallet(
       })
       .run()
     return { applied: true, balanceAfter: getWallet(input.userId, tx as unknown as Db).balance }
+  })
+}
+
+/** Per-user-per-DAY ceilings on SERVICE refunds (we-failed → credits back).
+ *  A user-triggerable failure is a credit-printing press without a cap. Both
+ *  the count AND the credit-sum are bounded. Operator-tunable defaults;
+ *  re-derive from measured abuse data post-launch. */
+export const DAILY_REFUND_MAX_COUNT = 20
+export const DAILY_REFUND_MAX_CREDITS = 500 // = $5.00 of credit-backs / user / day
+
+const SEC_PER_DAY = 86_400
+const epochDay = (sec: number): number => Math.floor(sec / SEC_PER_DAY)
+
+export type RefundResult =
+  | { ok: true; ledgerId: string; creditsRefunded: number; balanceAfter: number; reused: boolean }
+  | { ok: false; reason: 'ceiling_exceeded' }
+
+/**
+ * SERVICE refund: return `credits` to a user because WE failed (error/timeout)
+ * or cost-split an unusual high-cost failure. Recorded as an immutable
+ * usage_ledger row with `credits_charged` NEGATIVE (double-entry: a charge
+ * reversed) + the typed `reason`, then the balance is credited back — all in
+ * one atomic transaction. Idempotent on `idempotencyKey`. Bounded by a per-day
+ * count AND credit-sum ceiling (guard-in-the-write) so a repeatable failure
+ * can't mint unlimited credits. WHEN/how-much is decided by classifyRefund()
+ * in refundPolicy.ts (this primitive only moves money safely).
+ *
+ * IDEMPOTENCY-KEY NAMESPACE: `idempotencyKey` lives in the SAME UNIQUE column as
+ * settleHold()'s ledger key. Callers MUST namespace them (e.g. a `refund:`
+ * prefix derived server-side from the requestId + failure class) so one failure
+ * yields exactly one refund and a settle key is never reused. A reused settle
+ * key is caught — it throws rather than reporting a money-less "success".
+ *
+ * NEVER call this for a user-initiated abort or a delivered result — that is
+ * the policy's job to exclude.
+ */
+export function refund(
+  input: {
+    userId: string
+    requestId: string
+    holdId?: string
+    credits: number // positive amount to return
+    reason: string // typed failure class: 'error' | 'refused' | 'cost_split'
+    kind?: string // ledger kind, default 'refund'
+    sessionId?: string
+    idempotencyKey: string
+    costMicroUsd?: number // our raw cost on the failed call (audit)
+  },
+  db: Db = getDb(),
+): RefundResult {
+  assertCredits('refund credits', input.credits)
+  // A single refund must not exceed the DAILY credit ceiling: the first-of-day
+  // INSERT path can't be guarded by the ON CONFLICT WHERE, so the policy cap
+  // (PER_FAILURE_REFUND_CAP_CREDITS) is kept well below this and we refuse
+  // defensively if a caller ever exceeds it.
+  if (input.credits > DAILY_REFUND_MAX_CREDITS) return { ok: false, reason: 'ceiling_exceeded' }
+  const now = nowSec()
+  const day = epochDay(now)
+  return db.transaction((tx): RefundResult => {
+    // Idempotent: a retried refund re-finds its ledger row (NEGATIVE charge).
+    const existing = tx
+      .select({
+        id: usageLedger.id,
+        creditsCharged: usageLedger.creditsCharged,
+        balanceAfter: usageLedger.balanceAfter,
+      })
+      .from(usageLedger)
+      .where(eq(usageLedger.idempotencyKey, input.idempotencyKey))
+      .get()
+    if (existing) {
+      // SHARED idempotency_key namespace with settleHold(), opposite sign. A
+      // non-negative row here means a settle (charge) key was reused as a refund
+      // key — without this guard refund() would short-circuit BEFORE crediting
+      // the wallet and report a bogus `reused` success that moved no money.
+      if (existing.creditsCharged > 0) {
+        throw new Error(
+          `refund: idempotencyKey ${input.idempotencyKey} already names a CHARGE row — settle/refund keys must be namespaced`,
+        )
+      }
+      return {
+        ok: true,
+        ledgerId: existing.id,
+        creditsRefunded: -existing.creditsCharged,
+        balanceAfter: existing.balanceAfter ?? 0,
+        reused: true,
+      }
+    }
+
+    // Daily abuse ceiling — guard-in-the-write. A NEW (user,day) row always
+    // inserts (count 1, credits <= MAX checked above). On CONFLICT it increments
+    // ONLY while BOTH ceilings still hold; otherwise changes=0 → refuse and the
+    // whole txn rolls back (no ledger row, no balance move, counter untouched).
+    const counter = tx
+      .insert(refundCounters)
+      .values({ userId: input.userId, day, refundCount: 1, refundCredits: input.credits, updatedAt: now })
+      .onConflictDoUpdate({
+        target: [refundCounters.userId, refundCounters.day],
+        set: {
+          refundCount: sql`${refundCounters.refundCount} + 1`,
+          refundCredits: sql`${refundCounters.refundCredits} + ${input.credits}`,
+          updatedAt: now,
+        },
+        setWhere: sql`${refundCounters.refundCount} + 1 <= ${DAILY_REFUND_MAX_COUNT} AND ${refundCounters.refundCredits} + ${input.credits} <= ${DAILY_REFUND_MAX_CREDITS}`,
+      })
+      .run()
+    if (counter.changes !== 1) return { ok: false, reason: 'ceiling_exceeded' }
+
+    // Credit the balance back. The wallet should already exist (the user was
+    // charged); create it at 0 defensively. Adding credits can NEVER violate the
+    // solvency CHECK (balance rises, held unchanged), so no balance guard is
+    // needed — but the UPDATE must hit exactly one row.
+    tx.insert(creditWallets)
+      .values({ userId: input.userId, balance: 0, held: 0, version: 0, updatedAt: now })
+      .onConflictDoNothing()
+      .run()
+    const upd = tx
+      .update(creditWallets)
+      .set({
+        balance: sql`${creditWallets.balance} + ${input.credits}`,
+        version: sql`${creditWallets.version} + 1`,
+        updatedAt: now,
+      })
+      .where(eq(creditWallets.userId, input.userId))
+      .run()
+    if (upd.changes !== 1) {
+      throw new Error(`refund: wallet UPDATE matched ${upd.changes} rows for user ${input.userId}`)
+    }
+
+    const { balance: balanceAfter } = getWallet(input.userId, tx as unknown as Db)
+    const ledgerId = randomUUID()
+    tx.insert(usageLedger)
+      .values({
+        id: ledgerId,
+        userId: input.userId,
+        ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+        requestId: input.requestId,
+        ...(input.holdId !== undefined ? { holdId: input.holdId } : {}),
+        idempotencyKey: input.idempotencyKey,
+        kind: input.kind ?? 'refund',
+        reason: input.reason,
+        ...(input.costMicroUsd !== undefined ? { costMicroUsd: input.costMicroUsd } : {}),
+        creditsCharged: -input.credits, // NEGATIVE = credit returned (double-entry)
+        balanceAfter,
+        createdAt: now,
+      })
+      .run()
+
+    return { ok: true, ledgerId, creditsRefunded: input.credits, balanceAfter, reused: false }
   })
 }
 
