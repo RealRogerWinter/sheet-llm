@@ -30,6 +30,23 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Containerized self-host (deploy-vps): emit a standalone server bundle
+  // (.next/standalone/server.js) so the Docker image runs `node server.js`
+  // under Litestream supervision instead of `next start`.
+  output: "standalone",
+  // better-sqlite3 is a NATIVE addon — Next/Turbopack must NOT bundle it into
+  // the server output or the prebuilt .node fails to load at runtime
+  // (ERR_DLOPEN / NODE_MODULE_VERSION). Keep it external so the standalone
+  // trace copies the real module + its compiled .node.
+  serverExternalPackages: ["better-sqlite3"],
+  // The Drizzle migrations dir is read at boot by ensureMigrationsApplied()
+  // (src/lib/db) via path.resolve(process.cwd(), 'drizzle'); it is NOT a route
+  // asset, so standalone tracing won't include it on its own. Trace it in for
+  // all routes — and the Dockerfile ALSO COPYs drizzle/ explicitly, since the
+  // FATAL boot gate refuses to start if the folder is missing.
+  outputFileTracingIncludes: {
+    "/*": ["./drizzle/**"],
+  },
   // Hide the Next.js on-screen dev indicator (bottom-left floating menu).
   // Build/runtime errors are still surfaced. See node_modules/next/dist/
   // docs/.../devIndicators.md — `false` is the v16 way (the old

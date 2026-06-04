@@ -1,0 +1,25 @@
+# Build context hygiene — keep secrets, local state, and bulky/dev-only dirs out
+# of the image (and out of any layer / `docker history`).
+.git
+.github
+.circleci
+node_modules
+.next
+out
+data
+*.db
+*.db-wal
+*.db-shm
+coverage
+test-results
+playwright-report
+.env
+.env.*
+!.env.example
+.claude
+.vscode
+*.log
+npm-debug.log*
+.DS_Store
+Dockerfile
+.dockerignore

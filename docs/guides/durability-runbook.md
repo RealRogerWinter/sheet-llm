@@ -3,8 +3,8 @@ title: Durability & Restore Runbook (Litestream)
 subsystem: ops
 audience: [contributor, ai-agent]
 status: current
-last_verified: 2026-06-03
-verified_against: e6f5a58
+last_verified: 2026-06-04
+verified_against: 71117a3
 source_paths:
   - src/lib/db/durability.ts
   - src/lib/db/index.ts
@@ -62,9 +62,12 @@ litestream restore -config /etc/litestream.yml /data/sheet-llm.db
 #  LITESTREAM_SECRET_ACCESS_KEY first, since there's no config to read them from:)
 litestream restore -o /data/sheet-llm.db ${LITESTREAM_REPLICA_URL}
 
-# 2. Start Litestream + app as usual (replicate -exec). The -exec form already
-#    restores on boot if the DB file is missing, so step 1 is the explicit /
-#    point-in-time variant; for PITR add `-timestamp 2026-06-03T12:00:00Z`.
+# 2. Start Litestream + app (replicate -exec). NOTE: `replicate -exec` does NOT
+#    auto-restore a missing DB — step 1 is REQUIRED on a cold start, or the app
+#    comes up empty and replicates that empty DB over the good backup. The
+#    container entrypoint (deploy/docker-entrypoint.sh) runs step 1 automatically
+#    with `-if-replica-exists` (a no-op on the first-ever boot, before any
+#    replica exists). For PITR, add `-timestamp 2026-06-03T12:00:00Z` to step 1.
 ```
 
 **Verify** after restore: the app boots, `GET /api/auth/session` returns
