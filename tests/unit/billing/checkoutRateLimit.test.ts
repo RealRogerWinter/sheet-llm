@@ -1,0 +1,63 @@
+// @vitest-environment node
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { __resetForTesting, checkCheckoutRate } from '@/lib/billing/checkoutRateLimit'
+
+const ENV_KEYS = ['SL_CHECKOUT_USER_RATE_LIMIT', 'SL_CHECKOUT_IP_RATE_LIMIT'] as const
+const saved: Record<string, string | undefined> = {}
+
+beforeEach(() => {
+  __resetForTesting()
+  for (const k of ENV_KEYS) {
+    saved[k] = process.env[k]
+    delete process.env[k]
+  }
+})
+afterEach(() => {
+  for (const k of ENV_KEYS) {
+    if (saved[k] === undefined) delete process.env[k]
+    else process.env[k] = saved[k]
+  }
+  vi.useRealTimers()
+})
+
+describe('checkCheckoutRate', () => {
+  it('allows attempts under the per-user limit and rejects the one over', () => {
+    for (let i = 0; i < 10; i++) expect(checkCheckoutRate('u1', '1.1.1.1').ok).toBe(true)
+    const over = checkCheckoutRate('u1', '1.1.1.1')
+    expect(over.ok).toBe(false)
+    expect(over.retryAfterSec).toBeGreaterThan(0)
+  })
+
+  it('enforces the per-IP limit across DIFFERENT users from one host', () => {
+    // 20 distinct users sharing one IP — each is under its own limit, but the IP
+    // budget (20) trips on the 21st: a multi-account-from-one-host signal.
+    for (let i = 0; i < 20; i++) expect(checkCheckoutRate(`user-${i}`, '9.9.9.9').ok).toBe(true)
+    expect(checkCheckoutRate('user-20', '9.9.9.9').ok).toBe(false)
+  })
+
+  it('honors the env override for the user limit', () => {
+    process.env.SL_CHECKOUT_USER_RATE_LIMIT = '2'
+    expect(checkCheckoutRate('u1', '2.2.2.2').ok).toBe(true)
+    expect(checkCheckoutRate('u1', '2.2.2.2').ok).toBe(true)
+    expect(checkCheckoutRate('u1', '2.2.2.2').ok).toBe(false)
+  })
+
+  it('a user-capped reject does NOT consume the IP budget (two-phase check)', () => {
+    process.env.SL_CHECKOUT_USER_RATE_LIMIT = '1'
+    process.env.SL_CHECKOUT_IP_RATE_LIMIT = '2'
+    expect(checkCheckoutRate('u1', '3.3.3.3').ok).toBe(true) // ip hits = 1
+    expect(checkCheckoutRate('u1', '3.3.3.3').ok).toBe(false) // user-capped; must not record an ip hit
+    // If the reject had recorded an ip hit, ip would be 2 and this would reject.
+    expect(checkCheckoutRate('u2', '3.3.3.3').ok).toBe(true) // ip hits = 2
+  })
+
+  it('slides the window — budget refreshes after the window passes', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-04T00:00:00Z'))
+    process.env.SL_CHECKOUT_USER_RATE_LIMIT = '1'
+    expect(checkCheckoutRate('u1', '4.4.4.4').ok).toBe(true)
+    expect(checkCheckoutRate('u1', '4.4.4.4').ok).toBe(false)
+    vi.setSystemTime(new Date('2026-06-04T01:00:01Z')) // > 1 hour later
+    expect(checkCheckoutRate('u1', '4.4.4.4').ok).toBe(true)
+  })
+})

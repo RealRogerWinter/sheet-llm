@@ -9,6 +9,7 @@ import { resolveAppBaseUrl } from '@/lib/auth/email'
 import { getStripe, isStripeEnabled } from '@/lib/billing/stripe'
 import { getPack } from '@/lib/billing/packs'
 import { buildCheckoutSessionParams, checkPurchaseEligibility } from '@/lib/billing/checkout'
+import { checkCheckoutRate, extractClientIp } from '@/lib/billing/checkoutRateLimit'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -67,6 +68,18 @@ export async function POST(request: Request) {
   })
   if (!eligibility.ok) {
     return NextResponse.json({ code: eligibility.code, error: eligibility.message }, { status: eligibility.status })
+  }
+
+  // Throttle checkout-session creation per claimed user + per IP — the cheap
+  // front half of card-testing is opening sessions in a loop. Checked AFTER
+  // eligibility so only real account holders consume budget; one layer beneath
+  // Stripe Radar + 3DS (launch checklist).
+  const rate = checkCheckoutRate(user!.userId, extractClientIp(request))
+  if (!rate.ok) {
+    return NextResponse.json(
+      { code: 'rate_limited', error: 'Too many checkout attempts — please wait a moment and try again.' },
+      { status: 429, ...(rate.retryAfterSec ? { headers: { 'Retry-After': String(rate.retryAfterSec) } } : {}) },
+    )
   }
 
   // Prefer APP_BASE_URL behind a proxy (request.url is the internal bind host);
