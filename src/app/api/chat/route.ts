@@ -53,6 +53,7 @@ import { currentMeterTotals, runWithUsageMeter, toMicroUsd } from '@/lib/billing
 import { isPaidGenerationEnabled } from '@/lib/auth/account'
 import { ensureWallet, placeHold, refund, releaseHold, settleHold, type SettleResult } from '@/lib/billing/wallet'
 import { maybeReapExpiredHolds } from '@/lib/billing/reap'
+import { consumeFreePiece, isFreePieceEligible } from '@/lib/billing/freePiece'
 import {
   costToCredits,
   fallbackCreditsForKind,
@@ -529,7 +530,18 @@ async function handleChat(
   // IGNORES it in production unless SL_ALLOW_TIER_OVERRIDE is set — otherwise any
   // caller could POST debug.generationTier='pro' and bypass the paywall.
   // See isTierOverrideAllowed in generationTier.ts.
-  const generationTier = await resolveGenerationTier(userId, parsed.debug?.generationTier)
+  let generationTier = await resolveGenerationTier(userId, parsed.debug?.generationTier)
+
+  // ── Free full piece (PR-7b-3): a VERIFIED account's ONE-TIME pro-scope
+  // generation, free + OFF the money path (a charge-SKIP, never a credit grant —
+  // which would open refund farming). DARK with the paid layer. Restricted to
+  // FROM-SCRATCH requests (no existing score ⇒ always a generation, never a free
+  // edit/converse, so it can't be farmed). When eligible, upgrade THIS request to
+  // pro scope (the full product) and skip the hold below; the grant is consumed
+  // on successful DELIVERY (not on failure) so a failed piece doesn't burn it.
+  const freePiece =
+    isPaidGenerationEnabled() && authenticated && !orchestratorScore && isFreePieceEligible(userId)
+  if (freePiece) generationTier = 'pro'
 
   // Daily request-quota gate (hosted abuse-gating layer; OFF by default — inert
   // for self-hosters). Slotted AFTER identity + tier are known and BEFORE any
@@ -554,7 +566,8 @@ async function handleChat(
   // respondWithOrchestratorResult (non-streaming) and released on every other
   // outcome — streaming settle is PR-7b-2. A crashed request self-heals via
   // reapExpiredHolds.
-  const paidGeneration = isPaidGenerationEnabled() && authenticated && generationTier === 'pro'
+  const paidGeneration =
+    isPaidGenerationEnabled() && authenticated && generationTier === 'pro' && !freePiece
   let holdId: string | undefined
   if (paidGeneration) {
     try {
@@ -689,7 +702,9 @@ async function handleChat(
     }
     if (isOrchestratorScoreStream(orchestratorOutcome)) {
       // PR-7b-2: settled at `done` off the (backfilled) full sectional cost.
-      return await respondWithScoreStream(userId, chatId, orchestratorOutcome, mode, generationTier, requestId, holdId)
+      // PR-7b-3: a from-scratch free piece (holdId undefined) consumes the grant
+      // at `done` instead of settling.
+      return await respondWithScoreStream(userId, chatId, orchestratorOutcome, mode, generationTier, requestId, holdId, freePiece)
     }
     if (!('fellThrough' in orchestratorOutcome)) {
       // Non-streaming result: respondWithOrchestratorResult OWNS the hold's
@@ -703,6 +718,7 @@ async function handleChat(
         generationTier,
         requestId,
         holdId,
+        freePiece,
       )
     }
     // fellThrough — drop through to the legacy path below; the
@@ -1144,6 +1160,7 @@ async function respondWithOrchestratorResult(
   generationTier: GenerationTier,
   requestId?: string,
   holdId?: string,
+  freePiece?: boolean,
 ) {
   try {
     validateScore(result.score)
@@ -1276,6 +1293,13 @@ async function respondWithOrchestratorResult(
     }
     throw e
   }
+
+  // PR-7b-3: a delivered from-scratch free piece consumes the one-time grant
+  // (idempotent; off the money path). Only on success — a failure above already
+  // returned/threw before here, leaving the grant for a retry. freePiece is only
+  // set for a from-scratch (no prior score) request, which is always a
+  // generation, so this never burns the grant on an edit/converse.
+  if (freePiece) consumeFreePiece(userId)
 
   const keyConfigured = !!process.env.ANTHROPIC_API_KEY
   const debug: ChatDebugPayload = {
@@ -1602,6 +1626,7 @@ async function respondWithScoreStream(
   generationTier: GenerationTier,
   requestId: string,
   holdId?: string,
+  freePiece?: boolean,
 ): Promise<Response> {
   const keyConfigured = !!process.env.ANTHROPIC_API_KEY
   const debug: ChatDebugPayload = {
@@ -1728,6 +1753,9 @@ async function respondWithScoreStream(
               }
               try {
                 const persisted = await persist(ev.score, ev.introText, ev.toolUseId)
+                // PR-7b-3: a delivered from-scratch free piece (no hold) consumes
+                // the one-time grant here (idempotent; off the money path).
+                if (freePiece) consumeFreePiece(userId)
                 write('done', {
                   abc: persisted.abc,
                   scoreJson: ev.score,

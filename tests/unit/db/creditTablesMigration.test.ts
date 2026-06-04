@@ -191,3 +191,18 @@ describe('0013_orchestrator_turns_request_index migration', () => {
     expect(cols).toEqual(['request_id'])
   })
 })
+
+// 0014 added users.free_full_piece_used_at — the one-time free-full-piece grant
+// (PR-7b-3). A nullable timestamp (NULL = unused); off the money path.
+describe('0014_user_free_full_piece migration', () => {
+  const raw = (db: ReturnType<typeof makeTestDb>): Database.Database => db.$client
+
+  it('adds users.free_full_piece_used_at (nullable)', () => {
+    const client = raw(makeTestDb())
+    const col = (
+      client.pragma('table_info(users)') as Array<{ name: string; notnull: number }>
+    ).find((c) => c.name === 'free_full_piece_used_at')
+    expect(col, 'users.free_full_piece_used_at missing').toBeDefined()
+    expect(col!.notnull).toBe(0) // nullable — NULL means the grant is unused
+  })
+})

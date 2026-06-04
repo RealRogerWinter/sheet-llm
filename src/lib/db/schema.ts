@@ -56,6 +56,10 @@ export const users = sqliteTable(
     // 1-year recovery token (or a stale sl_uid) must not re-authenticate a
     // password-protected account. See api/auth/restore/route.ts + getRequestUser.
     claimedAt: integer('claimed_at'),
+    // PR-7b-3: epoch-seconds the account consumed its ONE-TIME free full piece
+    // (NULL = never used). A charge-SKIP grant, OFF the money path — never a
+    // credit grant (which would open refund farming; red-team #7).
+    freeFullPieceUsedAt: integer('free_full_piece_used_at'),
   },
   (table) => [
     index('users_last_seen').on(table.lastSeenAt),

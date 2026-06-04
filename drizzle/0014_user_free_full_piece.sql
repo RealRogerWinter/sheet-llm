@@ -1,0 +1,1 @@
+ALTER TABLE `users` ADD `free_full_piece_used_at` integer;
