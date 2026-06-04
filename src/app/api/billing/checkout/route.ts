@@ -5,6 +5,7 @@ import { getDb } from '@/lib/db'
 import { users } from '@/lib/db/schema'
 import { getExistingRequestUser } from '@/lib/auth/session'
 import { isSameOriginStrict, isJsonRequest } from '@/lib/auth/httpGuards'
+import { resolveAppBaseUrl } from '@/lib/auth/email'
 import { getStripe, isStripeEnabled } from '@/lib/billing/stripe'
 import { getPack } from '@/lib/billing/packs'
 import { buildCheckoutSessionParams, checkPurchaseEligibility } from '@/lib/billing/checkout'
@@ -13,6 +14,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const BodySchema = z.object({ packId: z.string().min(1).max(40) })
+const MAX_BODY_BYTES = 4 * 1024 // the body is just {packId}; reject anything large outright
 
 /**
  * POST /api/billing/checkout — start a Stripe Checkout session for a credit pack.
@@ -32,6 +34,9 @@ export async function POST(request: Request) {
   }
   if (!isStripeEnabled()) {
     return NextResponse.json({ code: 'not_found', error: 'Billing is not enabled' }, { status: 404 })
+  }
+  if (Number(request.headers.get('content-length') ?? '0') > MAX_BODY_BYTES) {
+    return NextResponse.json({ code: 'invalid_request', error: 'Request body too large' }, { status: 413 })
   }
 
   let body: z.infer<typeof BodySchema>
@@ -64,13 +69,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ code: eligibility.code, error: eligibility.message }, { status: eligibility.status })
   }
 
-  const origin = new URL(request.url).origin
+  // Prefer APP_BASE_URL behind a proxy (request.url is the internal bind host);
+  // a spoofed Host must not steer Stripe's post-checkout redirect off-origin.
+  const origin = resolveAppBaseUrl(request)
   const params = buildCheckoutSessionParams({
     pack,
     userId: user!.userId,
     email: account!.email!,
     successUrl: `${origin}/?checkout=success`,
     cancelUrl: `${origin}/?checkout=cancel`,
+    ...(process.env.SL_STRIPE_TAX_CODE ? { taxCode: process.env.SL_STRIPE_TAX_CODE } : {}),
   })
 
   try {
@@ -80,10 +88,16 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ url: checkout.url })
   } catch (e) {
+    // Surface the Stripe error code/requestId so an account-config failure (e.g.
+    // Stripe Tax not enabled) is diagnosable rather than a blind 502.
+    const se = e as { code?: string; type?: string; requestId?: string }
     console.error('[billing] checkout session create failed', {
       userId: user!.userId,
       packId: pack.id,
       error: e instanceof Error ? e.message : String(e),
+      stripeCode: se.code,
+      stripeType: se.type,
+      stripeRequestId: se.requestId,
     })
     return NextResponse.json({ code: 'upstream_error', error: 'Could not start checkout. Please try again.' }, { status: 502 })
   }

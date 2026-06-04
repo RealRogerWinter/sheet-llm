@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { buildCheckoutSessionParams, checkPurchaseEligibility } from '@/lib/billing/checkout'
+import {
+  buildCheckoutSessionParams,
+  checkPurchaseEligibility,
+  DEFAULT_STRIPE_TAX_CODE,
+} from '@/lib/billing/checkout'
 import { getPack } from '@/lib/billing/packs'
 
 describe('checkPurchaseEligibility', () => {
@@ -61,5 +65,18 @@ describe('buildCheckoutSessionParams', () => {
     expect(params.success_url).toBe('https://x/ok')
     expect(params.cancel_url).toBe('https://x/no')
     expect(params.automatic_tax).toEqual({ enabled: true })
+  })
+
+  it('sets a product tax_code (default + override) so Stripe Tax computes without a dashboard preset', () => {
+    expect(params.line_items?.[0]?.price_data?.product_data?.tax_code).toBe(DEFAULT_STRIPE_TAX_CODE)
+    const custom = buildCheckoutSessionParams({
+      pack,
+      userId: 'u-1',
+      email: 'a@b.com',
+      successUrl: 'https://x/ok',
+      cancelUrl: 'https://x/no',
+      taxCode: 'txcd_20030000',
+    })
+    expect(custom.line_items?.[0]?.price_data?.product_data?.tax_code).toBe('txcd_20030000')
   })
 })

@@ -2,6 +2,15 @@ import type Stripe from 'stripe'
 import type { CreditPack } from './packs'
 
 /**
+ * Default Stripe Tax product tax code: "General — Electronically Supplied
+ * Services" (digital goods). Set EXPLICITLY so `automatic_tax` computes without
+ * depending on an undocumented dashboard default/preset (absent one, the first
+ * live `sessions.create` 400s). Override per-deployment with SL_STRIPE_TAX_CODE
+ * if a jurisdiction needs a more specific code.
+ */
+export const DEFAULT_STRIPE_TAX_CODE = 'txcd_10000000'
+
+/**
  * Server-side purchase ELIGIBILITY gate (red-team must-fix #6). Only a CLAIMED,
  * EMAIL-VERIFIED account may buy credits: a purchase ties real money to an
  * identity for fraud / chargeback handling, and an anonymous bearer-cookie user
@@ -52,6 +61,8 @@ export function buildCheckoutSessionParams(input: {
   email: string
   successUrl: string
   cancelUrl: string
+  /** Stripe Tax product code; defaults to DEFAULT_STRIPE_TAX_CODE. */
+  taxCode?: string
 }): Stripe.Checkout.SessionCreateParams {
   const { pack, userId, email, successUrl, cancelUrl } = input
   const meta = { userId, packId: pack.id, credits: String(pack.totalCredits) }
@@ -75,6 +86,7 @@ export function buildCheckoutSessionParams(input: {
           product_data: {
             name: `${pack.totalCredits.toLocaleString('en-US')} credits`,
             description: `${pack.label} pack — ${pack.totalCredits.toLocaleString('en-US')} sheetllm.com credits`,
+            tax_code: input.taxCode ?? DEFAULT_STRIPE_TAX_CODE,
           },
         },
       },
