@@ -79,10 +79,19 @@ export function costToCredits(microUsd: number, markup: number): number {
 //            WORST_INPUT_TOKENS_PER_CALL in
 //   overhead: classifier (Haiku) + planner + dispatcher, folded into one
 //            generous Sonnet-priced bound
+// Sonnet 4.6 is the priciest IN-SCOPE model. PR-8 adds Advanced/Opus routing —
+// re-derive WORST_MODEL when that lands (Opus computes to a larger hold), else an
+// Opus turn would routinely trip overHold.
 const WORST_MODEL = 'claude-sonnet-4-6'
 /** completeWithRetry default maxRetries = 2 ⇒ 1 initial + 2 retries. */
 const MAX_HANDLER_ATTEMPTS = 3
-const WORST_INPUT_TOKENS_PER_CALL = 40_000
+// Generous per-call input bound: render_score schema (~13k) + a large grand-staff
+// score (~15k) + recent history, all billed UNCACHED. Covers realistic large
+// editedScores without false overHold alerts. The absolute MAX_BODY_BYTES (1MB)
+// pathological input is intentionally backstopped by settleHold's overHold cap
+// (we never overdraft; the alert fires) rather than inflating every hold —
+// deliberately attacking it costs the (paid) attacker far more than it costs us.
+const WORST_INPUT_TOKENS_PER_CALL = 80_000
 const OVERHEAD_INPUT_TOKENS = 20_000
 const OVERHEAD_OUTPUT_TOKENS = 2_000
 

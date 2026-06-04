@@ -92,14 +92,15 @@ vi.mock('@/lib/orchestrator', async (importActual) => {
 
 const { POST } = await import('@/app/api/chat/route')
 
-function postChat(message: string) {
+function postChat(message: string, orchestrator: 'on' | 'off' | 'shadow' = 'on') {
   return POST(
     new Request('http://localhost:3000/api/chat', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'cf-connecting-ip': '203.0.113.9' },
       // debug.orchestrator:'on' forces primary mode so run()'s result is served
-      // via respondWithOrchestratorResult (the non-streaming settle site).
-      body: JSON.stringify({ message, debug: { orchestrator: 'on' } }),
+      // via respondWithOrchestratorResult (the non-streaming settle site). In
+      // NODE_ENV=test the client override is honored (isTierOverrideAllowed).
+      body: JSON.stringify({ message, debug: { orchestrator } }),
     }),
   )
 }
@@ -167,6 +168,26 @@ describe('/api/chat credit paywall (PR-7b-1)', () => {
       const res = await postChat('compose a melody')
       expect(res.status).toBe(200)
       expect(getWallet(TEST_USER_ID).balance).toBe(1000 - 25)
+    })
+
+    it('SECURITY: a paid request that would hit the uncharged legacy path is REFUSED, not served free', async () => {
+      // mode=off routes around the orchestrator to the legacy single-shot path,
+      // which PR-7b-1 does not charge. A paid Pro user must NOT get a free
+      // generation there (the debug.orchestrator='off' bypass the security review
+      // flagged). Expect a refusal + the hold released + no charge + no dispatch.
+      creditWallet({ userId: TEST_USER_ID, creditsDelta: 1000, source: 'test' })
+      const res = await postChat('compose a melody', 'off')
+      expect(res.status).toBe(422)
+      const data = await res.json()
+      expect(data.code).toBe('refused')
+      expect(cfg.runCalls).toBe(0)
+      expect(getWallet(TEST_USER_ID).balance).toBe(1000) // not charged
+      expect(getWallet(TEST_USER_ID).held).toBe(0) // hold released, not stranded
+      expect(await countRows(usageLedger)).toBe(0)
+      const { getDb } = await import('@/lib/db')
+      const holds = getDb().select().from(creditHolds).all()
+      expect(holds.length).toBe(1)
+      expect(holds[0].status).toBe('released')
     })
 
     it('insufficient credits → 402 insufficient_credits and NEVER dispatches', async () => {

@@ -51,6 +51,7 @@ import { recordUsage } from '@/lib/orchestrator/budget'
 import { currentMeterTotals, runWithUsageMeter, toMicroUsd } from '@/lib/billing/usageMeter'
 import { isPaidGenerationEnabled } from '@/lib/auth/account'
 import { ensureWallet, placeHold, refund, releaseHold, settleHold } from '@/lib/billing/wallet'
+import { maybeReapExpiredHolds } from '@/lib/billing/reap'
 import {
   costToCredits,
   fallbackCreditsForKind,
@@ -61,7 +62,12 @@ import { checkRequestIp, extractClientIp } from '@/lib/orchestrator/requestRateL
 import { hasClearance } from '@/lib/security/turnstile'
 import { scoreHash } from '@/lib/orchestrator/scoreVersion'
 import { computeDeadlineAt } from '@/lib/orchestrator/deadline'
-import { resolveGenerationTier, policyFor, BOUNDED_EMIT_CEILING } from '@/lib/orchestrator/generationTier'
+import {
+  resolveGenerationTier,
+  policyFor,
+  isTierOverrideAllowed,
+  BOUNDED_EMIT_CEILING,
+} from '@/lib/orchestrator/generationTier'
 import type { GenerationTier } from '@/lib/orchestrator/generationTier'
 import { evaluateRequestQuota, isDailyQuotaEnabled } from '@/lib/orchestrator/dailyQuota'
 import { quotaErrorBody } from '@/lib/chat/quotaMessages'
@@ -383,6 +389,9 @@ export async function POST(request: Request) {
   // Same opportunistic, throttled sweep for the daily-quota counters — gated so a
   // self-hosted instance with the quota feature off does nothing.
   if (isDailyQuotaEnabled()) maybeReapStaleQuota()
+  // And for stranded credit holds (a crash between placeHold and settle/release)
+  // — gated so a non-paid instance does nothing.
+  if (isPaidGenerationEnabled()) maybeReapExpiredHolds()
 
   // Per-request API key override (from debug panel) is threaded through
   // ProviderCallOptions.apiKeyOverride rather than mutating process.env —
@@ -494,12 +503,19 @@ async function handleChat(
   //
   // Debug overrides take precedence over env when present.
   const envMode = getOrchestratorMode()
+  // `debug.orchestrator` is a CLIENT-supplied field (DebugOverridesSchema). Like
+  // `debug.generationTier` it must be IGNORED in production: a paid Pro user
+  // could otherwise POST debug.orchestrator='off'/'shadow' to route to the
+  // UNCHARGED legacy single-shot path — a free-generation bypass of the paywall.
+  // Honored only in the trusted dev/test context (or the explicit
+  // SL_ALLOW_TIER_OVERRIDE opt-in), mirroring resolveGenerationTier's gate.
+  const debugMode = isTierOverrideAllowed() ? parsed.debug?.orchestrator : undefined
   const mode: OrchestratorMode =
-    parsed.debug?.orchestrator === 'on'
+    debugMode === 'on'
       ? 'primary'
-      : parsed.debug?.orchestrator === 'off'
+      : debugMode === 'off'
         ? 'off'
-        : parsed.debug?.orchestrator === 'shadow'
+        : debugMode === 'shadow'
           ? 'shadow'
           : envMode
   const requestId = crypto.randomUUID()
@@ -556,10 +572,14 @@ async function handleChat(
           chatId,
         )
       }
-      if (hold.reused && hold.status !== 'active') {
-        // A reused TERMINAL (settled/released) hold means this exact request
-        // already completed — never run a second uncharged generation off it.
-        console.error('[paywall] placeHold returned a reused TERMINAL hold — refusing', {
+      if (hold.reused) {
+        // A reused hold means this exact request id already placed one —
+        // anomalous in PR-7b-1, where requestId is a fresh per-request UUID so
+        // `gen:${requestId}` is never reused. Refuse rather than risk serving or
+        // charging twice. (A reused-ACTIVE hold becomes a real double-settle
+        // hazard once PR-7b-2 / sectional introduce a STABLE hold key — reuse
+        // must be handled explicitly there.)
+        console.error('[paywall] placeHold returned a reused hold — refusing (anomalous for a per-request key)', {
           requestId,
           status: hold.status,
         })
@@ -740,6 +760,29 @@ async function handleChat(
       'refused',
       422,
       "I couldn't apply that as a quick edit. Try rephrasing it as a smaller, more specific change — or switch to Pro for full rewrites.",
+      chatId,
+    )
+  }
+
+  // A PAID request must NEVER be served by the uncharged legacy single-shot path
+  // (PR-7b-1 does not meter or charge legacy). Reaching here on the paid path
+  // means a non-deadline fall-through (low_confidence / handler_error) or mode
+  // off / shadow / kill — refuse instead of handing out a free Pro generation.
+  // The hold was already released above. (Deadline + free-tier fall-throughs are
+  // handled above; a Pro user is never on the free tier.) This is the backstop
+  // behind the debug.orchestrator gate: even an operator kill switch can't leak a
+  // free paid generation.
+  if (paidGeneration) {
+    console.warn('[paywall] paid request would hit the uncharged legacy path — refusing', {
+      requestId,
+      chatId,
+      mode,
+      fallThroughReason: fallThrough?.reason,
+    })
+    return errorResponse(
+      'refused',
+      422,
+      "I couldn't complete that on the Pro path just now. Try rephrasing it as a smaller, specific change, then try again.",
       chatId,
     )
   }
@@ -1045,7 +1088,9 @@ async function respondWithOrchestratorResult(
   // ── PR-7b-1 paywall settle (non-streaming). A hold was placed pre-dispatch;
   // charge the ACTUAL metered cost (cost-plus) BEFORE persisting/delivering so
   // we never deliver an uncharged generation. (Validation failures above
-  // released the hold instead — nothing was produced to charge for.)
+  // released the hold instead — nothing was produced to charge for.) A
+  // confirmation-gated candidate (requiresConfirmation / previewMode) IS charged
+  // here too — the generation cost was incurred regardless of accept/reject.
   let settledCredits = 0
   if (holdId && requestId) {
     const turn = readTurnCostByRequestId(requestId)
@@ -1128,7 +1173,7 @@ async function respondWithOrchestratorResult(
     // (refund:* vs settle:*), idempotent, and abuse-bounded.
     if (holdId && requestId && settledCredits > 0) {
       try {
-        refund({
+        const r = refund({
           userId,
           requestId,
           holdId,
@@ -1137,6 +1182,17 @@ async function respondWithOrchestratorResult(
           sessionId: chatId,
           idempotencyKey: `refund:${requestId}:persist_failed`,
         })
+        if (!r.ok) {
+          // refund() returns {ok:false} (it does NOT throw) when the per-day
+          // refund ceiling is hit — the customer stays charged for an undelivered
+          // turn. Surface it loudly for manual reconciliation; never swallow it.
+          console.error('[paywall] refund after persist failure DENIED — manual reconcile', {
+            requestId,
+            chatId,
+            reason: r.reason,
+            credits: settledCredits,
+          })
+        }
       } catch (re) {
         console.error('[paywall] refund after persist failure FAILED — manual reconcile', {
           requestId,

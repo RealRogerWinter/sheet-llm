@@ -63,9 +63,9 @@ describe('VALUE_TIERS anchors', () => {
 })
 
 describe('worstCaseHoldCredits (provable upper bound, creditsCharged ≤ hold)', () => {
-  it('computes the Pro non-streaming worst case (8000 max_tokens) → 203 credits', () => {
-    // 3 attempts × Sonnet(40k in + 8k out) + overhead(20k in + 2k out), ×2.5.
-    expect(worstCaseHoldCredits(8_000)).toBe(203)
+  it('computes the Pro non-streaming worst case (8000 max_tokens) → 293 credits', () => {
+    // 3 attempts × Sonnet(80k in + 8k out) + overhead(20k in + 2k out), ×2.5.
+    expect(worstCaseHoldCredits(8_000)).toBe(293)
   })
 
   it('is never below the standard anchor and dominates a typical charge', () => {
