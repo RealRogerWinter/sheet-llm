@@ -1,5 +1,5 @@
 import type Stripe from 'stripe'
-import { eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray, notInArray } from 'drizzle-orm'
 import { getDb } from '@/lib/db'
 import { stripeEvents } from '@/lib/db/schema'
 import { getPack } from './packs'
@@ -118,6 +118,15 @@ export function handleStripeEvent(
 }
 
 function markEvent(db: Db, eventId: string, outcome: ProcessOutcome, now: number): void {
+  // Status PRECEDENCE: 'processed'/'ignored' are terminal-good. A late 'failed'
+  // — e.g. the loser of a concurrent grant race that hit the external_ref UNIQUE
+  // after a sibling already granted — must NOT clobber a terminal-good row (the
+  // money landed once; the audit trail must not lie). 'failed' only applies while
+  // the row is still non-terminal.
+  const where =
+    outcome.status === 'failed'
+      ? and(eq(stripeEvents.eventId, eventId), notInArray(stripeEvents.status, ['processed', 'ignored']))
+      : eq(stripeEvents.eventId, eventId)
   db.update(stripeEvents)
     .set({
       status: outcome.status,
@@ -126,7 +135,7 @@ function markEvent(db: Db, eventId: string, outcome: ProcessOutcome, now: number
       ...(outcome.status === 'processed' ? { creditsGranted: outcome.creditsGranted } : {}),
       ...('reason' in outcome ? { reason: outcome.reason } : {}),
     })
-    .where(eq(stripeEvents.eventId, eventId))
+    .where(where)
     .run()
 }
 

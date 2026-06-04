@@ -37,6 +37,12 @@ export async function POST(request: Request) {
   // RAW body is REQUIRED — constructEvent recomputes the HMAC over these exact
   // bytes. Parsing to JSON first would break verification.
   const raw = await request.text()
+  // The content-length pre-check is spoofable; re-check the ACTUAL bytes so a
+  // missing/forged header can't push an unbounded payload into constructEvent on
+  // this unauthenticated endpoint. (The platform/proxy body limit is the outer backstop.)
+  if (raw.length > MAX_BODY_BYTES) {
+    return NextResponse.json({ error: 'Payload too large' }, { status: 413 })
+  }
   let event
   try {
     event = getStripe().webhooks.constructEvent(raw, sig, process.env.STRIPE_WEBHOOK_SECRET as string)

@@ -85,6 +85,13 @@ describe('processStripeEvent', () => {
     expect(processStripeEvent(makeEvent({ type: 'payment_intent.created' }), db).status).toBe('ignored')
     expect(getWallet('u1', db).balance).toBe(0)
   })
+
+  it('refuses a session with a null subtotal (can not verify the amount)', () => {
+    const r = processStripeEvent(makeEvent({ amountSubtotal: null }), db)
+    expect(r.status).toBe('failed')
+    if (r.status === 'failed') expect(r.reason).toMatch(/amount_mismatch/)
+    expect(getWallet('u1', db).balance).toBe(0)
+  })
 })
 
 describe('handleStripeEvent (inbox + idempotency)', () => {
