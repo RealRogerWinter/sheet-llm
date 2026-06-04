@@ -71,4 +71,32 @@ describe('verifyTurnstileToken (siteverify)', () => {
     const { verifyTurnstileToken } = await import('@/lib/security/turnstile')
     expect(await verifyTurnstileToken('tok', '1.2.3.4')).toBe(false)
   })
+
+  it('logs siteverify error-codes + hostname on rejection (the misconfig signal)', async () => {
+    vi.stubEnv('TURNSTILE_SECRET_KEY', '0xsecret')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({ success: false, 'error-codes': ['invalid-input-response'], hostname: 'sheetllm.com' }),
+          { status: 200 },
+        ),
+      ),
+    )
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { verifyTurnstileToken } = await import('@/lib/security/turnstile')
+    expect(await verifyTurnstileToken('tok', '1.2.3.4')).toBe(false)
+    const logged = warn.mock.calls.flat().join(' ')
+    expect(logged).toContain('siteverify_rejected')
+    expect(logged).toContain('invalid-input-response')
+  })
+
+  it('logs an HTTP error from siteverify', async () => {
+    vi.stubEnv('TURNSTILE_SECRET_KEY', '0xsecret')
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 502 })))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { verifyTurnstileToken } = await import('@/lib/security/turnstile')
+    expect(await verifyTurnstileToken('tok', '1.2.3.4')).toBe(false)
+    expect(warn.mock.calls.flat().join(' ')).toContain('siteverify_http_error')
+  })
 })

@@ -28,6 +28,18 @@ export function isTurnstileEnabled(): boolean {
   return Boolean(process.env.TURNSTILE_SITE_KEY && process.env.TURNSTILE_SECRET_KEY)
 }
 
+/**
+ * Structured, secret-free server-side log for Turnstile decisions. siteverify
+ * failures are logged unconditionally (that path is the rate-limited
+ * `/api/turnstile` route, so volume is bounded and the diagnostic value is
+ * high — a silent siteverify failure once blocked every user). Per-request
+ * clearance denials are noisy under a bot flood, so they log only when
+ * `SL_TURNSTILE_DEBUG=1`. Never logs the token or the secret.
+ */
+function logTurnstile(event: string, detail?: Record<string, unknown>): void {
+  console.warn(`[turnstile] ${event}`, detail ? JSON.stringify(detail) : '')
+}
+
 function signingKey(): string {
   const s = process.env.SESSION_SECRET
   if (!s || s.length < 32) {
@@ -74,7 +86,10 @@ export function checkClearanceValue(value: string, ip: string, nowMs: number = D
 /** Verify a Turnstile token with Cloudflare's siteverify endpoint. */
 export async function verifyTurnstileToken(token: string, ip: string): Promise<boolean> {
   const secret = process.env.TURNSTILE_SECRET_KEY
-  if (!secret || !token) return false
+  if (!secret || !token) {
+    logTurnstile('verify_skipped', { reason: !secret ? 'no-secret' : 'no-token' })
+    return false
+  }
   try {
     const body = new URLSearchParams({ secret, response: token })
     if (ip && ip !== 'local') body.set('remoteip', ip)
@@ -83,10 +98,30 @@ export async function verifyTurnstileToken(token: string, ip: string): Promise<b
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body,
     })
-    if (!res.ok) return false
-    const data = (await res.json()) as { success?: boolean }
-    return data.success === true
-  } catch {
+    if (!res.ok) {
+      logTurnstile('siteverify_http_error', { status: res.status })
+      return false
+    }
+    const data = (await res.json()) as {
+      success?: boolean
+      'error-codes'?: string[]
+      hostname?: string
+    }
+    if (data.success !== true) {
+      // The single most useful signal during a misconfig: `error-codes` and the
+      // `hostname` Cloudflare saw (e.g. a hostname not on the widget's allowlist,
+      // or `invalid-input-secret` for a mismatched key pair).
+      logTurnstile('siteverify_rejected', {
+        errorCodes: data['error-codes'] ?? [],
+        hostname: data.hostname,
+      })
+      return false
+    }
+    return true
+  } catch (e) {
+    logTurnstile('siteverify_exception', {
+      message: e instanceof Error ? e.message : String(e),
+    })
     return false
   }
 }
@@ -108,6 +143,12 @@ export async function hasClearance(request: Request): Promise<boolean> {
   if (!isTurnstileEnabled()) return true
   const store = await cookies()
   const value = store.get(CLEAR_COOKIE)?.value
-  if (!value) return false
-  return checkClearanceValue(value, extractClientIp(request))
+  const debug = process.env.SL_TURNSTILE_DEBUG === '1'
+  if (!value) {
+    if (debug) logTurnstile('clearance_denied', { reason: 'no-cookie' })
+    return false
+  }
+  const ok = checkClearanceValue(value, extractClientIp(request))
+  if (!ok && debug) logTurnstile('clearance_denied', { reason: 'invalid-or-ip-mismatch' })
+  return ok
 }
