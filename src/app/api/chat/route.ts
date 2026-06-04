@@ -44,6 +44,7 @@ import { isOrchestratorConverseStream, isOrchestratorScoreStream } from '@/lib/o
 import { summarizeAction } from '@/lib/orchestrator/summarizeAction'
 import { recordUsage } from '@/lib/orchestrator/budget'
 import { checkRequestIp, extractClientIp } from '@/lib/orchestrator/requestRateLimit'
+import { hasClearance } from '@/lib/security/turnstile'
 import { scoreHash } from '@/lib/orchestrator/scoreVersion'
 import { computeDeadlineAt } from '@/lib/orchestrator/deadline'
 import { resolveGenerationTier, BOUNDED_EMIT_CEILING } from '@/lib/orchestrator/generationTier'
@@ -322,6 +323,12 @@ export async function POST(request: Request) {
   // Cloudflare — is the backstop against unbounded Anthropic spend.
   if (!checkRequestIp(extractClientIp(request)).ok) {
     return errorResponse('rate_limited', 429, 'Too many requests — please slow down and try again shortly.')
+  }
+
+  // Bot-gate (Cloudflare Turnstile): keep automated clients off the LLM-cost
+  // surface. No-op unless Turnstile is configured (both keys set).
+  if (!(await hasClearance(request))) {
+    return errorResponse('bot_check_required', 403, 'Please complete the bot check and try again.')
   }
 
   const declared = Number(request.headers.get('content-length') ?? '0')
