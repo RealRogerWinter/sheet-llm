@@ -15,8 +15,12 @@ describe('streamed metering — ALS propagates into a pumped generator', () => {
   it('meters recordProviderCall fired inside a generator pumped within the scope', async () => {
     async function* fakeStream(): AsyncGenerator<string> {
       yield 'a'
+      // Model the real path: the generator awaits (the network stream) BEFORE
+      // the usage is known + recorded — the ALS context must survive the await.
+      await Promise.resolve()
       recordProviderCall('claude-sonnet-4-6', { inputTokens: 1_000_000, outputTokens: 0 })
       yield 'b'
+      await Promise.resolve()
       recordProviderCall('claude-sonnet-4-6', { outputTokens: 1_000_000 })
     }
     const totals = await runWithUsageMeter('req-stream', async () => {
@@ -55,6 +59,25 @@ describe('updateTurnUsageByRequestId', () => {
     expect(row?.inputTokens).toBe(500)
     expect(row?.outputTokens).toBe(200)
     expect(row?.costMicroUsd).toBe(90_000)
+  })
+
+  it('SUMS the streamed usage into the existing pre-call cost (never clobbers the classifier)', () => {
+    const db = makeTestDb()
+    const client = db.$client
+    client.pragma('foreign_keys = OFF')
+    // The optimistic record already holds the in-run() classifier/dispatcher cost.
+    client
+      .prepare(
+        'INSERT INTO orchestrator_turns (id, session_id, request_id, created_at, latency_ms, final_status, diff_algo_version, replacement_blocked, input_tokens, output_tokens, cost_micro_usd) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+      )
+      .run('t-pre', 's1', 'req-pre', 0, 100, 'ok', 1, 0, 100, 50, 10_000)
+
+    updateTurnUsageByRequestId('req-pre', { inputTokens: 400, outputTokens: 150, costMicroUsd: 90_000 }, db)
+
+    const row = db.select().from(orchestratorTurns).where(eq(orchestratorTurns.requestId, 'req-pre')).get()
+    expect(row?.inputTokens).toBe(500) // 100 classifier + 400 streamed
+    expect(row?.outputTokens).toBe(200) // 50 + 150
+    expect(row?.costMicroUsd).toBe(100_000) // 10_000 pre-call PRESERVED + 90_000 streamed
   })
 
   it('is a no-op for an unknown requestId (never throws)', () => {

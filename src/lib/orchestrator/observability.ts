@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { getDb } from '@/lib/db'
 import { orchestratorTurns } from '@/lib/db/schema'
 import type { Score } from '@/lib/music/types'
@@ -233,13 +233,17 @@ export interface TurnUsage {
 
 /**
  * Backfill the token / cost columns on an already-recorded turn. STREAMING
- * outcomes (converse / sectional) record their turn OPTIMISTICALLY at dispatch
- * with null cost — the real usage is only known once the route finishes pumping
- * the stream (outside `run()`'s usage-meter scope). The route wraps the pump in
- * its own meter scope and calls this on `message-stop` / `done` so the streamed
- * turn carries its true cost instead of reading null (the metering-undercount
- * the paywall would otherwise settle against). Matches on request_id (one turn
- * per streaming request); best-effort — a failure never breaks the stream.
+ * outcomes (converse / sectional) record their turn at dispatch with only the
+ * IN-run() cost so far (the classifier, and the Sonnet dispatcher on the
+ * converse path) — the streamed generation itself runs later, in the route's
+ * pump, outside `run()`'s meter scope. The route wraps the pump in its own meter
+ * scope and calls this on `message-stop` / `done` with the STREAMED usage.
+ *
+ * ADDITIVE: it SUMS the streamed usage into the columns rather than overwriting,
+ * so the pre-call (classifier/dispatcher) cost already on the row is preserved —
+ * the total is classifier + dispatcher + streamed generation, the true turn cost
+ * the paywall will settle against. Matches on request_id (one turn per streaming
+ * request); best-effort — a failure never breaks the stream.
  */
 export function updateTurnUsageByRequestId(
   requestId: string,
@@ -247,14 +251,16 @@ export function updateTurnUsageByRequestId(
   db: ReturnType<typeof getDb> = getDb(),
 ): void {
   try {
+    // ADD (not overwrite): COALESCE(col,0) + delta, so the in-run() pre-call
+    // cost already on the row is preserved.
     db
       .update(orchestratorTurns)
       .set({
-        inputTokens: usage.inputTokens ?? null,
-        cachedInputTokens: usage.cachedInputTokens ?? null,
-        cacheCreationInputTokens: usage.cacheCreationInputTokens ?? null,
-        outputTokens: usage.outputTokens ?? null,
-        costMicroUsd: usage.costMicroUsd ?? null,
+        inputTokens: sql`COALESCE(${orchestratorTurns.inputTokens}, 0) + ${usage.inputTokens ?? 0}`,
+        cachedInputTokens: sql`COALESCE(${orchestratorTurns.cachedInputTokens}, 0) + ${usage.cachedInputTokens ?? 0}`,
+        cacheCreationInputTokens: sql`COALESCE(${orchestratorTurns.cacheCreationInputTokens}, 0) + ${usage.cacheCreationInputTokens ?? 0}`,
+        outputTokens: sql`COALESCE(${orchestratorTurns.outputTokens}, 0) + ${usage.outputTokens ?? 0}`,
+        costMicroUsd: sql`COALESCE(${orchestratorTurns.costMicroUsd}, 0) + ${usage.costMicroUsd ?? 0}`,
       })
       .where(eq(orchestratorTurns.requestId, requestId))
       .run()
