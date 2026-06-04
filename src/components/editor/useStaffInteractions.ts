@@ -13,6 +13,8 @@ import { clickInsertSlot } from './clickInsertSlot'
 import { eventAtX } from './eventAtX'
 import { pitchFromY } from './staffGeometry'
 import { resolveStaffFromY } from './staffResolver'
+import { resolveMeasureAt } from './resolveMeasureAt'
+import { touchGestureBus } from './touchGestureBus'
 
 /**
  * Staff-level interactions that don't involve a specific notehead:
@@ -81,6 +83,34 @@ export function useStaffInteractions(scoreRef: RefObject<HTMLDivElement | null>)
         hasDown = false
         if (traveled > TAP_TOLERANCE_PX) return
       }
+
+      // Touch measure-range mode (armed by a long-press on a bar via
+      // useScoreContextMenu): a tap resolves to its containing bar and extends
+      // the range — tapping a notehead counts as tapping its bar, which is the
+      // intent while selecting bars. A tap off the staff finishes the session.
+      // Never falls through to note insertion while armed.
+      if (touchGestureBus.isRangeArmed()) {
+        const svg = container.querySelector('svg') as SVGSVGElement | null
+        const store = useChatStore.getState()
+        if (svg && store.editedScore && store.editMap) {
+          const m = resolveMeasureAt(svg, e.clientX, e.clientY, store.editedScore, store.editMap)
+          if (m !== undefined) {
+            store.extendMeasureRangeTo(m)
+            const range = useChatStore.getState().measureRangeSelection
+            if (range) {
+              const label =
+                range.fromStart === range.fromEnd
+                  ? `bar ${range.fromStart + 1}`
+                  : `bars ${range.fromStart + 1}-${range.fromEnd + 1}`
+              store.showStatusMessage(`Selected ${label} — tap more bars, or tap away to finish`)
+            }
+            return
+          }
+        }
+        touchGestureBus.disarmRange()
+        return
+      }
+
       // Cmd/Ctrl+click is owned by useMeasureRangeSelect (M19-PR-6)
       // for measure-range selection. Without this gate the modified
       // click would still fall through into the insert-note / deselect
@@ -208,6 +238,8 @@ export function useStaffInteractions(scoreRef: RefObject<HTMLDivElement | null>)
       if (container.contains(target)) return
       const menu = document.querySelector('[role="toolbar"][aria-label="Edit selected note"]')
       if (menu && menu.contains(target)) return
+      // A press outside the score also ends any touch range-select session.
+      touchGestureBus.disarmRange()
       const store = useChatStore.getState()
       if (store.selection) store.select(undefined)
     }
