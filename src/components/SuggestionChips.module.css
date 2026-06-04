@@ -1,0 +1,22 @@
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-2);
+  justify-content: center;
+  margin-top: var(--gap-4);
+}
+
+.chip {
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--graphite);
+  background: var(--paper);
+  transition: border-color 120ms, color 120ms;
+}
+
+.chip:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}

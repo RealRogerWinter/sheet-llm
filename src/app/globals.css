@@ -1,0 +1,132 @@
+:root {
+  /* Tells the browser which palette to use for native UI (scrollbars,
+   * form controls, default backgrounds). Without this, a dark-OS user
+   * keeps dark scrollbars in our light mode, making the page read as
+   * gray-tinted around the edges. */
+  color-scheme: light;
+
+  --ink: #0a0a0a;
+  --paper: #ffffff;
+  --paper-warm: #f4f4f2;
+  --graphite: #6b6b6b;
+  --rule: #d4d4d2;
+  --signal: #b91c1c;
+
+  --select: #2563eb15;
+  --select-ink: #1e40af;
+  --hover: #0a0a0a08;
+  --ghost: #6b6b6b40;
+  --playing: #1e40af;
+
+  /* The score area renders ink-on-paper using these tokens; abcjs's
+   * SVG uses currentColor, so changing --score-ink restains the whole
+   * engraving. In light mode the score matches the page; in dark mode
+   * it becomes a slightly-warmer card so the boundary is visible. */
+  --score-paper: #ffffff;
+  --score-ink: #0a0a0a;
+  --score-border: transparent;
+
+  /* Composing / reveal animation tokens. All derived via color-mix so
+   * dark-mode just needs different mix percentages, never raw hex. */
+  --ink-wet:        color-mix(in oklab, var(--score-ink) 18%, transparent);
+  --ink-mist:       color-mix(in oklab, var(--score-ink)  8%, transparent);
+  --ink-ghost:      color-mix(in oklab, var(--score-ink) 35%, transparent);
+  --status-ink:     var(--graphite);
+  --accent-compose: color-mix(in oklab, var(--playing)   30%, transparent);
+
+  --gap-1: 4px;
+  --gap-2: 8px;
+  --gap-3: 12px;
+  --gap-4: 16px;
+  --gap-5: 24px;
+  --gap-6: 32px;
+  --gap-7: 48px;
+  --gap-8: 80px;
+
+  --radius: 6px;
+
+  /* Layout reservations written imperatively at runtime.
+   * --transport-height: written by TransportBar (ResizeObserver).
+   * --sidebar-offset:   written by SessionSidebar (mq-aware writer).
+   * Defaults are 0 so the page lays out correctly when those
+   * components aren't mounted (e.g. SSR, no score loaded). */
+  --transport-height: 0px;
+  --sidebar-offset: 0px;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --ink: #ededed;
+  --paper: #0f1115;
+  --paper-warm: #181b21;
+  --graphite: #9ca0aa;
+  --rule: #2a2e36;
+  --signal: #f87171;
+
+  --select: #60a5fa20;
+  --select-ink: #93c5fd;
+  --hover: #ffffff0c;
+  --ghost: #9ca0aa40;
+  --playing: #60a5fa;
+
+  --score-paper: #181b21;
+  --score-ink: #ededed;
+  --score-border: #2a2e36;
+
+  --ink-wet:        color-mix(in oklab, var(--score-ink) 28%, transparent);
+  --ink-mist:       color-mix(in oklab, var(--score-ink) 14%, transparent);
+  --ink-ghost:      color-mix(in oklab, var(--score-ink) 45%, transparent);
+  --accent-compose: color-mix(in oklab, var(--playing)   35%, transparent);
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+body {
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}

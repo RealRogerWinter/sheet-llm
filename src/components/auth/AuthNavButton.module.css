@@ -1,0 +1,55 @@
+.group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.button {
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 7px 12px;
+  border-radius: 7px;
+  border: 1px solid var(--border, #d0d0d8);
+  background: var(--surface, #fff);
+  color: var(--text, #1a1a1a);
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.button:hover {
+  background: var(--surface-hover, #f3f3f7);
+}
+
+.button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.primary {
+  background: var(--accent, #3b5bdb);
+  border-color: var(--accent, #3b5bdb);
+  color: #fff;
+}
+
+.primary:hover {
+  background: var(--accent-hover, #364fc7);
+}
+
+.email {
+  font-size: 0.82rem;
+  max-width: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted, #555);
+  text-decoration: none;
+  border-bottom: 1px dotted transparent;
+}
+
+.email:hover {
+  color: var(--text, #1a1a1a);
+  border-bottom-color: currentColor;
+}

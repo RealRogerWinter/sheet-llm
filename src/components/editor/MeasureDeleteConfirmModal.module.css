@@ -1,0 +1,65 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 24px;
+}
+
+.modal {
+  background: var(--surface-1, #fff);
+  color: var(--text-1, #111);
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.header {
+  padding: 18px 24px 8px;
+  font-weight: 600;
+  font-size: 17px;
+}
+
+.body {
+  padding: 4px 24px 8px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-2, #444);
+}
+
+.footer {
+  padding: 16px 24px 18px;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.btn {
+  font: inherit;
+  font-size: 14px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-1, #d0d0d0);
+  background: var(--surface-2, #f4f4f4);
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: var(--surface-3, #ececec);
+}
+
+.btnDanger {
+  background: var(--accent-danger, #d9534f);
+  color: white;
+  border-color: var(--accent-danger, #d9534f);
+}
+
+.btnDanger:hover {
+  background: var(--accent-danger-hover, #c9302c);
+}

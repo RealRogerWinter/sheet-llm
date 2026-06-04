@@ -1,0 +1,22 @@
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid var(--rule);
+  color: var(--ink);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 80ms ease-out;
+}
+
+.button:hover {
+  background: var(--surface-1, rgba(0, 0, 0, 0.04));
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+}

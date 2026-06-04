@@ -1,0 +1,38 @@
+CREATE TABLE `orchestrator_turns` (
+	`id` text PRIMARY KEY NOT NULL,
+	`session_id` text NOT NULL,
+	`message_id` text,
+	`request_id` text NOT NULL,
+	`created_at` integer NOT NULL,
+	`latency_ms` integer NOT NULL,
+	`final_status` text NOT NULL,
+	`classification_kind` text,
+	`classification_confidence` real,
+	`handler` text,
+	`handler_model` text,
+	`compose_patch_dispatch` text,
+	`before_score_version_id` text,
+	`after_score_version_id` text,
+	`diff_algo_version` integer DEFAULT 1 NOT NULL,
+	`measure_count_before` integer,
+	`measure_count_after` integer,
+	`voice_count_before` integer,
+	`voice_count_after` integer,
+	`key_changed` integer,
+	`meter_changed` integer,
+	`title_changed` integer,
+	`retained_event_ratio` real,
+	`applied_ops_count` integer,
+	`input_tokens` integer,
+	`cached_input_tokens` integer,
+	`output_tokens` integer,
+	`error` text,
+	FOREIGN KEY (`session_id`) REFERENCES `sessions`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`message_id`) REFERENCES `messages`(`id`) ON UPDATE no action ON DELETE set null,
+	FOREIGN KEY (`before_score_version_id`) REFERENCES `score_versions`(`id`) ON UPDATE no action ON DELETE set null,
+	FOREIGN KEY (`after_score_version_id`) REFERENCES `score_versions`(`id`) ON UPDATE no action ON DELETE set null,
+	CONSTRAINT `orchestrator_turns_status_valid` CHECK(final_status IN ('ok', 'refused', 'fell_through', 'error'))
+);
+--> statement-breakpoint
+CREATE INDEX `orchestrator_turns_session_created` ON `orchestrator_turns` (`session_id`,`created_at`);--> statement-breakpoint
+CREATE INDEX `orchestrator_turns_status` ON `orchestrator_turns` (`final_status`,`created_at`);

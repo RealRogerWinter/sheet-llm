@@ -1,0 +1,40 @@
+.toast {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-3);
+  padding: var(--gap-3) var(--gap-4);
+  border: 1px solid var(--signal);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 14px;
+  max-width: 720px;
+  margin: 0 auto var(--gap-4) auto;
+  animation: slideIn 200ms ease-out;
+}
+
+.message {
+  flex: 1;
+}
+
+.dismiss {
+  color: var(--graphite);
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.dismiss:hover {
+  color: var(--ink);
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

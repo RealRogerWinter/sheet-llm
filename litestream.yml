@@ -1,0 +1,25 @@
+# Litestream — continuous replication of the SQLite WAL to object storage.
+#
+# THE DURABILITY LAUNCH GATE for accounts: Litestream must be LIVE and the app
+# booted with SL_REQUIRE_WAL=1 (so a non-WAL journal becomes a FATAL boot error)
+# BEFORE flipping SL_ACCOUNTS_ENABLED on. Without replication, a volume wipe or
+# host loss destroys every account. See docs/guides/durability-runbook.md.
+#
+# Run Litestream as the container entrypoint, supervising the app, so a clean
+# restore runs BEFORE the app opens the database:
+#   litestream replicate -config /etc/litestream.yml -exec "node server.js"
+#
+# $VAR references below are env-expanded by Litestream at load.
+
+dbs:
+  # MUST match the app's DATABASE_URL file path (e.g. file:/data/sheet-llm.db).
+  - path: /data/sheet-llm.db
+    replicas:
+      - url: ${LITESTREAM_REPLICA_URL} # e.g. s3://my-bucket/sheet-llm
+        # Credentials via env: LITESTREAM_ACCESS_KEY_ID / LITESTREAM_SECRET_ACCESS_KEY
+        # (or an instance role). For a non-AWS/S3-compatible store, also set:
+        #   endpoint: https://<host>
+        #   region: <region>
+        sync-interval: 1s # WAL ship cadence — the RPO upper bound
+        snapshot-interval: 1h # full snapshot cadence — bounds restore time
+        retention: 72h # keep 3 days of snapshots + WAL

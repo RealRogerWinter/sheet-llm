@@ -1,0 +1,45 @@
+/* ChordPalette-specific styles. Skeleton (frame, section labels,
+ * cells, footer, primary/secondary buttons) comes from
+ * Popover.module.css via the shared <Popover> shell. */
+
+.palette {
+  width: 360px;
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.previewName {
+  font-size: 15px;
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.previewPitches {
+  font-size: 12px;
+  color: var(--graphite);
+  font-variant-numeric: tabular-nums;
+}
+
+.rootGrid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 2px;
+}
+
+.qualityGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+
+/* Shared .cell uses 11px font for the densely-labelled markings
+ * grids; chord labels (Cmaj7, F#m7b5) read better at 12px. */
+.cellLg {
+  font-size: 12px;
+}

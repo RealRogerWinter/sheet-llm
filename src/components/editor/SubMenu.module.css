@@ -1,0 +1,75 @@
+/* Reusable category submenu: an inline trigger button (lives in the
+ * NoteFloatingMenu / EditorToolbar row) + a grouped popover panel built
+ * on the shared Popover shell. Matches the .button vocabulary of the
+ * floating menu so triggers read as part of the same toolset. */
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--graphite);
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 80ms, color 80ms, border-color 80ms;
+}
+
+.trigger:hover {
+  background: var(--hover);
+  color: var(--ink);
+  border-color: var(--rule);
+}
+
+/* Open: keep the trigger visually pinned so the user can see which
+ * category the panel belongs to. */
+.triggerOpen {
+  background: var(--paper);
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+/* Active: something inside the submenu is set on the selection. A small
+ * filled dot via border treatment, consistent with the .active frame
+ * used by per-note toggles. */
+.triggerActive {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.caret {
+  font-size: 9px;
+  line-height: 1;
+  color: var(--graphite);
+}
+
+.trigger:hover .caret,
+.triggerOpen .caret {
+  color: var(--ink);
+}
+
+/* Popover frame override for submenu panels — tightens the default
+ * padding a touch since the contents are compact action buttons. */
+.panel {
+  padding: 8px;
+}
+
+/* Panel: a compact grid of action buttons inside the Popover frame. */
+.grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 220px;
+}
+
+/* Column panel: stacked labeled control rows (toolbar Setup submenu). */
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-3);
+  min-width: 200px;
+}

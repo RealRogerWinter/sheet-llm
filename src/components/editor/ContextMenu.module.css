@@ -1,0 +1,94 @@
+/* Right-click context menu (M27). A vertical, cursor-anchored menu —
+ * distinct from the horizontal NoteFloatingMenu toolbar. Sits above the
+ * Popover layer (z-index 110) so a context menu always wins. */
+
+.menu {
+  position: fixed;
+  z-index: 200;
+  min-width: 200px;
+  max-width: 300px;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  animation: contextMenuFadeIn 100ms ease-out;
+}
+
+@keyframes contextMenuFadeIn {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu {
+    animation: none;
+  }
+}
+
+.menu:focus-visible,
+.menu:focus {
+  outline: none;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 0;
+}
+
+.section + .section {
+  border-top: 1px solid var(--rule);
+}
+
+.sectionLabel {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--graphite);
+  padding: 4px 10px 2px;
+  user-select: none;
+}
+
+.item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 5px 10px;
+  border: none;
+  background: none;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.item:hover,
+.item:focus-visible,
+.item.active {
+  background: rgba(0, 0, 0, 0.06);
+  outline: none;
+}
+
+.item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.item:disabled:hover {
+  background: none;
+}
+
+.danger {
+  color: #c0392b;
+}
+
+.danger:hover,
+.danger:focus-visible {
+  background: rgba(192, 57, 43, 0.1);
+}

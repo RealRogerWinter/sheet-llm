@@ -1,0 +1,382 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { sql } from 'drizzle-orm'
+import { logTurn, logShadowDivergence, recordTurn } from '@/lib/orchestrator/observability'
+import { orchestratorTurns, sessions, users } from '@/lib/db/schema'
+import { setDbForTesting } from '@/lib/db'
+import { makeTestDb } from '../../factories/db'
+import type { Score } from '@/lib/music/types'
+
+const SCORE_A: Score = {
+  key: 'C',
+  meter: '4/4',
+  measures: [
+    {
+      events: [{ kind: 'note', pitches: [{ step: 'C', octave: 4 }], duration: 'quarter' }],
+    },
+  ],
+}
+
+const SCORE_B: Score = {
+  key: 'G',
+  meter: '4/4',
+  measures: [
+    {
+      events: [{ kind: 'note', pitches: [{ step: 'D', octave: 4 }], duration: 'quarter' }],
+    },
+  ],
+}
+
+describe('orchestrator/observability', () => {
+  let logSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    // Global setup silences output via ORCHESTRATOR_LOG_SILENT=1.
+    // Override for these tests so we can assert on the JSON payload.
+    vi.unstubAllEnvs()
+    vi.stubEnv('ORCHESTRATOR_LOG_SILENT', '')
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+  })
+
+  afterEach(() => {
+    logSpy.mockRestore()
+    vi.unstubAllEnvs()
+  })
+
+  it('emits a single JSON line to stdout with the orchestrator marker', () => {
+    logTurn({
+      requestId: 'req-abc',
+      label: 'generate_simple',
+      handler: 'generateSimple',
+      model: 'claude-sonnet-4-6',
+      latencyMs: 1234,
+      finalStatus: 'ok',
+    })
+    expect(logSpy).toHaveBeenCalledTimes(1)
+    const arg = logSpy.mock.calls[0][0] as string
+    const parsed = JSON.parse(arg)
+    expect(parsed.evt).toBe('orchestrator.turn')
+    expect(parsed.requestId).toBe('req-abc')
+    expect(parsed.label).toBe('generate_simple')
+    expect(parsed.handler).toBe('generateSimple')
+    expect(parsed.model).toBe('claude-sonnet-4-6')
+    expect(parsed.latencyMs).toBe(1234)
+    expect(parsed.finalStatus).toBe('ok')
+  })
+
+  it('includes optional fields when provided', () => {
+    logTurn({
+      requestId: 'req-xyz',
+      label: 'edit_score_level',
+      handler: 'editScoreLevel',
+      model: null,
+      latencyMs: 5,
+      confidence: 0.92,
+      inputTokens: 100,
+      cachedInputTokens: 80,
+      outputTokens: 20,
+      opValidationErrors: 0,
+      finalStatus: 'ok',
+    })
+    const parsed = JSON.parse(logSpy.mock.calls[0][0] as string)
+    expect(parsed.confidence).toBe(0.92)
+    expect(parsed.inputTokens).toBe(100)
+    expect(parsed.cachedInputTokens).toBe(80)
+    expect(parsed.outputTokens).toBe(20)
+    expect(parsed.opValidationErrors).toBe(0)
+    expect(parsed.model).toBeNull()
+  })
+
+  it('includes the generationTier when provided (M26 diagnostic)', () => {
+    logTurn({
+      requestId: 'req-tier',
+      label: 'compose',
+      handler: 'generateBounded',
+      model: 'claude-sonnet-4-6',
+      latencyMs: 7,
+      finalStatus: 'ok',
+      generationTier: 'free',
+    })
+    expect(JSON.parse(logSpy.mock.calls[0][0] as string).generationTier).toBe('free')
+  })
+
+  it('emits a timestamp', () => {
+    logTurn({
+      requestId: 'req-ts',
+      label: 'refuse',
+      handler: 'refuse',
+      model: null,
+      latencyMs: 0,
+      finalStatus: 'refused',
+    })
+    const parsed = JSON.parse(logSpy.mock.calls[0][0] as string)
+    expect(typeof parsed.ts).toBe('string')
+    expect(() => new Date(parsed.ts)).not.toThrow()
+  })
+
+  it('is silent when ORCHESTRATOR_LOG_SILENT=1 (test runs)', () => {
+    vi.stubEnv('ORCHESTRATOR_LOG_SILENT', '1')
+    logTurn({
+      requestId: 'req-silent',
+      label: 'generate_simple',
+      handler: 'generateSimple',
+      model: null,
+      latencyMs: 0,
+      finalStatus: 'ok',
+    })
+    expect(logSpy).not.toHaveBeenCalled()
+  })
+
+  it('logShadowDivergence emits the shadow_divergence event', () => {
+    logShadowDivergence({
+      requestId: 'req-shadow',
+      label: 'edit_score_level',
+      diverged: true,
+      reason: 'different_score',
+      latencyMsOrchestrator: 12,
+      latencyMsLegacy: 1234,
+    })
+    expect(logSpy).toHaveBeenCalledTimes(1)
+    const parsed = JSON.parse(logSpy.mock.calls[0][0] as string)
+    expect(parsed.evt).toBe('orchestrator.shadow_divergence')
+    expect(parsed.diverged).toBe(true)
+    expect(parsed.reason).toBe('different_score')
+    expect(parsed.latencyMsOrchestrator).toBe(12)
+    expect(parsed.latencyMsLegacy).toBe(1234)
+  })
+
+  it('logShadowDivergence is silent when ORCHESTRATOR_LOG_SILENT=1', () => {
+    vi.stubEnv('ORCHESTRATOR_LOG_SILENT', '1')
+    logShadowDivergence({
+      requestId: 'req-silent',
+      label: 'generate_simple',
+      diverged: false,
+    })
+    expect(logSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('recordTurn — DB persistence', () => {
+  let db: ReturnType<typeof makeTestDb>
+  let logSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    vi.unstubAllEnvs()
+    vi.stubEnv('ORCHESTRATOR_LOG_SILENT', '')
+    db = makeTestDb()
+    db.insert(users).values({ id: 'u1', createdAt: 0, lastSeenAt: 0 }).run()
+    db.insert(sessions)
+      .values({
+        id: 'session-1',
+        userId: 'u1',
+        createdAt: 0,
+        updatedAt: 0,
+        lastMessageAt: 0,
+      })
+      .run()
+    setDbForTesting(db)
+    logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+  })
+
+  afterEach(() => {
+    logSpy.mockRestore()
+    setDbForTesting(undefined)
+    vi.unstubAllEnvs()
+  })
+
+  function countRows() {
+    return db.select({ n: sql<number>`count(*)` }).from(orchestratorTurns).get()!.n
+  }
+
+  it('inserts a row when sessionId is present', async () => {
+    await recordTurn({
+      requestId: 'req-1',
+      sessionId: 'session-1',
+      label: 'compose',
+      handler: 'compose',
+      model: 'claude-opus-4-7',
+      latencyMs: 8200,
+      finalStatus: 'ok',
+      confidence: 0.92,
+      beforeScore: SCORE_A,
+      afterScore: SCORE_A,
+    })
+    expect(countRows()).toBe(1)
+    const row = db.select().from(orchestratorTurns).get()
+    expect(row?.sessionId).toBe('session-1')
+    expect(row?.requestId).toBe('req-1')
+    expect(row?.classificationKind).toBe('compose')
+    expect(row?.handlerModel).toBe('claude-opus-4-7')
+    expect(row?.finalStatus).toBe('ok')
+    expect(row?.classificationConfidence).toBeCloseTo(0.92)
+    expect(row?.measureCountBefore).toBe(1)
+    expect(row?.measureCountAfter).toBe(1)
+    expect(row?.retainedEventRatio).toBe(1)
+    expect(row?.keyChanged).toBe(0)
+    expect(row?.diffAlgoVersion).toBe(2)
+  })
+
+  it('also emits a stdout line alongside the DB insert', async () => {
+    await recordTurn({
+      requestId: 'req-2',
+      sessionId: 'session-1',
+      label: 'compose',
+      handler: 'compose',
+      model: 'claude-opus-4-7',
+      latencyMs: 50,
+      finalStatus: 'ok',
+    })
+    expect(logSpy).toHaveBeenCalledTimes(1)
+    const parsed = JSON.parse(logSpy.mock.calls[0][0] as string)
+    expect(parsed.evt).toBe('orchestrator.turn')
+  })
+
+  it('skips DB insert when sessionId is missing', async () => {
+    await recordTurn({
+      requestId: 'req-3',
+      label: 'compose',
+      handler: 'compose',
+      model: null,
+      latencyMs: 5,
+      finalStatus: 'fell_through',
+    })
+    expect(countRows()).toBe(0)
+    expect(logSpy).toHaveBeenCalledTimes(1) // stdout still happens
+  })
+
+  it("skips DB insert when sessionId is 'anonymous'", async () => {
+    await recordTurn({
+      requestId: 'req-4',
+      sessionId: 'anonymous',
+      label: 'compose',
+      handler: 'compose',
+      model: null,
+      latencyMs: 5,
+      finalStatus: 'ok',
+    })
+    expect(countRows()).toBe(0)
+    expect(logSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('skips both stdout and DB when ORCHESTRATOR_LOG_SILENT=1', async () => {
+    vi.stubEnv('ORCHESTRATOR_LOG_SILENT', '1')
+    await recordTurn({
+      requestId: 'req-5',
+      sessionId: 'session-1',
+      label: 'compose',
+      handler: 'compose',
+      model: null,
+      latencyMs: 5,
+      finalStatus: 'ok',
+    })
+    expect(countRows()).toBe(0)
+    expect(logSpy).not.toHaveBeenCalled()
+  })
+
+  it('records the score-diff payload when both before and after are present', async () => {
+    await recordTurn({
+      requestId: 'req-6',
+      sessionId: 'session-1',
+      label: 'compose',
+      handler: 'compose',
+      model: 'claude-opus-4-7',
+      latencyMs: 100,
+      finalStatus: 'ok',
+      beforeScore: SCORE_A,
+      afterScore: SCORE_B,
+    })
+    const row = db.select().from(orchestratorTurns).get()
+    expect(row?.keyChanged).toBe(1) // C → G
+    expect(row?.meterChanged).toBe(0)
+    expect(row?.retainedEventRatio).toBe(0)
+  })
+
+  it('writes NULL change-flags when only afterScore is present (fresh generation)', async () => {
+    await recordTurn({
+      requestId: 'req-fresh',
+      sessionId: 'session-1',
+      label: 'generate_simple',
+      handler: 'generateSimple',
+      model: 'claude-sonnet-4-6',
+      latencyMs: 100,
+      finalStatus: 'ok',
+      afterScore: SCORE_A,
+    })
+    const row = db.select().from(orchestratorTurns).get()
+    // With no before, "did the key/meter/title change?" is unanswerable
+    // and must NOT be reported as a false-y "no change".
+    expect(row?.keyChanged).toBeNull()
+    expect(row?.meterChanged).toBeNull()
+    expect(row?.titleChanged).toBeNull()
+    expect(row?.measureCountAfter).toBe(1)
+  })
+
+  it('records createdAt as Unix epoch MILLISECONDS', async () => {
+    const beforeMs = Date.now()
+    await recordTurn({
+      requestId: 'req-ts',
+      sessionId: 'session-1',
+      label: 'compose',
+      handler: 'compose',
+      model: null,
+      latencyMs: 1,
+      finalStatus: 'ok',
+    })
+    const afterMs = Date.now()
+    const row = db.select().from(orchestratorTurns).get()
+    // Must be in ms range, not seconds — a sub-second turn would
+    // otherwise quantize to integer seconds and break replay ordering.
+    expect(row?.createdAt).toBeGreaterThanOrEqual(beforeMs)
+    expect(row?.createdAt).toBeLessThanOrEqual(afterMs)
+  })
+
+  it('truncates error longer than 500 chars', async () => {
+    const longErr = 'x'.repeat(900)
+    await recordTurn({
+      requestId: 'req-7',
+      sessionId: 'session-1',
+      label: 'compose',
+      handler: 'dispatch',
+      model: null,
+      latencyMs: 1,
+      finalStatus: 'error',
+      error: longErr,
+    })
+    const row = db.select().from(orchestratorTurns).get()
+    expect(row?.error?.length).toBe(500)
+  })
+
+  it('swallows DB insert failures and emits a follow-up logTurn with the error', async () => {
+    // Force DB failure by pointing it at a closed/invalid DB. Easiest:
+    // unset the test DB after recordTurn captured its own ref. Instead,
+    // we use a malformed insert by feeding an undefined finalStatus.
+    // Simpler: setDbForTesting(undefined) so getDb() reopens the real
+    // default DB path — which won't have the table without a migration —
+    // would interfere. We use a different strategy: monkey-patch the
+    // db.insert to throw, then restore.
+    const realInsert = db.insert.bind(db)
+    db.insert = (() => {
+      throw new Error('simulated DB failure: disk I/O')
+    }) as unknown as typeof db.insert
+    try {
+      await expect(
+        recordTurn({
+          requestId: 'req-8',
+          sessionId: 'session-1',
+          label: 'compose',
+          handler: 'compose',
+          model: null,
+          latencyMs: 1,
+          finalStatus: 'ok',
+        }),
+      ).resolves.toBeUndefined()
+      // Two stdout lines: the original logTurn + the recovery line.
+      expect(logSpy.mock.calls.length).toBeGreaterThanOrEqual(2)
+      const last = JSON.parse(
+        logSpy.mock.calls[logSpy.mock.calls.length - 1][0] as string,
+      )
+      expect(last.error).toMatch(/^orchestrator_turns_insert_failed:/)
+    } finally {
+      db.insert = realInsert
+    }
+  })
+})

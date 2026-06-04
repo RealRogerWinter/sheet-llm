@@ -1,0 +1,102 @@
+# sheet-llm
+
+Chat-driven music notation editor. A natural-language request is turned by an
+LLM orchestrator into *additive* edit operations against a canonical JSON
+`Score`; the score is rendered to staff notation via abcjs, played back through
+a transport, and exported to MusicXML / MIDI / PDF. The core invariant is
+additive editing: the system never silently replaces work the user did not ask
+to discard — enforced by server-side preservation verification plus a
+replacement-as-confirmation gate. All docs below carry YAML frontmatter with
+`source_paths` so staleness is detectable mechanically (this file, llms.txt,
+does not).
+
+## Docs
+
+### Architecture
+- [System Architecture Overview](architecture/overview.md): end-to-end map from app shell to orchestrator to score to render/play/export.
+- [Request Lifecycle](architecture/data-flow.md): step-by-step data flow for a chat edit, an import, and an export.
+- [The Score Data Model](architecture/data-model.md): canonical `Score` JSON — measures, events, spans, IDs, validation, migration.
+- [Glossary](architecture/glossary.md): domain and system terms (additive edit, SourceMap, sticky provider, score version).
+
+### Subsystems
+- [LLM Orchestrator](subsystems/orchestrator.md): tool-use dispatch, preservation verifier, replacement gate, budget/deadline.
+- [LLM Providers & Failover](subsystems/providers-llm.md): registry, tiered selection, sticky routing, degradation, failover.
+- [Music Data Model & Validation](subsystems/music-model.md): types, validators, accessors, meter, spans, techniques, articulations.
+- [Edit Operations & Score Transforms](subsystems/edit-operations.md): edit-op catalog, structural ops, measure balancing, diffing.
+- [Score-to-ABC, SourceMap & abcjs Rendering](subsystems/abc-rendering.md): Score→ABC emit, SourceMap round-trip, abcjs render/synth.
+- [Notation Editor UI & Interactions](subsystems/editor-ui.md): click/drag/keyboard editing, staff geometry, popovers, floating menu.
+- [Command Palette (Cmd-K)](subsystems/command-palette.md): command catalog, palette UI, dispatch bus into editor/chat state.
+- [AI Ghost Preview (M24)](subsystems/ghost-preview.md): inline amber overlay, docked diff panel, accept/reject, 30s resume toast.
+- [Chat & Session State (client)](subsystems/chat-session.md): client chat store, prompt submit/phase, transcript sync, persistence queue.
+- [Transport & Playback](subsystems/transport.md): transport state machine, cursor, scrubber, event-time index, MIDI/ping audio.
+- [Score Import Pipeline](subsystems/import.md): format detect → ABC/MIDI/JSON → normalized `Score`, import modal/preview.
+- [Export — MusicXML, MIDI, PDF](subsystems/export.md): MusicXML emit, MIDI/PDF generation, export bar.
+- [Persistence, Schema & Score Versioning](subsystems/persistence-db.md): Drizzle schema, conversations, score versions, fork/revert, janitor.
+- [Auth, Sessions & GDPR](subsystems/auth-gdpr.md): anonymous sessions, recovery codes, rate limiting, GDPR export/delete.
+- [App Shell, Routes & Boot](subsystems/app-shell.md): root layout, boot/instrumentation, recovery boot, page composition.
+- [Testing & Eval Harness](subsystems/evals-testing.md): Vitest configs, factories, mock/live/visual evals, local check commands.
+
+### Guides
+- [Getting Started](guides/getting-started.md): contributor onboarding — env, DB, providers, first run.
+- [Development Workflow](guides/development-workflow.md): branch/PR flow, flags, eval tiers, local check commands.
+- [Adding an Edit Operation](guides/adding-an-edit-operation.md): recipe to wire a new edit op through transforms, validation, orchestrator.
+- [Adding a Notation Feature](guides/adding-a-notation-feature.md): end-to-end recipe — type → ABC → render → tool → MusicXML → palette.
+- [Adding an LLM Provider](guides/adding-a-provider.md): recipe to register a provider, selection tiers, failover, system blocks.
+- [Local models (Ollama)](local-models.md): run sheet-llm against a local Ollama LLM for offline/zero-cost dev.
+
+### Reference
+- [API Routes Reference](reference/api-routes.md): every `src/app/api/**` route — method, auth, request/response shape.
+- [Environment Flags & Config](reference/env-flags.md): all env flags with defaults and effects.
+- [npm Scripts & the scripts/ Directory](reference/scripts.md): what each `package.json` script and `scripts/*.ts` utility does.
+
+### Contributing & AI agents
+- [Contributing to sheet-llm](contributing/CONTRIBUTING.md): repo conventions, local checks, commit/PR norms, additive-edit contract.
+- [AI Agent Guide](ai-agents/AGENT_GUIDE.md): orientation for coding agents — golden rules, where things live, how to verify.
+- [Documentation Maintenance Protocol](ai-agents/maintenance-protocol.md): how to keep docs and frontmatter fresh.
+- [Documentation Style Guide](_meta/STYLE_GUIDE.md): frontmatter contract and writing style every doc follows.
+- [Doc Coverage & Freshness Map](_meta/coverage.md): regenerable table of every doc with source_paths count and verified SHA.
+
+Per-subsystem context cards (terse agent companions) live under
+`ai-agents/context-cards/`: abc-rendering, app-shell, auth-gdpr, chat-session,
+command-palette, edit-operations, editor-ui, evals-testing, export,
+ghost-preview, import, music-model, orchestrator, persistence-db, providers-llm,
+transport.
+
+## Code map
+
+| Subsystem | Primary source dir | Entry file |
+| --- | --- | --- |
+| Orchestrator | `src/lib/orchestrator/` | `src/lib/orchestrator/index.ts` |
+| LLM providers | `src/lib/providers/` | `src/lib/providers/select.ts` |
+| LLM client | `src/lib/llm/` | `src/lib/llm/index.ts` |
+| Music data model | `src/lib/music/` | `src/lib/music/types.ts` |
+| Edit operations | `src/lib/music/` | `src/lib/music/editOperations.ts` |
+| Score→ABC + SourceMap | `src/lib/music/` + `src/lib/abc/` | `src/lib/music/scoreToAbcWithMap.ts` |
+| Import | `src/lib/music/import/` | `src/lib/music/import/index.ts` |
+| Export | `src/lib/music/export/` + `src/lib/abc/` | `src/lib/music/export/musicxml.ts` |
+| Chat/session state | `src/lib/chat/` | `src/lib/chat/state.ts` |
+| Editor UI | `src/components/editor/` | `src/components/ScoreStage.tsx` |
+| Command palette | `src/components/editor/` | `src/components/editor/commandCatalog.ts` |
+| Ghost preview | `src/components/orchestrator/` | `src/components/orchestrator/GhostPreviewOverlay.tsx` |
+| Transport | `src/components/transport/` | `src/components/transport/useTransport.ts` |
+| Persistence/DB | `src/lib/db/` | `src/lib/db/schema.ts` |
+| Auth & GDPR | `src/lib/auth/` + `src/lib/gdpr/` | `src/lib/auth/session.ts` |
+| App shell / routes | `src/app/` | `src/app/api/chat/route.ts` |
+| Evals | `evals/` | `evals/README.md` |
+
+## Conventions
+
+- Additive edits only. Never silently replace the user's score. Wholesale
+  rewrites are gated behind the replacement-as-confirmation modal; retained
+  measures are verified server-side by hash (`src/lib/orchestrator/preservationVerifier.ts`).
+  The LLM is never trusted to self-report preservation.
+- Schema-drift discipline. The `Score` type (`src/lib/music/types.ts`) is the
+  contract; changing it means updating validators, migration
+  (`src/lib/music/migrateScoreV1.ts`), Score→ABC, MusicXML export, and the data-model doc.
+- Read `node_modules/next/dist/docs/` before writing any Next.js code. This
+  repo's Next has breaking changes vs. common training data; heed deprecation notices.
+- Frontmatter freshness. Every doc except this file carries YAML frontmatter
+  with `source_paths`. When you touch a file, update the doc(s) listing it and
+  bump `last_verified` / `verified_against`. Coverage is tracked in
+  `_meta/coverage.md`; the rules live in `_meta/STYLE_GUIDE.md` and
+  `ai-agents/maintenance-protocol.md`.

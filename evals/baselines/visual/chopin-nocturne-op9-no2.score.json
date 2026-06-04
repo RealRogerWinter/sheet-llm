@@ -1,0 +1,57 @@
+{
+  "title": "Nocturne Op. 9 No. 2",
+  "composer": "F. Chopin",
+  "key": "Eb",
+  "meter": "12/8",
+  "tempo_bpm": 70,
+  "measures": [
+    {
+      "events": [
+        { "pitches": [{ "step": "B", "octave": 4, "accidental": "flat" }], "duration": "quarter" },
+        { "pitches": [{ "step": "G", "octave": 5 }], "duration": "eighth" },
+        { "pitches": [{ "step": "B", "octave": 4, "accidental": "flat" }], "duration": "quarter" },
+        { "pitches": [{ "step": "G", "octave": 5 }], "duration": "eighth" },
+        { "pitches": [{ "step": "B", "octave": 4, "accidental": "flat" }], "duration": "quarter" },
+        { "pitches": [{ "step": "G", "octave": 5 }], "duration": "eighth" },
+        { "pitches": [{ "step": "F", "octave": 5 }], "duration": "quarter" },
+        { "pitches": [{ "step": "G", "octave": 5 }], "duration": "eighth" }
+      ]
+    },
+    {
+      "events": [
+        { "pitches": [{ "step": "E", "octave": 5, "accidental": "flat" }], "duration": "quarter" },
+        { "pitches": [{ "step": "B", "octave": 4, "accidental": "flat" }], "duration": "eighth" },
+        { "pitches": [{ "step": "G", "octave": 5 }], "duration": "quarter" },
+        { "pitches": [{ "step": "B", "octave": 4, "accidental": "flat" }], "duration": "eighth" },
+        { "pitches": [{ "step": "E", "octave": 5, "accidental": "flat" }], "duration": "quarter" },
+        { "pitches": [{ "step": "B", "octave": 4, "accidental": "flat" }], "duration": "eighth" },
+        { "pitches": [{ "step": "C", "octave": 5 }], "duration": "quarter" },
+        { "pitches": [{ "step": "B", "octave": 4, "accidental": "flat" }], "duration": "eighth" }
+      ]
+    },
+    {
+      "events": [
+        { "pitches": [{ "step": "A", "octave": 4, "accidental": "flat" }], "duration": "quarter" },
+        { "pitches": [{ "step": "B", "octave": 4, "accidental": "flat" }], "duration": "eighth" },
+        { "pitches": [{ "step": "C", "octave": 5 }], "duration": "quarter" },
+        { "pitches": [{ "step": "B", "octave": 4, "accidental": "flat" }], "duration": "eighth" },
+        { "pitches": [{ "step": "A", "octave": 4, "accidental": "flat" }], "duration": "quarter" },
+        { "pitches": [{ "step": "G", "octave": 4 }], "duration": "eighth" },
+        { "pitches": [{ "step": "F", "octave": 4 }], "duration": "quarter" },
+        { "pitches": [{ "step": "E", "octave": 4, "accidental": "flat" }], "duration": "eighth" }
+      ]
+    },
+    {
+      "events": [
+        { "pitches": [{ "step": "D", "octave": 4 }], "duration": "quarter" },
+        { "pitches": [{ "step": "F", "octave": 4 }], "duration": "eighth" },
+        { "pitches": [{ "step": "B", "octave": 4, "accidental": "flat" }], "duration": "quarter" },
+        { "pitches": [{ "step": "F", "octave": 4 }], "duration": "eighth" },
+        { "pitches": [{ "step": "D", "octave": 4 }], "duration": "quarter" },
+        { "pitches": [{ "step": "F", "octave": 4 }], "duration": "eighth" },
+        { "pitches": [{ "step": "C", "octave": 4 }], "duration": "quarter" },
+        { "pitches": [{ "step": "E", "octave": 4, "accidental": "flat" }], "duration": "eighth" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,127 @@
+/* Three coordinated, compositor-only loops layered inside the same
+ * 720×160 viewBox BlankStaff uses. Loop durations 2400ms and 2800ms are
+ * intentionally coprime so the composite never resolves to a metronomic
+ * beat. All animated properties are opacity + transform — no layout.
+ * The root is now the wrapper div containing the SVG + a rotating
+ * flavor caption beneath/over the staff. */
+
+.root {
+  display: block;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  color: var(--graphite);
+  position: relative;
+}
+
+/* Overlay variant: absolutely positioned over the dimmed existing
+ * score on the editing surface. The host (.composingOverlay in
+ * ScoreStage) handles positioning; we just need to fill it. */
+.overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  margin: 0;
+  pointer-events: none;
+}
+
+.svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* In overlay mode the SVG must fill the absolutely-positioned wrapper. */
+.svgOverlay {
+  height: 100%;
+}
+
+.flavor {
+  margin-top: 12px;
+  text-align: center;
+  font-size: 13px;
+  font-style: italic;
+  color: var(--graphite);
+  opacity: 0.85;
+  /* Phase-locked to the staff-breathe loop so each phrase swap reads
+   * as part of the same rhythm. */
+  animation: flavor-pulse 2400ms cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+}
+
+.overlay .flavor {
+  position: absolute;
+  bottom: 8px;
+  left: 0;
+  right: 0;
+  margin-top: 0;
+  pointer-events: none;
+}
+
+.line {
+  stroke: currentColor;
+  stroke-width: 1;
+  transform-box: fill-box;
+  animation: staff-breathe 2400ms cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+}
+
+.barline {
+  stroke: currentColor;
+  stroke-width: 2;
+  animation: staff-breathe 2400ms cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+}
+
+.clef,
+.timesig {
+  fill: currentColor;
+  font-family: serif;
+}
+
+.shimmer {
+  fill: var(--ink-mist);
+  animation: shimmer-drift 2800ms cubic-bezier(0.45, 0.05, 0.55, 0.95) 200ms infinite;
+  will-change: transform;
+}
+
+.glow {
+  fill: var(--accent-compose);
+  animation: under-glow 2400ms cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+  will-change: opacity;
+}
+
+@keyframes staff-breathe {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
+
+@keyframes shimmer-drift {
+  from { transform: translateX(-120px); }
+  to   { transform: translateX(720px); }
+}
+
+@keyframes under-glow {
+  0%, 100% { opacity: 0; }
+  50%      { opacity: 0.6; }
+}
+
+@keyframes flavor-pulse {
+  0%, 100% { opacity: 0.6; }
+  50%      { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .line,
+  .barline,
+  .shimmer,
+  .flavor {
+    animation: none;
+  }
+  .flavor {
+    opacity: 0.85;
+  }
+  .glow {
+    animation: none;
+    opacity: 0.4;
+  }
+}

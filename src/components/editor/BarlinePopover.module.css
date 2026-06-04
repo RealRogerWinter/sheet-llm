@@ -1,0 +1,44 @@
+/* BarlinePopover-specific styles. Skeleton from MarkerPopover. */
+
+.popover {
+  width: 420px;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.input {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 13px;
+  box-sizing: border-box;
+  flex: 1;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--ink);
+}
+
+.flagRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 0;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--ink);
+  line-height: 1.4;
+}
+
+.flagRow input[type='checkbox'] {
+  margin-top: 2px;
+  flex-shrink: 0;
+}

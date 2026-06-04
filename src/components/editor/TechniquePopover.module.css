@@ -1,0 +1,17 @@
+/* TechniquePopover-specific styles. Skeleton (frame, header,
+ * section labels, button cells, footer, secondary button) comes
+ * from Popover.module.css via the shared <Popover> shell.
+ *
+ * Previously this file did not exist and TechniquePopover imported
+ * OrnamentMenuPopover.module.css for its grid — a cross-popover
+ * coupling the M4 refactor removes. */
+
+.popover {
+  width: 360px;
+}
+
+.techniqueGrid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+}

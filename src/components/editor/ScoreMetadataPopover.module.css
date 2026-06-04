@@ -1,0 +1,46 @@
+/* ScoreMetadataPopover-specific styles. Skeleton comes from
+ * Popover.module.css via the shared <Popover> shell. */
+
+.popover {
+  width: 420px;
+}
+
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.fieldLabel {
+  font-size: 10px;
+  color: var(--graphite);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.input {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--ink);
+}
+
+.input::placeholder {
+  color: var(--graphite);
+  opacity: 0.5;
+}

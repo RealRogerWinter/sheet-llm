@@ -1,0 +1,100 @@
+/* M24-PR-3c — AI ghost preview inline overlay.
+ *
+ * A floating toolbar fixed at the bottom-center of the viewport so it
+ * stays visible while the user scans the warm-amber proposed notes
+ * above it. The amber-on-amber-bordered toolbar matches the per-note
+ * recoloring (via --ghost-amber) so the visual link between toolbar
+ * and overlaid notes is obvious without an arrow or pointer.
+ */
+
+.toolbar {
+  position: fixed;
+  left: 50%;
+  bottom: 96px;
+  transform: translateX(-50%);
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: var(--surface-1, #fff);
+  border: 2px solid var(--ghost-amber, #c2570a);
+  box-shadow: 0 12px 28px rgba(194, 87, 10, 0.22);
+  font-size: 14px;
+  max-width: min(560px, 92vw);
+}
+
+.label {
+  font-weight: 600;
+  color: var(--ghost-amber, #c2570a);
+  text-align: center;
+  line-height: 1.4;
+}
+
+.intro {
+  font-weight: 400;
+  color: var(--text-1, #111);
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-1, #d0d0d0);
+  background: var(--surface-2, #f4f4f4);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn:not(:disabled):hover {
+  background: var(--surface-3, #ececec);
+}
+
+.btnPrimary {
+  background: var(--ghost-amber, #c2570a);
+  color: white;
+  border-color: var(--ghost-amber, #c2570a);
+}
+
+.btnPrimary:not(:disabled):hover {
+  background: var(--ghost-amber-hover, #a14808);
+}
+
+.btnSecondary {
+  background: var(--surface-2, #f4f4f4);
+  color: var(--text-1, #111);
+}
+
+.kbd {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+.btnSecondary .kbd {
+  background: rgba(0, 0, 0, 0.06);
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+.error {
+  font-size: 12px;
+  color: var(--text-error, #c00);
+}

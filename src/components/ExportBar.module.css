@@ -1,0 +1,30 @@
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gap-3);
+  margin-top: var(--gap-4);
+  max-width: 960px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.button {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--graphite);
+  background: var(--paper);
+  transition: color 120ms, border-color 120ms;
+}
+
+.button:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.error {
+  color: var(--signal);
+  font-size: 13px;
+}

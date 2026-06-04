@@ -1,0 +1,122 @@
+/* Shared popover skeleton used by every Shift+letter popover.
+ * Owns positioning frame + the common element vocabulary (header,
+ * section labels, button cells, footer, primary/secondary buttons).
+ * Popover-specific layouts (grids, inputs, preview lines) live in
+ * each popover's own .module.css.
+ */
+
+.popover {
+  position: fixed;
+  z-index: 110;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: popoverFadeIn 120ms ease-out;
+}
+
+@keyframes popoverFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.header {
+  font-size: 13px;
+  color: var(--ink);
+  font-weight: 500;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sectionLabel {
+  font-size: 11px;
+  color: var(--graphite);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.cell {
+  height: 26px;
+  padding: 0 4px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--paper);
+  color: var(--graphite);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 80ms, color 80ms, border-color 80ms;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.cell:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.cellActive {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+
+.cellActive:hover {
+  color: var(--paper);
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--rule);
+}
+
+/* Footer variant used by popovers with a Clear/Reset button on the
+ * left and a Done/Cancel button on the right. */
+.footerSplit {
+  justify-content: space-between;
+}
+
+.primary, .secondary {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 80ms, color 80ms, border-color 80ms;
+}
+
+.primary {
+  background: var(--ink);
+  color: var(--paper);
+  border: 1px solid var(--ink);
+}
+
+.primary:disabled {
+  background: var(--rule);
+  border-color: var(--rule);
+  color: var(--graphite);
+  cursor: not-allowed;
+}
+
+.secondary {
+  background: var(--paper);
+  color: var(--graphite);
+  border: 1px solid var(--rule);
+}
+
+.secondary:hover {
+  color: var(--ink);
+  border-color: var(--ink);
+}

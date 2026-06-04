@@ -1,0 +1,59 @@
+{
+  "title": "Eine kleine Nachtmusik (K. 525)",
+  "composer": "W.A. Mozart",
+  "key": "G",
+  "meter": "4/4",
+  "tempo_bpm": 140,
+  "measures": [
+    {
+      "events": [
+        { "pitches": [{ "step": "G", "octave": 4 }], "duration": "quarter" },
+        { "pitches": [{ "step": "D", "octave": 4 }], "duration": "quarter" },
+        { "pitches": [{ "step": "G", "octave": 4 }], "duration": "eighth" },
+        { "pitches": [{ "step": "D", "octave": 4 }], "duration": "eighth" },
+        { "pitches": [{ "step": "G", "octave": 4 }], "duration": "quarter" }
+      ]
+    },
+    {
+      "events": [
+        { "pitches": [{ "step": "D", "octave": 5 }], "duration": "quarter" },
+        { "pitches": [{ "step": "A", "octave": 4 }], "duration": "quarter" },
+        { "pitches": [{ "step": "D", "octave": 5 }], "duration": "eighth" },
+        { "pitches": [{ "step": "A", "octave": 4 }], "duration": "eighth" },
+        { "pitches": [{ "step": "D", "octave": 5 }], "duration": "quarter" }
+      ]
+    },
+    {
+      "events": [
+        { "pitches": [{ "step": "G", "octave": 5 }], "duration": "eighth" },
+        { "pitches": [{ "step": "A", "octave": 5 }], "duration": "eighth" },
+        { "pitches": [{ "step": "B", "octave": 5 }], "duration": "eighth" },
+        { "pitches": [{ "step": "G", "octave": 5 }], "duration": "eighth" },
+        { "pitches": [{ "step": "D", "octave": 5 }], "duration": "quarter" },
+        {
+          "pitches": [
+            { "step": "rest", "octave": 4 }
+          ],
+          "kind": "rest",
+          "duration": "quarter"
+        }
+      ]
+    },
+    {
+      "events": [
+        { "pitches": [{ "step": "C", "octave": 5 }], "duration": "eighth" },
+        { "pitches": [{ "step": "D", "octave": 5 }], "duration": "eighth" },
+        { "pitches": [{ "step": "E", "octave": 5 }], "duration": "eighth" },
+        { "pitches": [{ "step": "C", "octave": 5 }], "duration": "eighth" },
+        { "pitches": [{ "step": "A", "octave": 4 }], "duration": "quarter" },
+        {
+          "pitches": [
+            { "step": "rest", "octave": 4 }
+          ],
+          "kind": "rest",
+          "duration": "quarter"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,91 @@
+.group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-2);
+}
+
+.chips {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--paper);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.chipActive {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.chipLabel {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 3px 6px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.chipLabel:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.chipRemove {
+  border: 0;
+  border-left: 1px solid var(--rule);
+  background: transparent;
+  color: inherit;
+  padding: 3px 6px;
+  cursor: pointer;
+  font: inherit;
+  transition: background 80ms;
+}
+
+.chipActive .chipRemove {
+  border-left-color: var(--paper);
+}
+
+.chipRemove:hover:not(:disabled) {
+  background: var(--rule);
+}
+
+.chipActive .chipRemove:hover:not(:disabled) {
+  background: var(--graphite);
+}
+
+.chipRemove:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.addButton {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--graphite);
+  background: var(--paper);
+  cursor: pointer;
+  transition: color 80ms, border-color 80ms;
+}
+
+.addButton:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.addButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

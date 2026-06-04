@@ -1,0 +1,135 @@
+.bar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--gap-4);
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.form {
+  display: flex;
+  gap: var(--gap-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: var(--gap-2);
+  background: var(--paper);
+  transition: border-color 120ms;
+}
+
+.form:focus-within {
+  border-color: var(--ink);
+}
+
+.input {
+  flex: 1;
+  border: none;
+  outline: none;
+  padding: 10px 12px;
+  font-size: 15px;
+  background: transparent;
+}
+
+.input::placeholder {
+  color: var(--graphite);
+}
+
+.blankLink {
+  align-self: center;
+  border: 0;
+  background: transparent;
+  color: var(--graphite);
+  font-size: 12px;
+  padding: 2px 4px;
+  cursor: pointer;
+  transition: color 80ms;
+}
+
+.blankLink:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.sendButton {
+  --arrival-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  padding: 8px 18px;
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 14px;
+  font-weight: 500;
+  transition: opacity 120ms;
+  min-width: 70px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sendButton:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.sendButton[data-phase='done'] > span {
+  animation: send-crossfade 160ms var(--arrival-ease);
+}
+
+.pulse {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.pulse span {
+  width: 4px;
+  height: 4px;
+  background: var(--paper);
+  border-radius: 50%;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.pulse span:nth-child(2) { animation-delay: 0.15s; }
+.pulse span:nth-child(3) { animation-delay: 0.3s; }
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--paper);
+  animation: check-pop 200ms var(--arrival-ease);
+}
+
+@keyframes pulse {
+  0%, 80%, 100% { opacity: 0.3; }
+  40% { opacity: 1; }
+}
+
+@keyframes check-pop {
+  from { transform: scale(0.6); opacity: 0; }
+  to   { transform: scale(1);   opacity: 1; }
+}
+
+@keyframes send-crossfade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse span,
+  .check,
+  .sendButton[data-phase='done'] > span {
+    animation: none;
+  }
+  .pulse span {
+    opacity: 0.6;
+  }
+}
+
+.headline {
+  text-align: center;
+  font-size: 22px;
+  font-weight: 400;
+  color: var(--graphite);
+  margin-bottom: var(--gap-3);
+  letter-spacing: -0.01em;
+}

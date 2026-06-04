@@ -1,0 +1,90 @@
+/* AnnotationPopover-specific styles. Skeleton (frame, header,
+ * section labels, button cells, footer, primary/secondary buttons)
+ * comes from Popover.module.css via the shared <Popover> shell. */
+
+.popover {
+  width: 360px;
+}
+
+.textInput {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.textInput:focus {
+  outline: none;
+  border-color: var(--ink);
+}
+
+.styleGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+
+.positionRow {
+  display: flex;
+  gap: 4px;
+}
+
+.existingList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 100px;
+  overflow-y: auto;
+}
+
+.existingRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.existingText {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.existingStyle {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--graphite);
+}
+
+.removeButton {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--paper);
+  color: var(--graphite);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.removeButton:hover {
+  color: var(--signal);
+  border-color: var(--signal);
+}

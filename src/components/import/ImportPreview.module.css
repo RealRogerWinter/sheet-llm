@@ -1,0 +1,20 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.staff {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 8px;
+  background: var(--paper);
+  max-height: 220px;
+  overflow: auto;
+}
+
+.meta {
+  font-size: 12px;
+  color: var(--graphite);
+  text-align: center;
+}

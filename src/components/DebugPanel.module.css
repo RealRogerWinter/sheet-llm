@@ -1,0 +1,181 @@
+.panel {
+  position: fixed;
+  /* Keep the debug panel/button in its own bottom-left corner, clear of
+   * both docked chrome so it never overlaps (or steals clicks from)
+   * anything. --sidebar-offset (published by SessionSidebar: 280px
+   * docked, 0 collapsed/mobile) pushes it past the session list; adding
+   * --transport-height (published by TransportBar: its measured height,
+   * 0 when no score is mounted) lifts it above the playback bar. */
+  left: calc(var(--sidebar-offset, 0px) + 16px);
+  bottom: calc(var(--transport-height, 0px) + 16px);
+  width: 340px;
+  background: rgba(20, 22, 28, 0.96);
+  color: #d6d8df;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.4);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  z-index: 1000;
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  user-select: none;
+}
+
+.title {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 11px;
+  color: #8aa8ff;
+}
+
+.headerToggle {
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px;
+}
+
+.body {
+  padding: 12px;
+  display: grid;
+  gap: 12px;
+}
+
+.section {
+  display: grid;
+  gap: 6px;
+}
+
+.label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #888c95;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.select,
+.input {
+  background: rgba(255, 255, 255, 0.04);
+  color: #d6d8df;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 5px 7px;
+  font-family: inherit;
+  font-size: 12px;
+  flex: 1;
+}
+
+.select:focus,
+.input:focus {
+  outline: 2px solid #6d8aff;
+  outline-offset: 1px;
+}
+
+/* The popup that <select> renders is a native menu on Windows/Chromium
+   that ignores the parent's dark color scheme — without these rules,
+   options inherit the light option-list background and white text on
+   white becomes unreadable. */
+.select option {
+  background-color: #1a1d24;
+  color: #d6d8df;
+}
+
+.input::placeholder {
+  color: #6c7280;
+}
+
+.debugDump {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 11px;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 4px 8px;
+  font-size: 11px;
+}
+
+.kvKey {
+  color: #8a909c;
+}
+
+.kvVal {
+  color: #d6d8df;
+  word-break: break-word;
+}
+
+.kvVal.refuse { color: #ff9a8b; }
+.kvVal.ok { color: #99e0a8; }
+.kvVal.fell { color: #f3c065; }
+
+.empty {
+  color: #6c7280;
+  font-style: italic;
+  padding: 4px 0;
+}
+
+.minimized {
+  width: auto;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.quickRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.quickChip {
+  background: rgba(255, 255, 255, 0.04);
+  color: #d6d8df;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 120ms, color 120ms;
+}
+
+.quickChip:hover:not(:disabled) {
+  border-color: #6d8aff;
+  color: #fff;
+}
+
+.quickChip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.quickStatus {
+  font-size: 11px;
+  color: #99e0a8;
+}

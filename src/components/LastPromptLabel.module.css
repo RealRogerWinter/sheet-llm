@@ -1,0 +1,14 @@
+.label {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 13px;
+  color: var(--graphite);
+  text-align: center;
+  margin-top: var(--gap-4);
+  max-width: 720px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.quote {
+  color: var(--ink);
+}

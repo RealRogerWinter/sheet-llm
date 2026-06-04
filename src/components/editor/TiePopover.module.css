@@ -1,0 +1,64 @@
+/* TiePopover-specific styles. Skeleton from SlurPopover with the
+   per-pitch grid layout customised for the 4-column row (label / tie /
+   lv / enharmonic). */
+
+.popover {
+  width: 380px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.rowLabel {
+  font-size: 13px;
+  color: var(--ink);
+  user-select: none;
+}
+
+.pitchList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.pitchRow {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.pitchLabel {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.checkboxCell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--graphite);
+  cursor: pointer;
+  user-select: none;
+}
+
+.checkboxCell input[type='checkbox']:disabled + span {
+  color: var(--rule);
+  cursor: not-allowed;
+}

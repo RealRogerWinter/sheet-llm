@@ -1,0 +1,49 @@
+/* ParsedTextPopover styles. Skeleton (frame, footer, buttons) comes
+ * from Popover.module.css via the shared <Popover> shell. */
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.title {
+  font-size: 13px;
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.hint {
+  font-size: 11px;
+  color: var(--graphite);
+}
+
+.input {
+  height: 30px;
+  padding: 0 8px;
+  font-size: 14px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--paper);
+  color: var(--ink);
+  outline: none;
+  font-family: inherit;
+}
+
+.input:focus {
+  border-color: var(--ink);
+}
+
+.preview {
+  font-size: 12px;
+  color: var(--graphite);
+  min-height: 18px;
+  font-style: italic;
+}
+
+.previewError {
+  color: var(--signal);
+  font-style: normal;
+}

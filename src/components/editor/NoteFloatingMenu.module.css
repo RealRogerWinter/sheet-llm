@@ -1,0 +1,134 @@
+.menu {
+  position: fixed;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  animation: fadeIn 120ms ease-out;
+}
+
+.group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.divider {
+  width: 1px;
+  height: 18px;
+  background: var(--rule);
+  margin: 0 4px;
+}
+
+.button {
+  min-width: 28px;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--graphite);
+  border: 1px solid transparent;
+  background: transparent;
+  transition: background 80ms, color 80ms, border-color 80ms;
+}
+
+.button:hover {
+  background: var(--hover);
+  color: var(--ink);
+  border-color: var(--rule);
+}
+
+.button.danger:hover {
+  color: var(--signal);
+  border-color: var(--signal);
+}
+
+/**
+ * Per-note marking toggle in the active state: a marking is applied to
+ * the currently-selected event. Uses the same darker frame as
+ * .chipActive so visual treatment of "currently set" reads
+ * consistently across the menu.
+ */
+.button.active {
+  background: var(--paper);
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.button.active:hover {
+  background: var(--hover);
+}
+
+.chipRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 260px;
+  overflow-x: auto;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 2px 0 0;
+  border-radius: 11px;
+  background: var(--hover);
+  border: 1px solid var(--rule);
+  font-size: 12px;
+  color: var(--graphite);
+  transition: background 80ms, border-color 80ms;
+}
+
+.chipActive {
+  background: var(--paper);
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.chipLabel {
+  padding: 0 8px;
+  height: 100%;
+  border-radius: 11px 0 0 11px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  border: none;
+  cursor: pointer;
+}
+
+.chipLabel:hover {
+  background: var(--paper);
+}
+
+.chipRemove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-right: 2px;
+  padding: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--graphite);
+  font-size: 14px;
+  line-height: 1;
+  border: none;
+  cursor: pointer;
+}
+
+.chipRemove:hover {
+  background: var(--signal);
+  color: var(--paper);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}

@@ -1,0 +1,116 @@
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gap-3);
+  margin-bottom: var(--gap-4);
+  flex-wrap: wrap;
+}
+
+.group {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+}
+
+.label {
+  font-size: 12px;
+  color: var(--graphite);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.value {
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.select, .numberInput {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  font-size: 13px;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.numberInput {
+  width: 56px;
+}
+
+.iconButton {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 4px 10px;
+  font-size: 13px;
+  color: var(--graphite);
+  background: var(--paper);
+  transition: color 80ms, border-color 80ms;
+}
+
+.iconButton:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.divider {
+  width: 1px;
+  height: 22px;
+  background: var(--rule);
+}
+
+.meterCustomGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-1, 4px);
+}
+
+.meterNumInput {
+  width: 44px;
+}
+
+.meterSlash {
+  color: var(--graphite);
+  font-size: 13px;
+}
+
+/* Note-picker group: 6 durations + dot + 3 accidentals. Compact glyphs
+   that double as button labels (Unicode music symbols match the
+   floating-menu vocabulary so users see one consistent symbol set). */
+.pickerButton {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 2px 8px;
+  min-width: 28px;
+  height: 26px;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--graphite);
+  background: var(--paper);
+  transition: color 80ms, border-color 80ms, background 80ms;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pickerButton:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.pickerButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pickerButtonActive {
+  color: var(--paper);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.pickerButtonActive:hover {
+  color: var(--paper);
+  background: var(--ink);
+  border-color: var(--ink);
+}

@@ -1,0 +1,397 @@
+import { sql } from 'drizzle-orm'
+import {
+  type AnySQLiteColumn,
+  check,
+  index,
+  integer,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core'
+
+// All timestamps are Unix-epoch seconds (INTEGER) — portable, sortable,
+// timezone-free. UUIDs come from crypto.randomUUID(); idempotency tokens
+// are nanoid(32).
+
+// ============================================================================
+// users — anonymous-cookie-identified accounts.
+// The cookie value itself is a signed JWT whose `sub` claim is `id` — there
+// is intentionally no separate cookie_token column, because we'd never
+// look it up (the JWT is self-contained).
+// external_id reserves space for a future email / OAuth claim flow without
+// requiring a migration once auth ships.
+// ============================================================================
+export const users = sqliteTable(
+  'users',
+  {
+    id: text('id').primaryKey(),
+    externalId: text('external_id').unique(),
+    createdAt: integer('created_at').notNull(),
+    lastSeenAt: integer('last_seen_at').notNull(),
+    // last_recovery_nonce holds the most recently CONSUMED recovery
+    // nonce. Restore rejects any token whose nonce equals this value
+    // (already used → single-use enforcement). On successful restore,
+    // we mint a fresh recovery token with a new nonce and set this
+    // column to the now-consumed value.
+    lastRecoveryNonce: text('last_recovery_nonce'),
+    // --- Accounts (PR-1). All nullable/defaulted so existing anonymous rows
+    // stay valid; the migration is a pure ADD COLUMN (no table rebuild). ---
+    // Login identity once an anonymous account is "claimed". Stored LOWERCASED
+    // by every writer (signup/login/oauth/reset funnel through one helper) so
+    // the plain unique index below enforces case-insensitive uniqueness without
+    // an expression index. NULL for anonymous users; SQLite treats multiple
+    // NULLs as distinct, so unclaimed rows never collide.
+    email: text('email'),
+    emailVerified: integer('email_verified').notNull().default(0),
+    // Argon2id hash (PR-2). NULL for anonymous and OAuth-only accounts.
+    passwordHash: text('password_hash'),
+    // Product/paywall tier. Plain TEXT (no CHECK) so adding tiers later never
+    // forces a SQLite table rebuild; validated in app. See generationTier.ts.
+    tier: text('tier').notNull().default('free'),
+    displayName: text('display_name'),
+    // Set when an anonymous identity is upgraded to a real account (email or
+    // OAuth). Once set, the anonymous recovery-token path is REFUSED — a leaked
+    // 1-year recovery token (or a stale sl_uid) must not re-authenticate a
+    // password-protected account. See api/auth/restore/route.ts + getRequestUser.
+    claimedAt: integer('claimed_at'),
+  },
+  (table) => [
+    index('users_last_seen').on(table.lastSeenAt),
+    // Case-insensitive by convention (values stored lowercased); NULLs distinct.
+    uniqueIndex('users_email_unique').on(table.email),
+  ],
+)
+
+// ============================================================================
+// sessions — one row per "chatId" in today's API; what the sidebar lists.
+// head_version_id makes "what's the current score?" an O(1) lookup.
+// forked_from_* preserves provenance for the pointer-model fork.
+// deleted_at is soft delete; fork descendants must outlive their parent.
+// ============================================================================
+export const sessions = sqliteTable(
+  'sessions',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    title: text('title'),
+    headVersionId: text('head_version_id').references(
+      (): AnySQLiteColumn => scoreVersions.id,
+      { onDelete: 'set null' },
+    ),
+    forkedFromSessionId: text('forked_from_session_id').references(
+      (): AnySQLiteColumn => sessions.id,
+      { onDelete: 'set null' },
+    ),
+    forkedFromVersionId: text('forked_from_version_id').references(
+      (): AnySQLiteColumn => scoreVersions.id,
+      { onDelete: 'set null' },
+    ),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+    lastMessageAt: integer('last_message_at').notNull(),
+    deletedAt: integer('deleted_at'),
+    /**
+     * M3.5-PR-4 — per-session opt-out of the replacement-confirmation
+     * gate. Flipped to 1 when the user picks "Replace anyway and don't
+     * ask again this session" in the confirmation modal. Reset on
+     * new sessions (defaults to 0). Read by the orchestrator each
+     * turn before invoking `detectReplacement`.
+     */
+    replacementGateSuppressed: integer('replacement_gate_suppressed')
+      .notNull()
+      .default(0),
+  },
+  (table) => [
+    index('sessions_user_activity')
+      .on(table.userId, table.lastMessageAt)
+      .where(sql`deleted_at IS NULL`),
+    index('sessions_user_forked').on(table.userId, table.forkedFromSessionId),
+  ],
+)
+
+// ============================================================================
+// messages — native Anthropic content blocks preserved verbatim in
+// content_json. tool_use_id and score_version_id are denormalized so fork
+// lookups and score back-refs are indexed point queries, not JSON scans.
+// is_synthetic preserves the toolu_orch_* skip semantics from the legacy
+// in-memory store (see prepareMessagesForLLM in api/chat/route.ts).
+// ============================================================================
+export const messages = sqliteTable(
+  'messages',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    seq: integer('seq').notNull(),
+    role: text('role').notNull(), // 'user' | 'assistant'
+    contentJson: text('content_json').notNull(),
+    toolUseId: text('tool_use_id'),
+    scoreVersionId: text('score_version_id').references(
+      (): AnySQLiteColumn => scoreVersions.id,
+      { onDelete: 'set null' },
+    ),
+    isSynthetic: integer('is_synthetic').notNull().default(0),
+    streamStatus: text('stream_status').notNull().default('complete'), // 'complete' | 'partial' | 'errored'
+    errorCode: text('error_code'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('messages_session_seq').on(table.sessionId, table.seq),
+    index('messages_tool_use')
+      .on(table.sessionId, table.toolUseId)
+      .where(sql`tool_use_id IS NOT NULL`),
+    index('messages_streaming')
+      .on(table.streamStatus, table.createdAt)
+      .where(sql`stream_status = 'partial'`),
+  ],
+)
+
+// ============================================================================
+// score_versions — every LLM checkpoint AND every coalesced user edit.
+// parent_version_id represents the linear path from head back to root;
+// orphan branches (undone-then-replaced) remain in DB but are unreachable
+// from head — by design, see plan §"Score version chain & restore semantics".
+// idempotency_key makes retries safe via INSERT … ON CONFLICT DO NOTHING.
+// ============================================================================
+export const scoreVersions = sqliteTable(
+  'score_versions',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references((): AnySQLiteColumn => sessions.id, { onDelete: 'cascade' }),
+    parentVersionId: text('parent_version_id').references(
+      (): AnySQLiteColumn => scoreVersions.id,
+      { onDelete: 'set null' },
+    ),
+    scoreJson: text('score_json').notNull(),
+    scoreHash: text('score_hash').notNull(),
+    source: text('source').notNull(), // 'llm' | 'edit' | 'import' | 'fork-seed' | 'revert'
+    messageId: text('message_id').references(
+      (): AnySQLiteColumn => messages.id,
+      { onDelete: 'set null' },
+    ),
+    coalesceKey: text('coalesce_key'),
+    idempotencyKey: text('idempotency_key').unique(),
+    createdAt: integer('created_at').notNull(),
+    /**
+     * Score-JSON schema version. 0 = pre-Phase-1 (legacy schema with
+     * no required event ids, step:'rest' rest hack, etc.). 1 =
+     * post-PR-12 (ensureEventIds() applied, ready for spans).
+     * Migration is lazy on first read; backfill helpers in
+     * lib/db/migrateScores.ts can pre-migrate all rows in one pass.
+     */
+    schemaVersion: integer('schema_version').notNull().default(0),
+    /**
+     * Sidecar copy of score_json BEFORE the Phase 1 migration was
+     * applied. Populated only when migration runs against a v0 row.
+     * Used by rollbackScoreVersionToV0 if a defect in the migration
+     * corrupts data — preserved verbatim for ~90 days (retention
+     * enforced by lib/db/migrateScores.ts trimMigrationSidecars).
+     */
+    preMigrationScoreJson: text('pre_migration_score_json'),
+  },
+  (table) => [
+    index('sv_session_created').on(table.sessionId, table.createdAt),
+    index('sv_session_hash').on(table.sessionId, table.scoreHash),
+    // Without this CHECK, a typo at insert (`fork_seed` vs `fork-seed`) becomes
+    // silent data corruption: downstream filters miss rows and analytics undercount.
+    check(
+      'score_versions_source_valid',
+      sql`source IN ('llm', 'edit', 'import', 'fork-seed', 'revert')`,
+    ),
+  ],
+)
+
+// ============================================================================
+// orchestrator_turns — persistent forensic log of every orchestrator turn.
+// One row per `logTurn`/`recordTurn` invocation. Captures classification,
+// dispatch decision, handler model, latency, token usage, and a small
+// score-diff payload (counts + booleans + measure-identity retention ratio).
+// FKs to sessions / messages / score_versions keep this table additive —
+// no JSON duplication of the score itself, just references.
+//
+// Why: when a production bug like the triplet-demo replacement happens
+// ("add 4 more bars" → wholesale new score), stdout-only logs are lost.
+// This table makes any session replayable via `npm run replay`.
+// ============================================================================
+export const orchestratorTurns = sqliteTable(
+  'orchestrator_turns',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    // NULL when the turn was logged BEFORE the assistant message was
+    // persisted (e.g. fall-through / refuse paths).
+    messageId: text('message_id').references((): AnySQLiteColumn => messages.id, {
+      onDelete: 'set null',
+    }),
+    requestId: text('request_id').notNull(),
+    /**
+     * Unix epoch MILLISECONDS (ms-resolution; differs from other tables
+     * which use seconds — needed for sub-second turn ordering when
+     * multiple orchestrator turns land inside the same wall-second).
+     */
+    createdAt: integer('created_at').notNull(),
+    latencyMs: integer('latency_ms').notNull(),
+    finalStatus: text('final_status').notNull(), // 'ok' | 'refused' | 'fell_through' | 'error'
+    classificationKind: text('classification_kind'), // TaskKind | 'unknown'
+    classificationConfidence: real('classification_confidence'),
+    handler: text('handler'),
+    handlerModel: text('handler_model'),
+    composePatchDispatch: text('compose_patch_dispatch'), // 'patch' | 'regen' | 'skipped'
+    beforeScoreVersionId: text('before_score_version_id').references(
+      (): AnySQLiteColumn => scoreVersions.id,
+      { onDelete: 'set null' },
+    ),
+    afterScoreVersionId: text('after_score_version_id').references(
+      (): AnySQLiteColumn => scoreVersions.id,
+      { onDelete: 'set null' },
+    ),
+    diffAlgoVersion: integer('diff_algo_version').notNull().default(1),
+    measureCountBefore: integer('measure_count_before'),
+    measureCountAfter: integer('measure_count_after'),
+    /**
+     * Sum of voice counts across every staff (staff 0 + staff 1 + ...).
+     * Single value, NOT per-staff — a grand-staff score with 2 voices
+     * per staff stores `4` here, indistinguishable from a single-staff
+     * score with 4 voices. PR-7 (review M1) considered adding
+     * per-staff columns; deferred — the conflation is acceptable for
+     * the forensic-replay use case (operators read both rows alongside
+     * `score_versions` to see the actual layout), and the column count
+     * would creep monotonically as more layouts get added.
+     */
+    voiceCountBefore: integer('voice_count_before'),
+    voiceCountAfter: integer('voice_count_after'),
+    // Nullable on purpose: when only one side of the diff is present
+    // (e.g. fresh generation with no prior score), the "did this metadata
+    // change?" question is meaningless. Writing 0 there would falsely
+    // imply the field was unchanged. NULL = "no comparison was possible".
+    keyChanged: integer('key_changed'),
+    meterChanged: integer('meter_changed'),
+    titleChanged: integer('title_changed'),
+    retainedEventRatio: real('retained_event_ratio'),
+    appliedOpsCount: integer('applied_ops_count'),
+    inputTokens: integer('input_tokens'),
+    cachedInputTokens: integer('cached_input_tokens'),
+    outputTokens: integer('output_tokens'),
+    error: text('error'),
+    /**
+     * M3.5-PR-4 — telemetry flag. Set to 1 when the
+     * replacement-as-confirmation gate fired on this turn
+     * (`detectReplacement` returned isReplacement=true and the route
+     * surfaced a confirmation modal to the user). Lets us measure
+     * gate noise vs. real-replacement frequency in production.
+     */
+    replacementBlocked: integer('replacement_blocked').notNull().default(0),
+  },
+  (table) => [
+    index('orchestrator_turns_session_created').on(table.sessionId, table.createdAt),
+    index('orchestrator_turns_status').on(table.finalStatus, table.createdAt),
+    check(
+      'orchestrator_turns_status_valid',
+      sql`final_status IN ('ok', 'refused', 'fell_through', 'error')`,
+    ),
+  ],
+)
+
+// ============================================================================
+// auth_sessions — server-side, REVOCABLE login sessions (PR-2 mints these).
+// Distinct from the `sessions` table above, which is MUSIC chat sessions. The
+// cookie carries an opaque 32-byte random token; only its SHA-256 hash is
+// stored here, so a DB read cannot replay a session. logout/logout-all/reset
+// set revoked_at (the row is kept for audit; the janitor GCs it later).
+// ============================================================================
+export const authSessions = sqliteTable(
+  'auth_sessions',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull().unique(),
+    createdAt: integer('created_at').notNull(),
+    // Absolute expiry — the session dies at this wall-clock second no matter
+    // how active it is. idle_expires_at slides forward on use (throttled).
+    expiresAt: integer('expires_at').notNull(),
+    idleExpiresAt: integer('idle_expires_at').notNull(),
+    lastUsedAt: integer('last_used_at').notNull(),
+    userAgent: text('user_agent'),
+    // Truncated to /24 (IPv4) or /64 (IPv6) by the writer; dropped on revoke.
+    ip: text('ip'),
+    revokedAt: integer('revoked_at'),
+  },
+  (table) => [
+    index('auth_sessions_user').on(table.userId),
+    index('auth_sessions_expires').on(table.expiresAt),
+  ],
+)
+
+// ============================================================================
+// oauth_accounts — links a user to an external OAuth identity (PR-6). A user
+// may have several (one per provider). provider is validated in app (no CHECK,
+// so adding a provider never forces a SQLite table rebuild).
+// ============================================================================
+export const oauthAccounts = sqliteTable(
+  'oauth_accounts',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    provider: text('provider').notNull(), // 'google' | 'github' (validated in app)
+    providerAccountId: text('provider_account_id').notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('oauth_provider_account').on(
+      table.provider,
+      table.providerAccountId,
+    ),
+    index('oauth_accounts_user').on(table.userId),
+  ],
+)
+
+// ============================================================================
+// auth_tokens — single-use, hashed, short-TTL tokens for email verification
+// and password reset (PR-5). Only SHA-256(token) is stored; the raw token is
+// emailed. consumed_at enforces single-use via an atomic CAS update. purpose
+// is validated in app (no CHECK → no rebuild when purposes are added).
+// ============================================================================
+export const authTokens = sqliteTable(
+  'auth_tokens',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    purpose: text('purpose').notNull(), // 'email_verify' | 'password_reset'
+    tokenHash: text('token_hash').notNull().unique(),
+    expiresAt: integer('expires_at').notNull(),
+    consumedAt: integer('consumed_at'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (table) => [index('auth_tokens_user').on(table.userId)],
+)
+
+export type User = typeof users.$inferSelect
+export type NewUser = typeof users.$inferInsert
+export type Session = typeof sessions.$inferSelect
+export type NewSession = typeof sessions.$inferInsert
+export type Message = typeof messages.$inferSelect
+export type NewMessage = typeof messages.$inferInsert
+export type ScoreVersion = typeof scoreVersions.$inferSelect
+export type NewScoreVersion = typeof scoreVersions.$inferInsert
+export type OrchestratorTurn = typeof orchestratorTurns.$inferSelect
+export type NewOrchestratorTurn = typeof orchestratorTurns.$inferInsert
+export type AuthSession = typeof authSessions.$inferSelect
+export type NewAuthSession = typeof authSessions.$inferInsert
+export type OAuthAccount = typeof oauthAccounts.$inferSelect
+export type NewOAuthAccount = typeof oauthAccounts.$inferInsert
+export type AuthToken = typeof authTokens.$inferSelect
+export type NewAuthToken = typeof authTokens.$inferInsert

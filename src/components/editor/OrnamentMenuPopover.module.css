@@ -1,0 +1,80 @@
+/* OrnamentMenuPopover-specific styles. Skeleton (frame, header,
+ * section labels, button cells, footer, secondary button) comes
+ * from Popover.module.css via the shared <Popover> shell. */
+
+.popover {
+  width: 360px;
+}
+
+.ornamentGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ornamentSubgroup {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.subgroupLabel {
+  font-size: 10px;
+  color: var(--graphite);
+  letter-spacing: 0.04em;
+}
+
+.subgroupCells {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+}
+
+.trillPitchRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--rule);
+}
+
+.trillPitchLabel {
+  font-size: 10px;
+  color: var(--graphite);
+  letter-spacing: 0.04em;
+  margin-right: 4px;
+  min-width: 76px;
+}
+
+.tremoloRow,
+.jazzRow {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.measuredToggle {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--graphite);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.clearButton {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  background: var(--paper);
+  color: var(--graphite);
+  border: 1px solid var(--rule);
+}
+
+.clearButton:hover {
+  color: var(--signal);
+  border-color: var(--signal);
+}

@@ -1,0 +1,55 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1779612450769,
+      "tag": "0000_curious_hiroim",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1779654678359,
+      "tag": "0001_bizarre_punisher",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1779750939851,
+      "tag": "0002_vengeful_thena",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1780000000000,
+      "tag": "0003_phase1_score_versioning",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1780500000000,
+      "tag": "0004_orchestrator_turns",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1781000000000,
+      "tag": "0005_replacement_gate",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1781500000000,
+      "tag": "0006_accounts",
+      "breakpoints": true
+    }
+  ]
+}

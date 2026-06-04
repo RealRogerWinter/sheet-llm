@@ -1,0 +1,179 @@
+/* M24-PR-4 — AI ghost preview docked diff panel.
+ *
+ * Right-docked, 360px wide, full viewport height. Matches the
+ * ChatHistoryPanel docked-mode positioning so users get a consistent
+ * "right panel" affordance. The chat panel is auto-closed when this
+ * one opens (only one right-dock at a time).
+ */
+
+.panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 360px;
+  height: 100dvh;
+  z-index: 95;
+  background: var(--paper, #fff);
+  color: var(--ink, #111);
+  border-left: 2px solid var(--ghost-amber, #c2570a);
+  box-shadow: -12px 0 32px rgba(194, 87, 10, 0.18);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 16px;
+  font-size: 13px;
+  animation: slide-in-right 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.header {
+  border-bottom: 1px solid var(--rule, #eee);
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ghost-amber, #c2570a);
+  margin: 0;
+}
+
+.subtitle {
+  font-size: 12px;
+  color: var(--text-2, #666);
+  margin-top: 2px;
+}
+
+.intro {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  background: var(--surface-2, #faf6f0);
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.diffList {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.diffRow {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--rule, #eee);
+}
+
+.diffRow:last-child {
+  border-bottom: 0;
+}
+
+.diffLoc {
+  font-size: 11px;
+  color: var(--text-2, #666);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 2px;
+}
+
+.diffPair {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+
+.before {
+  color: var(--text-2, #888);
+  text-decoration: line-through;
+}
+
+.arrow {
+  color: var(--ghost-amber, #c2570a);
+}
+
+.after {
+  color: var(--ghost-amber, #c2570a);
+  font-weight: 600;
+}
+
+.footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding-top: 12px;
+  border-top: 1px solid var(--rule, #eee);
+}
+
+.btn {
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-1, #d0d0d0);
+  background: var(--surface-2, #f4f4f4);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn:not(:disabled):hover {
+  background: var(--surface-3, #ececec);
+}
+
+.btnPrimary {
+  background: var(--ghost-amber, #c2570a);
+  color: white;
+  border-color: var(--ghost-amber, #c2570a);
+}
+
+.btnPrimary:not(:disabled):hover {
+  background: var(--ghost-amber-hover, #a14808);
+}
+
+.btnSecondary {
+  background: var(--surface-2, #f4f4f4);
+  color: var(--text-1, #111);
+}
+
+.kbd {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+.btnSecondary .kbd {
+  background: rgba(0, 0, 0, 0.06);
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+.error {
+  font-size: 12px;
+  color: var(--text-error, #c00);
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  background: rgba(204, 0, 0, 0.05);
+  border-radius: 4px;
+}

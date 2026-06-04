@@ -1,0 +1,81 @@
+.stage {
+  position: relative;
+  min-height: 200px;
+  color: var(--score-ink);
+  background: var(--score-paper);
+  border: 1px solid var(--score-border);
+  border-radius: var(--radius);
+  padding: var(--gap-4);
+}
+
+/* Legacy dim — only fires when the new reveal animation is disabled.
+ * Hero pending state now hands the wait to ComposingStaff instead. */
+.stage.pending {
+  opacity: 0.5;
+}
+
+/* Editing surface, mid-request: existing score desaturates + dims to
+ * ~65% so the new shimmer band has somewhere to sit. The score's own
+ * staff lines stay solid (spatial anchor). */
+.stage.editingComposing .incoming {
+  opacity: 0.65;
+  filter: saturate(0.5);
+  transition: opacity 220ms ease-out, filter 220ms ease-out;
+}
+
+.layer {
+  position: relative;
+}
+
+.layerStacked {
+  position: absolute;
+  inset: 0;
+}
+
+.outgoing {
+  animation: fadeOut 220ms ease-out forwards;
+  pointer-events: none;
+}
+
+.incoming {
+  animation: fadeIn 220ms ease-out forwards;
+}
+
+/* When the per-note reveal is in flight, suppress the wrapper's fadeIn
+ * so opacity isn't multiplied (wrapper × per-element). */
+.incoming[data-revealing='true'] {
+  animation: none;
+  opacity: 1;
+}
+
+/* Composing overlay sits absolutely on top of the existing-but-dimmed
+ * incoming score. Pointer-events none so the underlying score (and
+ * editor handlers) stay reachable. */
+.composingOverlay {
+  position: absolute;
+  inset: var(--gap-4);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.blank {
+  /* --graphite reads as subtle on both paper colors; --rule is fine on
+   * white but disappears against the dark-mode score paper. */
+  color: var(--graphite);
+}
+
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stage.editingComposing .incoming {
+    transition: none;
+  }
+}

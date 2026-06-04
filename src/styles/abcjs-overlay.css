@@ -1,0 +1,27 @@
+/* Global styles targeting abcjs-controlled DOM (CSS Modules' local
+   scoping doesn't reach inside abcjs's SVG output). */
+
+.abcjs-note-playing,
+.abcjs-note-playing path,
+.abcjs-note-playing ellipse,
+.abcjs-note-playing rect {
+  fill: var(--playing) !important;
+  stroke: var(--playing) !important;
+  stroke-width: 1.5px;
+  transition: fill 60ms linear, stroke 60ms linear;
+}
+
+.abcjs-note:hover path,
+.abcjs-note:hover ellipse {
+  stroke: var(--graphite);
+  stroke-width: 1.5px;
+  cursor: crosshair;
+}
+
+/* In-progress drag feedback. useNoteDrag sets an inline transform on
+   the active notehead. Tint it blue (formerly abcjs's dragColor). */
+.abcjs-note[transform] path,
+.abcjs-note[transform] ellipse {
+  fill: #1e40af;
+  stroke: #1e40af;
+}

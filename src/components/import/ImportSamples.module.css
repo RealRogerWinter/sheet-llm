@@ -1,0 +1,36 @@
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.label {
+  font-size: 12px;
+  color: var(--graphite);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--graphite);
+  background: var(--paper);
+  transition: border-color 120ms, color 120ms;
+}
+
+.chip:hover:not(:disabled) {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.chip:disabled {
+  opacity: 0.5;
+}

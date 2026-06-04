@@ -1,0 +1,11 @@
+.label {
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--ink);
+  text-align: center;
+  margin-top: var(--gap-3);
+  margin-bottom: 0;
+  max-width: 720px;
+  margin-left: auto;
+  margin-right: auto;
+}

@@ -1,0 +1,657 @@
+/* Backdrop only renders in drawer / sheet modes. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(10, 10, 10, 0.06);
+  animation: fade 140ms ease-out;
+}
+
+/* Base panel styles shared across modes. */
+.panel {
+  position: fixed;
+  background: var(--paper);
+  color: var(--ink);
+  z-index: 81;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Docked: permanent right sidebar, below the app header. No backdrop, no
+ * animation. Overlays the right edge of the viewport; the score area stays
+ * centered in the full window rather than reserving room for the panel. */
+.panel[data-mode='docked'] {
+  top: var(--app-header-height, 73px);
+  right: 0;
+  width: 360px;
+  height: calc(100dvh - var(--app-header-height, 73px));
+  border-left: 1px solid var(--rule);
+  box-shadow: -8px 0 24px rgba(10, 10, 10, 0.06);
+}
+
+/* Drawer: right-edge overlay between 768–1280px. */
+.panel[data-mode='drawer'] {
+  top: 0;
+  right: 0;
+  width: min(360px, 92vw);
+  height: 100dvh;
+  border-left: 1px solid var(--rule);
+  box-shadow: -8px 0 24px rgba(10, 10, 10, 0.06);
+  animation: slide-right 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Bottom sheet: phones (<768px). */
+.panel[data-mode='sheet'] {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 85dvh;
+  border-top: 1px solid var(--rule);
+  border-top-left-radius: 14px;
+  border-top-right-radius: 14px;
+  box-shadow: 0 -8px 24px rgba(10, 10, 10, 0.1);
+  animation: slide-up 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.panel[data-mode='sheet']::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--rule);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--gap-4) var(--gap-4);
+  border-bottom: 1px solid var(--rule);
+  flex-shrink: 0;
+}
+
+.panel[data-mode='sheet'] .header {
+  padding-top: calc(var(--gap-4) + 8px);
+}
+
+.headerLeft {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap-2);
+  min-width: 0;
+}
+
+.title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.turnCount {
+  font-size: 12px;
+  color: var(--graphite);
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+}
+
+.headerAction {
+  font-size: 12px;
+  color: var(--graphite);
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: color 120ms, background 120ms;
+}
+
+.headerAction:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--hover);
+}
+
+.closeButton {
+  font-size: 20px;
+  line-height: 1;
+  color: var(--graphite);
+  padding: 0 6px;
+}
+
+.closeButton:hover {
+  color: var(--ink);
+}
+
+.list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.transcript {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--gap-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-4);
+}
+
+.placeholder {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gap-2);
+  color: var(--graphite);
+  font-size: 13px;
+  padding: var(--gap-5);
+}
+
+.errorPanel {
+  margin: var(--gap-4);
+  padding: var(--gap-3);
+  border: 1px solid var(--signal);
+  border-radius: var(--radius);
+  color: var(--signal);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-3);
+}
+
+.retryButton {
+  font-size: 12px;
+  color: var(--signal);
+  padding: 4px 10px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  transition: background 120ms;
+}
+
+.retryButton:hover {
+  background: rgba(185, 28, 28, 0.08);
+}
+
+.empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  padding: var(--gap-5);
+  gap: var(--gap-2);
+}
+
+.emptyTitle {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.emptyBody {
+  font-size: 13px;
+  color: var(--graphite);
+  max-width: 260px;
+  line-height: 1.5;
+}
+
+.kbd {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  background: var(--paper-warm);
+  padding: 1px 5px;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+}
+
+.turn {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-2);
+}
+
+.roleLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--graphite);
+}
+
+/* A small leading dot, tinted to the speaker's accent, reinforces who
+ * is talking before you even read the label. */
+.roleLabel::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.65;
+  flex-shrink: 0;
+}
+
+/* Speaker-coded label color: the user reads in the blue accent, Claude
+ * stays neutral graphite. Pairs with the left/right alignment below. */
+.turn[data-role='user'] .roleLabel {
+  color: var(--select-ink);
+}
+
+.roleLabelErrored {
+  color: var(--signal);
+}
+
+.userBubble {
+  /* Sent messages hug the right edge and cap their width so a short
+   * reply doesn't stretch edge-to-edge — the classic "my message"
+   * shape, distinct from Claude's left-aligned cards. */
+  align-self: flex-end;
+  max-width: 90%;
+  padding: 10px 12px;
+  background: var(--select);
+  border: 1px solid var(--rule);
+  border-right: 2px solid var(--select-ink);
+  border-radius: var(--radius);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+/* Keep the "You" label and the edited pill aligned with the right-hung
+ * user bubble. */
+.turn[data-role='user'] .roleLabel,
+.turn[data-role='user'] .editedPill {
+  align-self: flex-end;
+}
+
+.editedPill {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 2px 8px;
+  background: var(--select);
+  color: var(--select-ink);
+  font-size: 11px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.intro {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.scoreCard {
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--paper);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: border-color 120ms;
+}
+
+.scoreCardCurrent {
+  border-color: var(--ink);
+}
+
+.scoreCardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-2);
+}
+
+.scoreCardTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.currentBadge {
+  font-size: 10px;
+  padding: 2px 6px;
+  background: var(--select);
+  color: var(--select-ink);
+  border-radius: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.scoreCardMeta {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--graphite);
+}
+
+.scoreCardRevertRow {
+  margin-top: 6px;
+}
+
+.revertLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.revertLink:hover:not([aria-disabled='true']) {
+  color: var(--graphite);
+}
+
+.revertLink[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.revertLink:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.requestError {
+  align-self: flex-start;
+  margin-top: -8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--signal);
+  border-left: 2px solid var(--signal);
+  background: rgba(185, 28, 28, 0.06);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+.footer {
+  border-top: 1px solid var(--rule);
+  padding: var(--gap-3);
+  flex-shrink: 0;
+}
+
+.form {
+  display: flex;
+  gap: var(--gap-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 4px;
+  background: var(--paper);
+  transition: border-color 120ms;
+}
+
+.form:focus-within {
+  border-color: var(--ink);
+}
+
+.input {
+  flex: 1;
+  border: none;
+  outline: none;
+  padding: 6px 8px;
+  font-size: 13px;
+  background: transparent;
+  min-width: 0;
+}
+
+.input::placeholder {
+  color: var(--graphite);
+}
+
+.sendButton {
+  padding: 6px 14px;
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 12px;
+  font-weight: 500;
+  transition: opacity 120ms;
+}
+
+.sendButton:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.pulse {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.pulse span {
+  width: 4px;
+  height: 4px;
+  background: var(--graphite);
+  border-radius: 50%;
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+.pulse span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.pulse span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-right {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.3;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backdrop,
+  .panel[data-mode='drawer'],
+  .panel[data-mode='sheet'] {
+    animation: none;
+  }
+  .pulse span {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
+/* ---- Converse (text-answer) turns ---------------------------------- */
+
+.answerBubble {
+  /* Received messages hug the left and read as a bordered card — the
+   * mirror of the right-hung user bubble. */
+  align-self: flex-start;
+  max-width: 92%;
+  padding: 10px 12px;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-left: 2px solid var(--graphite);
+  border-radius: var(--radius);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink);
+  word-wrap: break-word;
+  position: relative;
+}
+
+/* Failed generation: red accent on the card + the inline reason row. */
+.answerBubbleErrored {
+  border-color: var(--signal);
+  border-left-color: var(--signal);
+  background: rgba(185, 28, 28, 0.05);
+}
+
+.turnError {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--signal);
+}
+
+/* Space the reason off any partial text that streamed in before the
+ * failure (when the bubble has only the error, this collapses to 0). */
+.turnError:not(:first-child) {
+  margin-top: 8px;
+}
+
+.turnErrorIcon {
+  flex-shrink: 0;
+  line-height: 1.45;
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+.markdown p {
+  margin: 0 0 8px;
+}
+.markdown ul,
+.markdown ol {
+  margin: 4px 0 8px;
+  padding-left: 20px;
+}
+.markdown li {
+  margin: 2px 0;
+}
+.markdown strong {
+  font-weight: 600;
+}
+.markdown em {
+  font-style: italic;
+}
+.markdown code {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 12px;
+  padding: 1px 4px;
+  background: var(--paper-warm);
+  border-radius: 3px;
+}
+.markdown pre {
+  margin: 6px 0;
+  padding: 8px 10px;
+  background: var(--paper-warm);
+  border-radius: var(--radius);
+  overflow-x: auto;
+}
+.markdown pre code {
+  padding: 0;
+  background: transparent;
+}
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 8px 0 4px;
+}
+.markdown blockquote {
+  margin: 6px 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--rule);
+  color: var(--graphite);
+}
+.markdown a {
+  color: var(--ink);
+  text-decoration: underline;
+}
+.markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 12px;
+}
+.markdown th,
+.markdown td {
+  padding: 4px 8px;
+  border: 1px solid var(--rule);
+  text-align: left;
+  vertical-align: top;
+}
+.markdown th {
+  background: var(--paper-warm);
+  font-weight: 600;
+}
+.markdown table code {
+  white-space: nowrap;
+}
+
+.streamingCursor {
+  display: inline-block;
+  width: 6px;
+  height: 12px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: var(--ink);
+  animation: streamingBlink 1s steps(2, start) infinite;
+}
+
+@keyframes streamingBlink {
+  to {
+    visibility: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .streamingCursor {
+    animation: none;
+    opacity: 0.5;
+  }
+}

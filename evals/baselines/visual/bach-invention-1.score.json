@@ -1,0 +1,85 @@
+{
+  "title": "Bach Invention No. 1 (BWV 772)",
+  "composer": "J.S. Bach",
+  "key": "C",
+  "meter": "4/4",
+  "tempo_bpm": 100,
+  "measures": [
+    {
+      "events": [
+        { "pitches": [{ "step": "C", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "D", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "E", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "F", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "D", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "E", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "C", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "G", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "F", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "E", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "D", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "C", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "B", "octave": 4 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "C", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "D", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "E", "octave": 5 }], "duration": "sixteenth" }
+      ]
+    },
+    {
+      "events": [
+        { "pitches": [{ "step": "F", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "D", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "G", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "F", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "A", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "G", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "F", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "E", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "D", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "C", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "B", "octave": 4 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "A", "octave": 4 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "G", "octave": 4 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "A", "octave": 4 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "B", "octave": 4 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "C", "octave": 5 }], "duration": "sixteenth" }
+      ]
+    },
+    {
+      "events": [
+        { "pitches": [{ "step": "D", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "G", "octave": 4 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "A", "octave": 4 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "B", "octave": 4 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "C", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "B", "octave": 4 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "A", "octave": 4 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "G", "octave": 4 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "F", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "E", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "D", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "C", "octave": 5 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "B", "octave": 4 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "A", "octave": 4 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "G", "octave": 4 }], "duration": "sixteenth" },
+        { "pitches": [{ "step": "F", "octave": 4 }], "duration": "sixteenth" }
+      ]
+    },
+    {
+      "events": [
+        { "pitches": [{ "step": "E", "octave": 4 }], "duration": "eighth" },
+        { "pitches": [{ "step": "C", "octave": 5 }], "duration": "eighth" },
+        { "pitches": [{ "step": "G", "octave": 4 }], "duration": "eighth" },
+        { "pitches": [{ "step": "C", "octave": 5 }], "duration": "eighth" },
+        {
+          "pitches": [
+            { "step": "C", "octave": 5 },
+            { "step": "E", "octave": 5 },
+            { "step": "G", "octave": 5 }
+          ],
+          "duration": "half"
+        }
+      ]
+    }
+  ]
+}

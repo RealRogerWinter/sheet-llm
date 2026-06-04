@@ -1,0 +1,84 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(10, 10, 10, 0.04);
+  animation: fade 120ms ease-out;
+}
+
+.panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100dvh;
+  width: 320px;
+  z-index: 91;
+  background: var(--paper);
+  border-left: 1px solid var(--rule);
+  padding: var(--gap-5) var(--gap-5);
+  font-size: 13px;
+  color: var(--ink);
+  overflow-y: auto;
+  animation: slide 180ms ease-out;
+  box-shadow: -8px 0 24px rgba(10, 10, 10, 0.06);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--gap-4);
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.close {
+  font-size: 18px;
+  color: var(--graphite);
+  padding: 0 6px;
+}
+.close:hover { color: var(--ink); }
+
+.section {
+  margin-bottom: var(--gap-5);
+}
+
+.sectionTitle {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--graphite);
+  margin-bottom: var(--gap-2);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.row:last-child { border-bottom: none; }
+
+.key {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 12px;
+  background: var(--paper-warm);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+@keyframes fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slide {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
