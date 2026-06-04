@@ -71,6 +71,13 @@
       "when": 1783000000000,
       "tag": "0009_credit_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1783500000000,
+      "tag": "0010_credit_schema_refinements",
+      "breakpoints": true
     }
   ]
 }
