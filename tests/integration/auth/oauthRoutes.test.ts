@@ -90,6 +90,19 @@ describe('GET /api/auth/oauth/[provider]/callback', () => {
     expect(res.headers.get('location')).toContain('oauth_error=denied')
   })
 
+  it('redirects to APP_BASE_URL origin, never the internal request host (no 0.0.0.0:3000)', async () => {
+    // Regression: behind the proxy request.url host is the internal bind, so the
+    // post-login redirect must come from APP_BASE_URL, not new URL(request.url).
+    vi.stubEnv('APP_BASE_URL', 'https://sheetllm.com')
+    await setFlow('GOOD')
+    const { GET } = await import('@/app/api/auth/oauth/[provider]/callback/route')
+    const res = await GET(get('/api/auth/oauth/google/callback', { error: 'access_denied' }), ctx('google'))
+    const loc = res.headers.get('location') ?? ''
+    expect(loc.startsWith('https://sheetllm.com/')).toBe(true)
+    expect(loc).not.toContain('localhost')
+    expect(loc).not.toContain('0.0.0.0')
+  })
+
   it('claims the anon identity on a valid new-user callback → session + oauth=created', async () => {
     await setFlow('GOOD')
     const { exchangeCodeForUser } = await import('@/lib/auth/oauth/oauthUser')
