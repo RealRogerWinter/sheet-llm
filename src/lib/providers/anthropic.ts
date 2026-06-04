@@ -363,11 +363,13 @@ export class AnthropicProvider implements LLMProvider {
  */
 /**
  * Convert a string-or-blocks system prompt into Anthropic's
- * TextBlockParam[]. Anthropic accepts up to 4 cache_control markers
- * per request; when the caller provides explicit blocks (multi-block
- * layout), each block flagged `cache: true` gets its own ephemeral
- * cache marker. Single-string back-compat: one block, marked cached
- * iff the global `wantsCache` option says so.
+ * TextBlockParam[]. Anthropic accepts up to 4 cache_control breakpoints
+ * per request (the tool def consumes one). A breakpoint caches the
+ * cumulative PREFIX, so for a multi-block layout we mark the LAST
+ * `cache: true` block — caching the whole static prefix (all reference
+ * blocks) — plus the leading ones for shared-base reuse across handlers,
+ * within budget (see buildSystemBlocks). Single-string back-compat: one
+ * block, marked cached iff the global `wantsCache` option says so.
  */
 function buildSystemBlocks(
   prompt: ProviderCallOptions['systemPrompt'],
@@ -383,18 +385,31 @@ function buildSystemBlocks(
     ]
   }
   const blocks = toSystemBlocks(prompt)
-  // Cap cache markers at 3 here; the tool definition consumes the 4th
-  // slot (Anthropic's per-request limit is 4 cache_control markers).
-  let cacheBudget = wantsCache ? 3 : 0
-  return blocks.map((b) => {
-    const marker = b.cache && cacheBudget > 0
-    if (marker) cacheBudget--
-    return {
-      type: 'text' as const,
-      text: b.text,
-      ...(marker ? { cache_control: { type: 'ephemeral' as const } } : {}),
+  // Anthropic allows 4 cache_control breakpoints/request; the tool def takes
+  // one, leaving 3 for the system. A breakpoint caches the cumulative PREFIX
+  // up to it — so the highest-value marker is on the LAST static
+  // (`cache: true`) block: it caches the ENTIRE static system prefix (all
+  // ~13 reference blocks), not just the first few. (Previously we marked the
+  // FIRST 3 cache blocks, so everything after the 3rd was re-billed at full
+  // input rate on every call.) We mark the last static block first (full
+  // prefix), then spend the remaining budget on the FRONT blocks so a shared
+  // base prefix (BASE_RULES + early references) is still cache-reused ACROSS
+  // handlers. Any trailing non-static (`cache: false`) block stays OUTSIDE the
+  // cached prefix, exactly as the byte-frozen-rules design intends.
+  const SYSTEM_CACHE_BUDGET = 3
+  const cacheableIdx = blocks.flatMap((b, i) => (b.cache ? [i] : []))
+  const marked = new Set<number>()
+  if (wantsCache && cacheableIdx.length > 0) {
+    marked.add(cacheableIdx[cacheableIdx.length - 1])
+    for (let i = 0; i < cacheableIdx.length && marked.size < SYSTEM_CACHE_BUDGET; i++) {
+      marked.add(cacheableIdx[i])
     }
-  })
+  }
+  return blocks.map((b, i) => ({
+    type: 'text' as const,
+    text: b.text,
+    ...(marked.has(i) ? { cache_control: { type: 'ephemeral' as const } } : {}),
+  }))
 }
 
 function buildMessages(options: ProviderCallOptions): ChatMessage[] {

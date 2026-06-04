@@ -153,6 +153,34 @@ describe('AnthropicProvider', () => {
     expect(cached).toHaveLength(3)
   })
 
+  it('caches the FULL static prefix by marking the LAST cache block (>budget layout)', async () => {
+    anthropicCreateMock.mockResolvedValue(toolUseResponse({ x: 'hi', y: 1 }))
+    await provider.toolCall(
+      { name: 'test_tool', inputSchema: SimpleSchema, inputSchemaJson: {} },
+      {
+        systemPrompt: [
+          { text: 'base', cache: true },
+          { text: 'ref-1', cache: true },
+          { text: 'ref-2', cache: true },
+          { text: 'ref-3', cache: true },
+          { text: 'ref-4-last', cache: true },
+        ],
+        userText: 'usr',
+        toolChoice: 'required',
+      },
+    )
+    const system = anthropicCreateMock.mock.calls[0][0].system
+    // A breakpoint caches the cumulative prefix, so the LAST static block must
+    // carry one — that's what caches the whole reference prefix (the fix). The
+    // unmarked middle blocks (system[2], system[3]) are still cached via it.
+    expect(system[4]).toMatchObject({ text: 'ref-4-last', cache_control: { type: 'ephemeral' } })
+    // Still within the 3-marker system budget (the tool takes the 4th).
+    const marked = system.filter((b: { cache_control?: unknown }) => b.cache_control)
+    expect(marked).toHaveLength(3)
+    // ...and the leading shared base is still marked for cross-handler reuse.
+    expect(system[0].cache_control).toMatchObject({ type: 'ephemeral' })
+  })
+
   it('drops cache markers entirely when cacheControl: "none"', async () => {
     anthropicCreateMock.mockResolvedValue(toolUseResponse({ x: 'hi', y: 1 }))
     await provider.toolCall(
