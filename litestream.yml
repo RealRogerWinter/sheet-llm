@@ -5,9 +5,13 @@
 # BEFORE flipping SL_ACCOUNTS_ENABLED on. Without replication, a volume wipe or
 # host loss destroys every account. See docs/guides/durability-runbook.md.
 #
-# Run Litestream as the container entrypoint, supervising the app, so a clean
-# restore runs BEFORE the app opens the database:
+# Run Litestream as the container supervisor (see deploy/docker-entrypoint.sh).
+# IMPORTANT: `replicate -exec` does NOT restore a missing DB on its own. The
+# entrypoint therefore runs an EXPLICIT guarded restore FIRST, then supervises:
+#   litestream restore -if-replica-exists -config /etc/litestream.yml <db>
 #   litestream replicate -config /etc/litestream.yml -exec "node server.js"
+# (Without the restore, a cold start would come up EMPTY and then replicate that
+# empty DB over the good backup — silent data loss.)
 #
 # $VAR references below are env-expanded by Litestream at load.
 
