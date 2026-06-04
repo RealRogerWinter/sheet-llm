@@ -22,6 +22,8 @@ related:
 
 # sheet-llm Documentation
 
+**[Try the live demo at sheetllm.com](https://sheetllm.com)** -- no setup required.
+
 sheet-llm is a chat-driven music notation editor. You describe music in
 natural language; an LLM **orchestrator** turns the request into
 *additive* edit operations against a canonical JSON `Score`, which is
