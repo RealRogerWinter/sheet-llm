@@ -3,8 +3,8 @@ title: Testing & Eval Harness
 subsystem: evals-testing
 audience: [contributor, ai-agent]
 status: current
-last_verified: 2026-06-03
-verified_against: 150cb15
+last_verified: 2026-06-04
+verified_against: 4fcabd9
 source_paths:
   - evals/README.md
   - evals/lib/assertions.ts
@@ -13,6 +13,7 @@ source_paths:
   - evals/lib/mockProvider.ts
   - evals/lib/baselines.ts
   - evals/lib/pricing.ts
+  - src/lib/billing/pricing.ts
   - evals/lib/svgPathDistance.ts
   - evals/lib/renderScoreSvg.ts
   - evals/lib/jsdomShim.ts
@@ -69,7 +70,7 @@ the README has drifted from the code.
 | `evals/lib/liveRunner.ts` | `runLiveCase(input, options)` hits the **real** orchestrator (`run` from `@/lib/orchestrator`). Retries `UpstreamError` / `RateLimitedError` with exponential backoff (default 3 attempts, 250 ms base). Returns `kind:'ok'` vs `kind:'infra'`. Emits a stderr cache-hit warning when ratio < 0.8. `extractTelemetry` pulls `model`/`usage` off the outcome union permissively. `summarizeLiveResults` aggregates. `SKIP_LIVE_EVAL_TOKEN='[skip-live-eval]'` + `isSkippedByCommitMessage()`. |
 | `evals/lib/mockProvider.ts` | Canned Anthropic SDK response builders: `toolUseResponse(score, opts)` (single `tool_use` block + `usage`) and `classifyResponse(classification, opts)`. The eval file owns the hoisted `vi.mock('@anthropic-ai/sdk')`; this only produces payloads. Mirrors the production **wire** shape — `AnthropicProvider.toolCall` reads `id`/`name`/`input` off the first `tool_use` block and `usage.cached_input_tokens`. |
 | `evals/lib/baselines.ts` | Per-model-SHA regression ledger at `evals/baselines/eval-scores.json` (ships `{}`). `loadBaselines` / `saveBaselines` / `detectRegression` / `recordLiveResult`. `EvalCaseStatus = new \| still-passing \| still-failing \| regression \| recovery`. `detectRegression` does **not** mutate; `recordLiveResult` mutates in memory (caller persists). `DEFAULT_BASELINES_PATH='evals/baselines/eval-scores.json'`. |
-| `evals/lib/pricing.ts` | `PRICING` table (USD per 1M tokens) + `estimateCostUsd(model, input, output, cached?)`. Cached billed at ~0.1× input. Unknown model → returns `0` + stderr warning (never blocks). Known: `claude-haiku-4-5` ($1/$5), `claude-sonnet-4-6` ($3/$15), `claude-opus-4-7` ($5/$25), plus dated aliases. |
+| `evals/lib/pricing.ts` | Re-exports the canonical cost model in `src/lib/billing/pricing.ts`. The `PRICING` table (USD per 1M tokens) now carries cache-read (0.1×) **and** cache-write (1.25× 5-min / 2× 1-hr) rates. Two cost paths: `estimateCostUsd` (lenient eval — unknown model → `0` + stderr warn, never blocks) and `billableCostUsd` (strict billing — disjoint Anthropic usage buckets, THROWS on an unpriced model so a debit never silently bills $0). Known: `claude-haiku-4-5` ($1/$5), `claude-sonnet-4-6` ($3/$15), `claude-opus-4-7` / `claude-opus-4-8` ($5/$25), plus dated aliases. |
 | `evals/lib/svgPathDistance.ts` | Pure visual metric. `pathDistance(svgA, svgB): PathDistanceResult{metric ∈ [0,1]}`. `extractPathDs` / `extractSvgSize` / `walkPath`. Normalizes coords to each SVG's own viewBox (falls back to width/height, then 1.0). Walks **pen positions only** — bezier control points are ignored. Tested by `tests/unit/eval-lib/svgPathDistance.test.ts`. |
 | `evals/lib/renderScoreSvg.ts` | `renderScoreSvg(score): Promise<string>` → `scoreToAbc` then `renderAbcSvg` via abcjs into a jsdom `<div>`, returns `svg.outerHTML`. `renderAbcSvg(abc)` is the raw-ABC entry. Requires a DOM. |
 | `evals/lib/jsdomShim.ts` | Shared `getBBox` polyfill (jsdom has no SVG layout). `installGetBBoxPolyfill()` patches ambient globals (called by `tests/setup.ts`); `installGetBBoxPolyfillOn(win)` patches a window-local jsdom (called by `scripts/capture-visual-baselines.ts`). `makeBBox()` returns a stable `{width:100, height:20}`. Kept in **one** place so the two callers can't drift. |
