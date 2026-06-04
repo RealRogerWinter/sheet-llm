@@ -300,6 +300,16 @@ export type TranscriptTurn =
       errorText?: string
       ts?: number
     }
+  | {
+      role: 'assistant'
+      kind: 'cta'
+      /** Structured limit-reached call-to-action (quota / login gate). A
+       *  CLIENT-ONLY synthetic turn — never POSTed or persisted, so a
+       *  GET /api/chat refresh never replays a stale card. */
+      cta: ChatCta
+      toolUseId: string
+      ts?: number
+    }
 
 export interface TranscriptResponse {
   chatId: string

@@ -6,6 +6,7 @@ import { useDebugStore, buildDebugOverrides } from '@/lib/debug/debugStore'
 import { summarizeScore } from '@/lib/shared/scoreSummary'
 import type { Score } from '@/lib/music/types'
 import type {
+  ChatCta,
   ChatDebugPayload,
   ChatRequest,
   ChatResponse,
@@ -51,6 +52,8 @@ export function useSubmitPrompt() {
   const finalizeStreamingTurn = useChatStore((s) => s.finalizeStreamingTurn)
   const failStreamingTurn = useChatStore((s) => s.failStreamingTurn)
   const appendErrorTurn = useChatStore((s) => s.appendErrorTurn)
+  const appendCtaTurn = useChatStore((s) => s.appendCtaTurn)
+  const openQuotaCta = useChatStore((s) => s.openQuotaCta)
   const debugOrchestrator = useDebugStore((s) => s.orchestratorOverride)
   const debugModelOverride = useDebugStore((s) => s.modelOverride)
   const debugApiKeyOverride = useDebugStore((s) => s.apiKeyOverride)
@@ -136,12 +139,25 @@ export function useSubmitPrompt() {
           return { ok: false }
         }
         if (!res.ok) {
-          const data = (await res.json().catch(() => ({}))) as { error?: string; chatId?: string }
+          const data = (await res.json().catch(() => ({}))) as {
+            error?: string
+            chatId?: string
+            cta?: ChatCta
+          }
           // Adopt server-returned chatId so a retry hits the same session
           // and the orphan user row from the early server-side persist
           // (see /api/chat route.ts comment on `appendMessages([userTurn])`)
           // collapses into the next attempt via prepareMessagesForLLM.
           if (data.chatId) setChatId(data.chatId)
+          if (data.cta) {
+            // Quota / login gate: render the structured CTA — a persistent
+            // in-transcript card plus a one-shot modal — instead of a plain
+            // error toast (avoids card+modal+toast triple-messaging).
+            appendCtaTurn(data.cta)
+            openQuotaCta(data.cta)
+            endRequestNoScore()
+            return { ok: false }
+          }
           const msg = data.error ?? `Request failed: ${res.status}`
           appendErrorTurn(msg)
           failRequest(msg)
@@ -300,6 +316,8 @@ export function useSubmitPrompt() {
       finalizeStreamingTurn,
       failStreamingTurn,
       appendErrorTurn,
+      appendCtaTurn,
+      openQuotaCta,
       setLastDebug,
     ],
   )

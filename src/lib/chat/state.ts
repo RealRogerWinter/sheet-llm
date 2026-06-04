@@ -20,7 +20,7 @@ import {
 import { scoreToAbcWithMap, type SourceMap } from '@/lib/music/scoreToAbcWithMap'
 import { pitchAudioPing } from '@/lib/abc/pitchAudioPing'
 import { resetSession } from './resetSession'
-import type { ImportFormat, TranscriptTurn } from '@/lib/shared/types'
+import type { ChatCta, ImportFormat, TranscriptTurn } from '@/lib/shared/types'
 
 /**
  * Note-picker active state — UI-only. Drives the toolbar buttons that
@@ -526,6 +526,16 @@ interface ChatStore {
     | undefined
   setPendingConfirmation: (p: ChatStore['pendingConfirmation']) => void
   clearPendingConfirmation: () => void
+  /**
+   * Daily-quota limit-reached CTA (mirrors pendingConfirmation). Set when the
+   * server returns a quota_exceeded/login_required body carrying a `cta`; drives
+   * the one-shot QuotaCtaModal. The persistent in-transcript card is a separate
+   * appendCtaTurn turn. Cleared on the next beginRequest so a stale modal never
+   * lingers across submits.
+   */
+  quotaCta: ChatCta | undefined
+  openQuotaCta: (cta: ChatCta) => void
+  closeQuotaCta: () => void
 
   /**
    * M24-PR-1 — AI ghost preview proposal slot. See [[PendingProposal]]
@@ -818,6 +828,8 @@ interface ChatStore {
    * as `failStreamingTurn`.
    */
   appendErrorTurn: (message: string) => void
+  /** Append a client-only CTA turn (quota/login gate) to the transcript. */
+  appendCtaTurn: (cta: ChatCta) => void
   clearTurns: () => void
   setTranscriptLoading: (loading: boolean) => void
   setTranscriptError: (msg: string | undefined) => void
@@ -1011,6 +1023,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   pendingConfirmation: undefined,
   setPendingConfirmation: (p) => set({ pendingConfirmation: p }),
   clearPendingConfirmation: () => set({ pendingConfirmation: undefined }),
+  quotaCta: undefined,
+  openQuotaCta: (cta) => set({ quotaCta: cta }),
+  closeQuotaCta: () => set({ quotaCta: undefined }),
   pendingProposal: undefined,
   setPendingProposal: (proposal) => {
     if (proposal === undefined) {
@@ -1087,6 +1102,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       streamProgress: undefined,
       lastPrompt: prompt,
       error: undefined,
+      quotaCta: undefined,
       introText: undefined,
       revealStartedAt: null,
     })
@@ -1714,6 +1730,20 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           toolUseId: `toolu_error_${s.turns.length}_${Date.now()}`,
           errored: true,
           errorText: message,
+          ts: Date.now(),
+        },
+      ],
+    })),
+  appendCtaTurn: (cta) =>
+    set((s) => ({
+      turns: [
+        ...s.turns,
+        {
+          role: 'assistant',
+          kind: 'cta',
+          cta,
+          // synthetic + client-only; never POSTed, so a refresh won't replay it
+          toolUseId: `toolu_cta_${s.turns.length}_${Date.now()}`,
           ts: Date.now(),
         },
       ],
