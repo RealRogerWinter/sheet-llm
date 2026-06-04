@@ -30,6 +30,29 @@ async function horizontalOverflow(page: Page): Promise<number> {
   return page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
 }
 
+// Overlay-containment guard. A fixed `inset:0` backdrop must cover the whole
+// viewport. If any ancestor (e.g. Hero) wrongly applies layout containment
+// (`container-type`/`contain`), it becomes the containing block for the fixed
+// scrim and the backdrop shrinks to that ancestor's box (top ≈ header height) —
+// this asserts that never happens.
+test.describe('overlay containment guard', () => {
+  test.use({ viewport: { width: 1280, height: 800 } })
+  test('a modal backdrop covers the full viewport', async ({ page }) => {
+    await page.getByRole('button', { name: /open help and quick start/i }).click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+    const rect = await page.getByRole('dialog').evaluate((el) => {
+      const scrim = el.parentElement as HTMLElement
+      const r = scrim.getBoundingClientRect()
+      return { top: r.top, left: r.left, width: r.width, height: r.height }
+    })
+    const vp = page.viewportSize()!
+    expect(rect.top).toBeLessThanOrEqual(1)
+    expect(rect.left).toBeLessThanOrEqual(1)
+    expect(rect.width).toBeGreaterThanOrEqual(vp.width - 1)
+    expect(rect.height).toBeGreaterThanOrEqual(vp.height - 1)
+  })
+})
+
 for (const vp of VIEWPORTS) {
   test.describe(`responsive layout @ ${vp.name}`, () => {
     test.use({ viewport: { width: vp.width, height: vp.height } })
