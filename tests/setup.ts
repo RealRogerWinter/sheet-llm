@@ -29,3 +29,19 @@ installGetBBoxPolyfill()
 // PointerEvent) — install no-op/portable stubs so pointer-based touch
 // interactions can be exercised in unit tests.
 installPointerEventPolyfills()
+
+// jsdom doesn't implement matchMedia — provide a default stub (matches:false)
+// so components using useMatchMedia render without a per-test mock. Tests that
+// need a specific breakpoint result still override via vi.stubGlobal.
+if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
+  window.matchMedia = ((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia
+}

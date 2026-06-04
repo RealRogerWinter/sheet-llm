@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useChatStore, type PendingProposal } from '@/lib/chat/state'
+import { mq } from '@/lib/ui/breakpoints'
+import { useMatchMedia } from '@/lib/ui/useMatchMedia'
 import { findEventLocationById } from '@/lib/music/scoreAccessors'
 import { summarizeScore } from '@/lib/shared/scoreSummary'
 import type {
@@ -152,13 +154,18 @@ export function GhostPreviewPanel() {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [active, submitting, onDecision])
 
+  // At xl the panel PUSHES the score (reflows beside it, not an overlay), so it
+  // isn't truly modal — the score stays interactive. Only mark it modal in the
+  // fixed-overlay variant below xl.
+  const pushed = useMatchMedia(mq.up('xl'))
+
   if (!active || !proposal) return null
 
   return (
     <aside
       className={styles.panel}
-      role="dialog"
-      aria-modal="true"
+      role={pushed ? 'complementary' : 'dialog'}
+      aria-modal={pushed ? undefined : true}
       aria-label={`AI proposal — ${diffRows.length} changes`}
     >
       <header className={styles.header}>

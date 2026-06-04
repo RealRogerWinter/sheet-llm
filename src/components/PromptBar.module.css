@@ -131,7 +131,7 @@
 
 .headline {
   text-align: center;
-  font-size: 22px;
+  font-size: var(--text-2xl); /* fluid 22 → 28 */
   font-weight: 400;
   color: var(--graphite);
   margin-bottom: var(--gap-3);
