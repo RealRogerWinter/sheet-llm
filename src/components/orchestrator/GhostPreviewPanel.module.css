@@ -10,9 +10,9 @@
   position: fixed;
   top: 0;
   right: 0;
-  width: 360px;
+  width: var(--panel-w);
   height: 100dvh;
-  z-index: 95;
+  z-index: var(--z-ghost-panel);
   background: var(--paper, #fff);
   color: var(--ink, #111);
   border-left: 2px solid var(--ghost-amber, #c2570a);

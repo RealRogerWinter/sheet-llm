@@ -4,7 +4,7 @@
   align-items: stretch;
   gap: var(--gap-4);
   width: 100%;
-  max-width: 720px;
+  max-width: var(--prompt-max);
   margin: 0 auto;
 }
 

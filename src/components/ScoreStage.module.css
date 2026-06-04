@@ -55,7 +55,7 @@
   position: absolute;
   inset: var(--gap-4);
   pointer-events: none;
-  z-index: 2;
+  z-index: var(--z-score-overlay);
 }
 
 .blank {

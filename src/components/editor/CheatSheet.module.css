@@ -1,7 +1,7 @@
 .backdrop {
   position: fixed;
   inset: 0;
-  z-index: 90;
+  z-index: var(--z-cheatsheet-backdrop);
   background: rgba(10, 10, 10, 0.04);
   animation: fade 120ms ease-out;
 }
@@ -12,7 +12,7 @@
   right: 0;
   height: 100dvh;
   width: 320px;
-  z-index: 91;
+  z-index: var(--z-cheatsheet);
   background: var(--paper);
   border-left: 1px solid var(--rule);
   padding: var(--gap-5) var(--gap-5);

@@ -9,7 +9,7 @@
   background: var(--paper);
   color: var(--ink);
   font-size: 14px;
-  max-width: 720px;
+  max-width: var(--prompt-max);
   margin: 0 auto var(--gap-4) auto;
   animation: slideIn 200ms ease-out;
 }

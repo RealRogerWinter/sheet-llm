@@ -7,7 +7,7 @@
 
 .popover {
   position: fixed;
-  z-index: 110;
+  z-index: var(--z-popover);
   background: var(--paper);
   border: 1px solid var(--rule);
   border-radius: var(--radius);

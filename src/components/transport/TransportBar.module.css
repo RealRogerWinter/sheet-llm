@@ -3,7 +3,7 @@
   bottom: 0;
   left: var(--sidebar-offset, 0px);
   right: var(--panel-offset, 0px);
-  z-index: 30;
+  z-index: var(--z-transport);
   background: var(--paper);
   border-top: 1px solid var(--rule);
   padding-bottom: env(safe-area-inset-bottom, 0);
@@ -246,7 +246,7 @@
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
   padding: 8px;
   min-width: 200px;
-  z-index: 31;
+  z-index: var(--z-transport-menu);
 }
 
 .menuItem {

@@ -8,7 +8,7 @@
   position: fixed;
   left: 16px;
   bottom: 24px;
-  z-index: 850;
+  z-index: var(--z-resume-toast);
   display: flex;
   align-items: center;
   gap: 12px;

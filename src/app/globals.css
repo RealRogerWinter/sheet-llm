@@ -110,6 +110,32 @@
   /* Minimum touch-target size (WCAG / 2026 touch guidance). Applied under
    * @media (pointer: coarse) by the components that own touch controls. */
   --touch-target: 44px;
+
+  /* z-index scale — semantic names for the app's fixed-overlay stack. Values
+   * equal today's exact numbers, so adopting them is a pure rename with zero
+   * stacking-order change. Two names share value 80 (toast / panel-backdrop)
+   * because they genuinely occupy the same layer today; the names document
+   * intent without altering order. (Pre-existing quirks such as the resume
+   * toast at 850 sitting below the ghost overlay at 900 are preserved as-is.) */
+  --z-score-overlay: 2;
+  --z-transport: 30;
+  --z-transport-menu: 31;
+  --z-sidebar: 40;
+  --z-overlay: 50;
+  --z-drawer-backdrop: 70;
+  --z-drawer: 71;
+  --z-toast: 80;
+  --z-panel-backdrop: 80;
+  --z-panel: 81;
+  --z-cheatsheet-backdrop: 90;
+  --z-cheatsheet: 91;
+  --z-ghost-panel: 95;
+  --z-floating-menu: 100;
+  --z-popover: 110;
+  --z-context-menu: 200;
+  --z-resume-toast: 850;
+  --z-ghost-overlay: 900;
+  --z-modal: 1000;
 }
 
 [data-theme='dark'] {
