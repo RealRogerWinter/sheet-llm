@@ -7,6 +7,7 @@ import type {
   ProviderName,
   ProviderTool,
   ProviderToolResult,
+  ProviderUsage,
   TextStreamEvent,
 } from './types'
 import { OutputTruncatedError, ProviderSchemaError } from './types'
@@ -58,6 +59,35 @@ function tuningParams(
     out.output_config = { effort: options.effort }
   }
   return out
+}
+
+/**
+ * Map the Anthropic wire `usage` object to the normalised ProviderUsage.
+ * Captures `cache_creation_input_tokens` (cache-WRITE) — previously dropped,
+ * which silently under-counted the first (cold-cache) call of every prefix.
+ * A 0 bucket is preserved (it distinguishes a warm-cache call from an absent
+ * field); only null/undefined fields are omitted.
+ */
+export function mapAnthropicUsage(
+  u:
+    | {
+        input_tokens?: number | null
+        cache_read_input_tokens?: number | null
+        cache_creation_input_tokens?: number | null
+        output_tokens?: number | null
+      }
+    | null
+    | undefined,
+): ProviderUsage | undefined {
+  if (!u) return undefined
+  return {
+    ...(u.input_tokens != null ? { inputTokens: u.input_tokens } : {}),
+    ...(u.cache_read_input_tokens != null ? { cachedInputTokens: u.cache_read_input_tokens } : {}),
+    ...(u.cache_creation_input_tokens != null
+      ? { cacheCreationInputTokens: u.cache_creation_input_tokens }
+      : {}),
+    ...(u.output_tokens != null ? { outputTokens: u.output_tokens } : {}),
+  }
 }
 
 /**
@@ -201,27 +231,13 @@ export class AnthropicProvider implements LLMProvider {
       (b): b is Anthropic.TextBlock => b.type === 'text',
     )
 
-    const usage = response.usage as unknown as
-      | {
-          input_tokens?: number
-          cache_read_input_tokens?: number
-          output_tokens?: number
-        }
-      | undefined
-
     return {
       input: parsed.data,
       toolUseId: toolUse.id,
       model,
       stopReason: response.stop_reason ?? undefined,
       introText: textBlock?.text,
-      usage: usage
-        ? {
-            inputTokens: usage.input_tokens,
-            cachedInputTokens: usage.cache_read_input_tokens,
-            outputTokens: usage.output_tokens,
-          }
-        : undefined,
+      usage: mapAnthropicUsage(response.usage),
     }
   }
 
@@ -297,24 +313,11 @@ export class AnthropicProvider implements LLMProvider {
         return
       }
       const finalMsg = await stream.finalMessage()
-      const usage = finalMsg.usage as unknown as
-        | {
-            input_tokens?: number
-            cache_read_input_tokens?: number
-            output_tokens?: number
-          }
-        | undefined
       yield {
         type: 'message-stop',
         finalText: accumulated,
         stopReason: finalMsg.stop_reason ?? undefined,
-        usage: usage
-          ? {
-              inputTokens: usage.input_tokens,
-              cachedInputTokens: usage.cache_read_input_tokens,
-              outputTokens: usage.output_tokens,
-            }
-          : undefined,
+        usage: mapAnthropicUsage(finalMsg.usage),
       }
     } catch (e) {
       // Our own guard abort (or a caller-supplied abortSignal) can surface here

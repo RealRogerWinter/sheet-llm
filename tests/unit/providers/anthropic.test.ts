@@ -19,7 +19,7 @@ vi.mock('@anthropic-ai/sdk', () => {
   return { default: MockAnthropic }
 })
 
-const { AnthropicProvider } = await import('@/lib/providers/anthropic')
+const { AnthropicProvider, mapAnthropicUsage } = await import('@/lib/providers/anthropic')
 const { ProviderSchemaError } = await import('@/lib/providers/types')
 
 const SimpleSchema = z.object({ x: z.string(), y: z.number() })
@@ -56,6 +56,22 @@ describe('AnthropicProvider', () => {
     expect(r.usage?.inputTokens).toBe(100)
     expect(r.usage?.cachedInputTokens).toBe(80)
     expect(r.usage?.outputTokens).toBe(25)
+  })
+
+  it('captures cache_creation_input_tokens (cache-write) from the response usage', async () => {
+    anthropicCreateMock.mockResolvedValue(
+      toolUseResponse(
+        { x: 'hi', y: 1 },
+        { usage: { input_tokens: 10, cache_read_input_tokens: 0, cache_creation_input_tokens: 5000, output_tokens: 7 } },
+      ),
+    )
+    const r = await provider.toolCall(
+      { name: 'test_tool', inputSchema: SimpleSchema, inputSchemaJson: {} },
+      { systemPrompt: 'sys', userText: 'usr', toolChoice: 'required' },
+    )
+    expect(r.usage?.cacheCreationInputTokens).toBe(5000)
+    expect(r.usage?.inputTokens).toBe(10)
+    expect(r.usage?.outputTokens).toBe(7)
   })
 
   it('throws ProviderSchemaError when the tool input fails zod validation', async () => {
@@ -236,5 +252,41 @@ describe('AnthropicProvider', () => {
         { systemPrompt: 'sys', userText: 'usr', toolChoice: 'required' },
       ),
     ).rejects.toThrow(UpstreamError)
+  })
+})
+
+describe('mapAnthropicUsage', () => {
+  it('maps all four buckets, including cache_creation (cache-write)', () => {
+    expect(
+      mapAnthropicUsage({
+        input_tokens: 100,
+        cache_read_input_tokens: 50,
+        cache_creation_input_tokens: 200,
+        output_tokens: 30,
+      }),
+    ).toEqual({
+      inputTokens: 100,
+      cachedInputTokens: 50,
+      cacheCreationInputTokens: 200,
+      outputTokens: 30,
+    })
+  })
+
+  it('preserves a 0 cache-write bucket (warm-cache call, not an absent field)', () => {
+    expect(
+      mapAnthropicUsage({ input_tokens: 10, cache_creation_input_tokens: 0, output_tokens: 5 })
+        ?.cacheCreationInputTokens,
+    ).toBe(0)
+  })
+
+  it('returns undefined when usage is absent', () => {
+    expect(mapAnthropicUsage(undefined)).toBeUndefined()
+    expect(mapAnthropicUsage(null)).toBeUndefined()
+  })
+
+  it('omits null / undefined fields rather than emitting them', () => {
+    const u = mapAnthropicUsage({ input_tokens: 10, cache_read_input_tokens: null, output_tokens: 5 })
+    expect(u).toEqual({ inputTokens: 10, outputTokens: 5 })
+    expect(u && 'cachedInputTokens' in u).toBe(false)
   })
 })
