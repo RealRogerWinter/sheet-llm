@@ -3,8 +3,8 @@ title: Environment Flags & Config Reference
 subsystem: cross-cutting
 audience: [contributor, ai-agent]
 status: current
-last_verified: 2026-06-03
-verified_against: e6f5a58
+last_verified: 2026-06-04
+verified_against: ab82027
 source_paths:
   - src/lib/orchestrator/flags.ts
   - src/lib/orchestrator/generationTier.ts
@@ -32,6 +32,8 @@ source_paths:
   - src/lib/llm/client.ts
   - src/lib/shared/types.ts
   - src/instrumentation.ts
+  - src/lib/orchestrator/dailyQuota.ts
+  - src/lib/security/ipRisk.ts
   - playwright.config.ts
   - evals/lib/buildLiveCase.ts
   - evals/lib/pricing.ts
@@ -345,3 +347,31 @@ DATABASE_URL=file:./data/sheet-llm.db     # default; only file:* supported
 - [`docs/subsystems/orchestrator.md`](../subsystems/orchestrator.md),
   [`docs/subsystems/providers-llm.md`](../subsystems/providers-llm.md),
   [`docs/subsystems/auth-gdpr.md`](../subsystems/auth-gdpr.md)
+
+## Daily request quota & abuse gating (hosted-only)
+
+**HOSTED sheetllm.com ONLY; OFF BY DEFAULT** — inert unless `SL_DAILY_QUOTA_ENABLED`
+is set, so self-hosted/local installs are unaffected. All read fresh per request.
+Full design + Cloudflare runbook: [`daily-quota.md`](../subsystems/daily-quota.md).
+Readers: `src/lib/orchestrator/dailyQuota.ts`, `src/lib/security/ipRisk.ts`.
+
+| Var | Default | Meaning |
+| --- | --- | --- |
+| `SL_DAILY_QUOTA_ENABLED` | off | Master toggle for the daily quota on `/api/chat`. |
+| `SL_DAILY_QUOTA_ANON` | `5` | Anonymous requests / 24h, keyed on the pseudonymized CF-Connecting-IP. |
+| `SL_DAILY_QUOTA_FREE` | `10` | Verified logged-in (non-Pro) requests / 24h, keyed on userId. Unverified → the anon bucket. |
+| `SL_DAILY_QUOTA_WINDOW_SEC` | `86400` | Window length (seconds). |
+| `SL_DAILY_QUOTA_ANON_GLOBAL` | off | Optional instance-wide anon ceiling / window — aggregate backstop vs IP/account rotation. |
+| `SL_DAILY_QUOTA_MAX_ROWS` | `200000` | Fail-OPEN row cap (bounds table bloat; new keys past it are admitted without a row). |
+| `SL_DAILY_QUOTA_V6_PREFIX` | `56` | IPv6 prefix the anon key collapses to. |
+| `SL_DAILY_QUOTA_RETENTION_GRACE_SEC` | `3600` | Grace after a window closes before the anon IP row is reaped. |
+| `SL_IP_RISK_ENABLED` | off | Master toggle for the IP-reputation verdict. |
+| `SL_IP_RISK_TOR` | off | Treat `cf-ipcountry=T1` (Cloudflare's free TOR signal) as risky. |
+| `SL_IP_RISK_ASN` | off | Treat a denylisted client ASN as risky (needs the CF Transform Rule). |
+| `SL_IP_RISK_TRUSTED_ASN_HEADER` | `x-sl-client-asn` | Header the CF rule SETs to `ip.geoip.asnum` (trusted only on a CF request). |
+| `SL_IP_RISK_ASN_LIST_PATH` | `config/ip-risk-asns.json` | Datacenter/VPN ASN denylist file (mtime hot-reloaded). |
+| `SL_IP_RISK_EXTRA_DENY_ASNS` / `SL_IP_RISK_ALLOW_ASNS` | — | CSV deny-merge / allow-override (allow beats deny). |
+| `SL_IP_RISK_ALLOW_CIDRS` / `SL_IP_RISK_DENY_CIDRS` | — | CSV CIDR allow / deny (allow wins). |
+| `SL_IP_RISK_DEBUG` | off | Log per-request risk verdicts (hashed IP only). |
+| `SL_EDGE_AUTH_SECRET` | unset | Shared secret a CF Transform Rule SETs as `x-sl-edge-auth`; makes `isCfRequest()` independent of the CF-IP firewall. |
+| `SL_PRO_WAITLIST_NOTIFY` | unset | Operator email for `/api/pro-interest` (else `/pro` uses a `mailto:` fallback). |

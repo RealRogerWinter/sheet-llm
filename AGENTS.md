@@ -19,6 +19,15 @@ the architecture, flag reference, and rollback procedure, and
 [`evals/README.md`](evals/README.md) for the mock+live eval harness
 that pins the behavior.
 
+## Daily quota & abuse gating (hosted-only, off by default)
+
+`/api/chat` has an optional daily request-quota + IP-reputation layer that exists
+ONLY to protect tokens on the hosted demo at **https://sheetllm.com**. It is
+**disabled by default** (`SL_DAILY_QUOTA_ENABLED` unset) and inert for
+self-hosted/local installs — never enable it by default. Architecture, config,
+threat model, and the Cloudflare runbook are in
+[`docs/subsystems/daily-quota.md`](docs/subsystems/daily-quota.md).
+
 ## Documentation (read this to orient fast)
 
 The canonical documentation set lives in [`docs/`](docs/README.md). When
