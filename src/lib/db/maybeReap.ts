@@ -1,6 +1,7 @@
 import {
   reapExpiredAuthSessions,
   reapExpiredAuthTokens,
+  reapExpiredQuotaCounters,
   reapOrphanSessions,
   reapStalePartials,
 } from '@/lib/db/janitor'
@@ -78,10 +79,41 @@ export function maybeReapAuth(intervalMs = DEFAULT_INTERVAL_MS): void {
   })
 }
 
+let lastQuotaReapAt = 0
+let quotaScheduled = false
+
+/**
+ * Opportunistic GC of fully-expired daily-quota counters, throttled + microtask-
+ * deferred exactly like `maybeReapStalePartials`. Call from the chat route ONLY
+ * when the quota feature is enabled (the caller guards on isDailyQuotaEnabled) so
+ * a self-hosted instance with the flag off pays nothing. Also runs at boot
+ * (instrumentation.ts) so a quiet/redeployed instance still sweeps the IP-PII rows.
+ */
+export function maybeReapStaleQuota(intervalMs = DEFAULT_INTERVAL_MS): void {
+  const now = Date.now()
+  if (now - lastQuotaReapAt < intervalMs) return
+  lastQuotaReapAt = now
+  if (quotaScheduled) return
+  quotaScheduled = true
+  queueMicrotask(() => {
+    quotaScheduled = false
+    try {
+      const { reaped } = reapExpiredQuotaCounters()
+      if (reaped > 0) {
+        console.warn(`[janitor] reaped ${reaped} expired quota counters`)
+      }
+    } catch (e) {
+      console.error('[janitor] opportunistic quota reap failed', e)
+    }
+  })
+}
+
 /** Test-only: reset module state. */
 export function __resetForTesting(): void {
   lastReapAt = 0
   scheduled = false
   lastAuthReapAt = 0
   authScheduled = false
+  lastQuotaReapAt = 0
+  quotaScheduled = false
 }

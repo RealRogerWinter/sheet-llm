@@ -141,3 +141,31 @@ export function reapExpiredAuthSessions(
   `)
   return { reaped: runChanges(result) }
 }
+
+// Daily-quota retention (hosted abuse-gating layer). Anonymous 'a:' rows hold a
+// hashed/truncated IP — short-lived PII — so they're reaped once their window
+// has fully CLOSED plus a small grace (so a live or just-closed window is never
+// deleted out from under an active limit). The cutoff uses the SAME
+// SL_DAILY_QUOTA_WINDOW_SEC the counting side (dailyQuota.ts) uses, read here
+// directly to avoid an orchestrator→db import; a longer configured window only
+// makes the reaper MORE conservative. window_start is indexed, so the scan is
+// bounded. 'u:' rows are erased on account deletion via FK cascade; this reaper
+// covers anon rows + any abandoned 'u:'/'*' rows.
+const QUOTA_WINDOW_DEFAULT_SEC = 24 * 60 * 60 // mirror dailyQuota default
+const QUOTA_RETENTION_GRACE_DEFAULT_SEC = 60 * 60
+function quotaIntEnv(name: string, def: number): number {
+  const n = Number(process.env[name])
+  return Number.isInteger(n) && n > 0 ? n : def
+}
+
+/**
+ * Hard-delete fully-expired request_quota rows past the window+grace cutoff.
+ * Idempotent. Sync (better-sqlite3). Returns `{reaped}`. No-op on an empty table.
+ */
+export function reapExpiredQuotaCounters(db = getDb()): { reaped: number } {
+  const win = quotaIntEnv('SL_DAILY_QUOTA_WINDOW_SEC', QUOTA_WINDOW_DEFAULT_SEC)
+  const grace = quotaIntEnv('SL_DAILY_QUOTA_RETENTION_GRACE_SEC', QUOTA_RETENTION_GRACE_DEFAULT_SEC)
+  const cutoff = Math.floor(Date.now() / 1000) - win - grace
+  const result = db.run(sql`DELETE FROM request_quota WHERE window_start < ${cutoff}`)
+  return { reaped: runChanges(result) }
+}
