@@ -64,8 +64,10 @@ export function ensureWallet(userId: string, db: Db = getDb()): void {
     .run()
 }
 
+export type HoldStatus = 'active' | 'settled' | 'released'
+
 export type HoldResult =
-  | { ok: true; holdId: string }
+  | { ok: true; holdId: string; reused: boolean; status: HoldStatus }
   | { ok: false; reason: 'insufficient_credits'; available: number; requested: number }
 
 /**
@@ -90,11 +92,16 @@ export function placeHold(
   const expiresAt = now + (input.ttlSec ?? DEFAULT_HOLD_TTL_SEC)
   return db.transaction((tx): HoldResult => {
     const existing = tx
-      .select({ id: creditHolds.id })
+      .select({ id: creditHolds.id, status: creditHolds.status })
       .from(creditHolds)
       .where(eq(creditHolds.idempotencyKey, input.idempotencyKey))
       .get()
-    if (existing) return { ok: true, holdId: existing.id }
+    if (existing) {
+      // Idempotent retry. `status` tells the caller whether the original
+      // request already completed (settled/released) — a TERMINAL hold must NOT
+      // be treated as a fresh reservation (the follow-up settle will refuse it).
+      return { ok: true, holdId: existing.id, reused: true, status: existing.status as HoldStatus }
+    }
 
     const res = tx
       .update(creditWallets)
@@ -128,7 +135,7 @@ export function placeHold(
         createdAt: now,
       })
       .run()
-    return { ok: true, holdId }
+    return { ok: true, holdId, reused: false, status: 'active' }
   })
 }
 
@@ -207,7 +214,8 @@ export function settleHold(
     const debit = Math.min(input.creditsCharged, hold.credits)
     const overHold = input.creditsCharged > hold.credits
 
-    tx.update(creditWallets)
+    const upd = tx
+      .update(creditWallets)
       .set({
         balance: sql`${creditWallets.balance} - ${debit}`,
         held: sql`${creditWallets.held} - ${hold.credits}`,
@@ -216,6 +224,14 @@ export function settleHold(
       })
       .where(eq(creditWallets.userId, hold.userId))
       .run()
+    // A settle MUST debit exactly one wallet row. If it matched none (a missing
+    // or inconsistent wallet), refuse — never append a usage_ledger row that
+    // asserts a charge which never debited a balance. Throwing rolls the txn back.
+    if (upd.changes !== 1) {
+      throw new Error(
+        `settleHold: wallet UPDATE matched ${upd.changes} rows for user ${hold.userId} (hold ${input.holdId})`,
+      )
+    }
 
     tx.update(creditHolds)
       .set({ status: 'settled', settledAt: now })
@@ -278,6 +294,10 @@ export function releaseHold(holdId: string, db: Db = getDb()): { released: boole
   })
 }
 
+export type CreditResult =
+  | { applied: true; balanceAfter: number }
+  | { applied: false; reason: 'duplicate' | 'insufficient_balance'; balanceAfter: number }
+
 /**
  * Grant credits (Stripe purchase / promo / refund). Atomic: bump the balance
  * and append the immutable credit_purchases row. Idempotent on `externalRef`
@@ -294,32 +314,49 @@ export function creditWallet(
     currency?: string
   },
   db: Db = getDb(),
-): { applied: boolean; balanceAfter: number } {
+): CreditResult {
   if (!Number.isInteger(input.creditsDelta)) {
     throw new Error(`wallet: creditsDelta must be an integer (got ${input.creditsDelta})`)
   }
   const now = nowSec()
-  return db.transaction((tx): { applied: boolean; balanceAfter: number } => {
+  return db.transaction((tx): CreditResult => {
     if (input.externalRef) {
       const dup = tx
         .select({ id: creditPurchases.id })
         .from(creditPurchases)
         .where(eq(creditPurchases.externalRef, input.externalRef))
         .get()
-      if (dup) return { applied: false, balanceAfter: getWallet(input.userId, tx as unknown as Db).balance }
+      if (dup)
+        return { applied: false, reason: 'duplicate', balanceAfter: getWallet(input.userId, tx as unknown as Db).balance }
     }
     tx.insert(creditWallets)
       .values({ userId: input.userId, balance: 0, held: 0, version: 0, updatedAt: now })
       .onConflictDoNothing()
       .run()
-    tx.update(creditWallets)
+    // Guard-in-the-write: a debit (negative delta — refund/chargeback) must not
+    // drop the balance below the held amount (or below 0). A positive grant
+    // always passes. Avoids a raw CHECK violation on the Stripe refund path.
+    const upd = tx
+      .update(creditWallets)
       .set({
         balance: sql`${creditWallets.balance} + ${input.creditsDelta}`,
         version: sql`${creditWallets.version} + 1`,
         updatedAt: now,
       })
-      .where(eq(creditWallets.userId, input.userId))
+      .where(
+        and(
+          eq(creditWallets.userId, input.userId),
+          sql`${creditWallets.balance} + ${input.creditsDelta} >= ${creditWallets.held}`,
+        ),
+      )
       .run()
+    if (upd.changes !== 1) {
+      return {
+        applied: false,
+        reason: 'insufficient_balance',
+        balanceAfter: getWallet(input.userId, tx as unknown as Db).balance,
+      }
+    }
     tx.insert(creditPurchases)
       .values({
         id: randomUUID(),

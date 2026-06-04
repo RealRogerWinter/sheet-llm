@@ -1,7 +1,8 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it } from 'vitest'
+import { eq } from 'drizzle-orm'
 import { makeTestDb } from '../../factories/db'
-import { users } from '@/lib/db/schema'
+import { creditWallets, usageLedger, users } from '@/lib/db/schema'
 import {
   creditWallet,
   ensureWallet,
@@ -54,6 +55,11 @@ describe('wallet engine', () => {
     const a = placeHold({ userId: 'u1', requestId: 'r1', idempotencyKey: 'k1', credits: 30 }, db)
     const b = placeHold({ userId: 'u1', requestId: 'r1', idempotencyKey: 'k1', credits: 30 }, db)
     expect(a.ok && b.ok && a.holdId === b.holdId).toBe(true)
+    if (a.ok) expect(a.reused).toBe(false)
+    if (b.ok) {
+      expect(b.reused).toBe(true)
+      expect(b.status).toBe('active')
+    }
     expect(getWallet('u1', db).held).toBe(30) // not 60
   })
 
@@ -132,5 +138,25 @@ describe('wallet engine', () => {
     expect(getWallet('u1', db).held).toBe(40)
     expect(reapExpiredHolds(db, 10_000_000_000)).toBe(1) // clock far in the future
     expect(getWallet('u1', db).held).toBe(0)
+  })
+
+  it('settle against a missing wallet THROWS (no phantom ledger row)', () => {
+    creditWallet({ userId: 'u1', creditsDelta: 100, source: 'manual' }, db)
+    const h = placeHold({ userId: 'u1', requestId: 'r1', idempotencyKey: 'k1', credits: 40 }, db)
+    if (!h.ok) throw new Error('hold failed')
+    db.delete(creditWallets).where(eq(creditWallets.userId, 'u1')).run() // wallet vanishes
+    expect(() =>
+      settleHold({ holdId: h.holdId, creditsCharged: 23, kind: 'x', requestId: 'r1', idempotencyKey: 'led-1' }, db),
+    ).toThrow()
+    expect(db.select().from(usageLedger).all()).toHaveLength(0) // rolled back: no phantom row
+  })
+
+  it('creditWallet refuses a debit that would drop balance below held', () => {
+    creditWallet({ userId: 'u1', creditsDelta: 50, source: 'manual' }, db)
+    placeHold({ userId: 'u1', requestId: 'r1', idempotencyKey: 'k1', credits: 30 }, db) // held 30, available 20
+    const r = creditWallet({ userId: 'u1', creditsDelta: -40, source: 'refund', externalRef: 'ref-1' }, db)
+    expect(r.applied).toBe(false)
+    if (!r.applied) expect(r.reason).toBe('insufficient_balance')
+    expect(getWallet('u1', db).balance).toBe(50) // unchanged
   })
 })
