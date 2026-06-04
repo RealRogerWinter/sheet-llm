@@ -87,6 +87,9 @@ be detected mechanically — see
 | [Adding a Notation Feature](guides/adding-a-notation-feature.md) | End-to-end recipe: type → ABC → render → tool → MusicXML → palette. |
 | [Adding an LLM Provider](guides/adding-a-provider.md) | Recipe: register a provider, selection tiers, failover, system blocks. |
 | [Durability & Restore Runbook](guides/durability-runbook.md) | Litestream WAL-to-object-storage replication, the `SL_REQUIRE_WAL` launch gate, and restore procedure. |
+| [Self-Hosted VPS Deployment](guides/deploy-vps.md) | Production topology: Cloudflare → Caddy → Docker → Litestream/R2; image, container start sequence, host layout, pull-based deploy. |
+| [Security Hardening & Threat Model](guides/security-hardening.md) | Defense-in-depth: origin lock (ufw CF-IP + AOP mTLS), host hardening, secret hygiene, LLM cost-abuse controls (rate limit + Turnstile). |
+| [CI/CD Pipeline & Build-in-Public](guides/ci-cd-pipeline.md) | The CircleCI gate (timing-split tests, schema-drift), build→approve→deploy, and the build-in-public philosophy. |
 | [Local models (Ollama)](local-models.md) | Run sheet-llm against a local Ollama LLM for offline/zero-cost dev. |
 
 ## Reference
