@@ -167,7 +167,7 @@ function matchAnyCidr(ip: string, name: string): boolean {
  * → TOR → (allow-ASN → deny-ASN) → clear. Allow always beats deny. Header trust
  * is gated behind isCfRequest(); off-CF returns "clear" (never downgrades risk).
  */
-export function assessClientRisk(request: Request): RiskVerdict {
+function evaluateRisk(request: Request): RiskVerdict {
   if (!isIpRiskEnabled()) return { risky: false, reason: 'disabled' }
   if (!isCfRequest(request)) return { risky: false, reason: 'off_cf' }
 
@@ -190,6 +190,29 @@ export function assessClientRisk(request: Request): RiskVerdict {
   return { risky: false, reason: 'clear', country }
 }
 
+/**
+ * Public entry point: classify the request and, ONLY under SL_IP_RISK_DEBUG, log
+ * the verdict so an operator can confirm the edge headers are flowing — the
+ * observed ASN, country, whether the request was trusted as Cloudflare
+ * (isCfRequest), and a HASHED IP (never the raw IP). The detail is built only when
+ * debugging, so the hot path pays nothing when the flag is off.
+ */
+export function assessClientRisk(request: Request): RiskVerdict {
+  const verdict = evaluateRisk(request)
+  if (process.env.SL_IP_RISK_DEBUG === '1') {
+    const ip = (request.headers.get('cf-connecting-ip') || '').trim()
+    logIpRisk('verdict', {
+      risky: verdict.risky,
+      reason: verdict.reason,
+      cf: isCfRequest(request),
+      asn: verdict.asn,
+      country: verdict.country,
+      ipHash: ip ? hashIpForLog(ip) : undefined,
+    })
+  }
+  return verdict
+}
+
 // --- logging (PII-safe) ---
 let lastWarnMs = 0
 
@@ -208,6 +231,11 @@ export function logIpRisk(event: string, detail: Record<string, unknown>, always
     return
   }
   if (process.env.SL_IP_RISK_DEBUG === '1') console.warn(`[ip-risk] ${event}`, JSON.stringify(detail))
+}
+
+/** A short, non-reversible tag for an IP — debug logs only, never the raw IP. */
+export function hashIpForLog(ip: string): string {
+  return crypto.createHash('sha256').update(ip).digest('base64url').slice(0, 12)
 }
 
 /** Test-only: drop the denylist-file cache so a fresh file is re-read. */
