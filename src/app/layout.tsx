@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import RecoveryBoot from "@/components/RecoveryBoot";
+import TurnstileGate from "@/components/TurnstileGate";
 import "./globals.css";
 import "abcjs/abcjs-audio.css";
 import "@/styles/abcjs-overlay.css";
@@ -41,6 +42,7 @@ export default function RootLayout({
       </head>
       <body>
         <RecoveryBoot />
+        <TurnstileGate siteKey={process.env.TURNSTILE_SITE_KEY ?? ""} />
         {children}
       </body>
     </html>

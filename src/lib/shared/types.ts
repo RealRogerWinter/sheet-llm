@@ -415,6 +415,7 @@ export type ChatErrorCode =
   | 'chat_not_found'
   | 'chat_full'
   | 'rate_limited'
+  | 'bot_check_required'
   | 'upstream_error'
   | 'validation_failed'
   | 'refused'
