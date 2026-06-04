@@ -30,7 +30,7 @@ export function DragPreviewOverlay() {
         left: target.clientX - 1,
         top: 0,
         width: 2,
-        height: '100vh',
+        height: '100dvh',
         background: 'rgba(72, 187, 120, 0.75)',
         pointerEvents: 'none',
         zIndex: 100,

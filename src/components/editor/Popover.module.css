@@ -17,6 +17,12 @@
   flex-direction: column;
   gap: 10px;
   animation: popoverFadeIn 120ms ease-out;
+  /* Never exceed the viewport (minus an 8px gutter each side and any notch
+   * inset) — caps the fixed-width popover/palette overrides (360/480px) so
+   * they don't overflow a narrow phone. The JS clamp keeps `left` in bounds;
+   * this keeps the box itself in bounds. */
+  max-width: calc(100vw - 2 * var(--gap-2) - var(--safe-l) - var(--safe-r));
+  box-sizing: border-box;
 }
 
 @keyframes popoverFadeIn {

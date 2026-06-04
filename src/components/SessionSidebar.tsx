@@ -8,6 +8,7 @@ import {
   type KeyboardEvent,
 } from 'react'
 import { useChatStore } from '@/lib/chat/state'
+import { mq as bp } from '@/lib/ui/breakpoints'
 import type {
   SessionListResponse,
   SessionSummary,
@@ -106,7 +107,7 @@ export default function SessionSidebar() {
         setSidebarOpen(false)
         return
       }
-      if (typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches) {
+      if (typeof window !== 'undefined' && window.matchMedia(bp.up('lg')).matches) {
         if (!sidebarCollapsed) setSidebarCollapsed(true)
       }
     }
@@ -122,12 +123,12 @@ export default function SessionSidebar() {
     if (typeof window === 'undefined') return
     const root = document.documentElement
     const apply = () => {
-      const isDesktop = window.matchMedia('(min-width: 1024px)').matches
+      const isDesktop = window.matchMedia(bp.up('lg')).matches
       const docked = isDesktop && !sidebarCollapsed
       root.style.setProperty('--sidebar-offset', docked ? '280px' : '0px')
     }
     apply()
-    const mq = window.matchMedia('(min-width: 1024px)')
+    const mq = window.matchMedia(bp.up('lg'))
     const onMq = () => apply()
     if (mq.addEventListener) mq.addEventListener('change', onMq)
     else mq.addListener(onMq)
