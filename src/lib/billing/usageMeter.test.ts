@@ -38,6 +38,22 @@ describe('usageMeter', () => {
     expect(totals?.inputTokens).toBe(500)
   })
 
+  it('clamps a malformed usage value (NaN / negative / fractional) to 0', async () => {
+    const totals = await runWithUsageMeter('r', async () => {
+      recordProviderCall('claude-sonnet-4-6', {
+        inputTokens: Number.NaN,
+        outputTokens: -100,
+        cacheCreationInputTokens: 1.5,
+      })
+      return currentMeterTotals()
+    })
+    expect(totals?.inputTokens).toBe(0)
+    expect(totals?.outputTokens).toBe(0)
+    expect(totals?.cacheCreationInputTokens).toBe(0)
+    expect(totals?.costUsd).toBe(0)
+    expect(totals?.callCount).toBe(1)
+  })
+
   it('is a no-op outside a meter scope (never throws)', () => {
     expect(() => recordProviderCall('claude-sonnet-4-6', { inputTokens: 100 })).not.toThrow()
     expect(currentMeterTotals()).toBeUndefined()

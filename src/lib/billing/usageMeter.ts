@@ -70,22 +70,36 @@ export function recordProviderCall(model: string, usage: ProviderUsage | undefin
   if (!store) return
   const t = store.totals
   t.callCount++
-  t.inputTokens += usage?.inputTokens ?? 0
-  t.cachedInputTokens += usage?.cachedInputTokens ?? 0
-  t.cacheCreationInputTokens += usage?.cacheCreationInputTokens ?? 0
-  t.outputTokens += usage?.outputTokens ?? 0
+  // Coerce each bucket to a safe non-negative integer up front — a malformed
+  // / NaN usage value must never corrupt the running tally (provider
+  // responses are always integer counts).
+  const input = safeCount(usage?.inputTokens)
+  const cacheRead = safeCount(usage?.cachedInputTokens)
+  const cacheWrite = safeCount(usage?.cacheCreationInputTokens)
+  const output = safeCount(usage?.outputTokens)
+  t.inputTokens += input
+  t.cachedInputTokens += cacheRead
+  t.cacheCreationInputTokens += cacheWrite
+  t.outputTokens += output
   try {
     t.costUsd += billableCostUsd(model, {
-      uncachedInputTokens: usage?.inputTokens ?? 0,
-      outputTokens: usage?.outputTokens ?? 0,
-      cacheReadInputTokens: usage?.cachedInputTokens ?? 0,
-      cacheCreationInputTokens: usage?.cacheCreationInputTokens ?? 0,
+      uncachedInputTokens: input,
+      outputTokens: output,
+      cacheReadInputTokens: cacheRead,
+      cacheCreationInputTokens: cacheWrite,
     })
   } catch {
     // Unpriced / invalid model — keep the token tally, flag the gap, leave
     // cost untouched. (The strict billing path in PR-5 fails closed instead.)
     t.unpricedCalls++
   }
+}
+
+/** Coerce a usage count to a safe non-negative integer (provider responses
+ *  are integer counts; this guards a malformed / NaN value from corrupting
+ *  the running tally). */
+function safeCount(n: number | undefined): number {
+  return Number.isInteger(n) && (n as number) >= 0 ? (n as number) : 0
 }
 
 /** Snapshot of the ambient request meter (undefined outside a scope). */
