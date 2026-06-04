@@ -45,6 +45,7 @@ does not).
 - [Self-Hosted VPS Deployment](guides/deploy-vps.md): production topology (Cloudflare → Caddy → Docker → Litestream/R2), image build, container start, pull-based deploy.
 - [Security Hardening & Threat Model](guides/security-hardening.md): origin lock (ufw CF-IP + AOP mTLS), host hardening, secret hygiene, LLM cost-abuse controls (rate limit + Turnstile).
 - [CI/CD Pipeline & Build-in-Public](guides/ci-cd-pipeline.md): CircleCI gate (timing-split, schema-drift), build→approve→deploy, build-in-public philosophy.
+- [Host Monitoring & Alerting](guides/monitoring.md): five host checks (health, litestream, disk, AOP-cert, cf-ufw) behind a systemd timer, email/webhook alerts.
 - [Local models (Ollama)](local-models.md): run sheet-llm against a local Ollama LLM for offline/zero-cost dev.
 
 ### Reference

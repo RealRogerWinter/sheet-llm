@@ -1,0 +1,13 @@
+# Oneshot that runs all sheet-llm host checks. Triggered by sheetllm-monitor.timer.
+# Runs as root: needs docker, systemctl, and read access to /etc/caddy.
+[Unit]
+Description=sheet-llm host monitoring checks
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/sheetllm-monitoring/run-all.sh
+# Don't let a hung curl/docker exec wedge the run.
+TimeoutStartSec=120
+Nice=10
