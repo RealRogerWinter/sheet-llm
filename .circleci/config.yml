@@ -73,16 +73,21 @@ jobs:
       - attach_workspace: { at: ~/app }
       - setup_pnpm
       - run:
-          name: Vitest (file-count shard across containers; JUnit -> Test Insights)
+          name: Vitest (timing-split across containers; JUnit -> Test Insights)
           command: |
             mkdir -p test-results
-            # File-count sharding (vitest --shard). NOTE: this is count-balanced,
-            # not timing-balanced — timing split is a follow-up (vitest JUnit has
-            # no per-case file= attr for `circleci tests split --split-by=timings`).
+            # Smarter testing: timing-based split. `circleci tests split` balances
+            # the per-container file list using historical per-file timings recorded
+            # by store_test_results. vitest's JUnit puts the spec path in `classname`
+            # (no per-case file= attr), so we key the split on classname. The first
+            # run with no timing data auto-falls-back to a filesize split.
+            TESTFILES=$(circleci tests glob "tests/**/*.test.ts" "src/**/*.test.ts" \
+              | grep -vE "/eval/|/evals/|/e2e/" \
+              | circleci tests split --split-by=timings --timings-type=classname)
+            echo "This container's shard:"; echo "$TESTFILES"
+            [ -n "$TESTFILES" ] || { echo "empty shard — nothing to run"; exit 0; }
             # --retry=2 de-flakes the 2 known-flaky specs (api-chat-fork, midiToScore).
-            pnpm vitest run \
-              --exclude "**/eval/**" --exclude "**/evals/**" --exclude "**/tests/e2e/**" \
-              --shard=$((CIRCLE_NODE_INDEX + 1))/$CIRCLE_NODE_TOTAL \
+            pnpm vitest run $TESTFILES \
               --retry=2 \
               --reporter=default --reporter=junit --outputFile="test-results/junit-$CIRCLE_NODE_INDEX.xml"
       - store_test_results: { path: test-results }
