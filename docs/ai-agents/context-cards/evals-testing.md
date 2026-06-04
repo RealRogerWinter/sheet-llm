@@ -3,8 +3,8 @@ title: Evals & Testing — Context Card
 subsystem: evals-testing
 audience: [ai-agent, contributor]
 status: current
-last_verified: 2026-06-03
-verified_against: 150cb15
+last_verified: 2026-06-04
+verified_against: 213d7c1
 source_paths:
   - evals/lib/assertions.ts
   - evals/lib/buildLiveCase.ts
@@ -12,6 +12,7 @@ source_paths:
   - evals/lib/mockProvider.ts
   - evals/lib/baselines.ts
   - evals/lib/pricing.ts
+  - src/lib/billing/pricing.ts
   - evals/lib/svgPathDistance.ts
   - evals/lib/renderScoreSvg.ts
   - evals/lib/jsdomShim.ts
@@ -35,7 +36,7 @@ Four-tier eval harness (mock/smoke/visual/live) pinning orchestrator contracts o
 - `evals/lib/liveRunner.ts` — `runLiveCase` hits real `run` from `@/lib/orchestrator`; retry backoff; `kind:'ok'|'infra'`.
 - `evals/lib/mockProvider.ts` — `toolUseResponse`/`classifyResponse` canned wire payloads (eval file owns `vi.mock`).
 - `evals/lib/baselines.ts` — per-model-SHA ledger `evals/baselines/eval-scores.json`; `detectRegression`/`recordLiveResult`.
-- `evals/lib/pricing.ts` — `estimateCostUsd`; unknown model → 0 + warn, never blocks.
+- `evals/lib/pricing.ts` — re-exports the canonical cost model in `src/lib/billing/pricing.ts`: `PRICING` (cache-read + cache-write rates, incl. Opus 4.8), the lenient `estimateCostUsd` (unknown model → 0 + warn, never blocks evals), and the strict `billableCostUsd` (throws on an unpriced model so a customer debit never silently bills $0).
 - `evals/lib/svgPathDistance.ts` — `pathDistance(a,b)→metric∈[0,1]`; viewBox-normalized, bezier ctrl pts ignored.
 - `evals/lib/renderScoreSvg.ts` — `renderScoreSvg(score)` = scoreToAbc→abcjs→jsdom; needs DOM.
 - `evals/lib/jsdomShim.ts` — `getBBox` polyfill, ONE place; `installGetBBoxPolyfill()` + `…On(win)`.
