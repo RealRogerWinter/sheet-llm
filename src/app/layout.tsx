@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import RecoveryBoot from "@/components/RecoveryBoot";
 import TurnstileGate from "@/components/TurnstileGate";
@@ -19,6 +19,21 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "sheet-llm",
   description: "Sheet music generating chatbot powered by Claude",
+};
+
+// `viewportFit: 'cover'` is the prerequisite for non-zero env(safe-area-inset-*)
+// on notched devices; the editor's own pinch-zoom handles score magnification,
+// but page user-scaling is intentionally left enabled for accessibility (no
+// maximumScale/userScalable lock). themeColor matches --paper in each scheme so
+// the mobile browser chrome blends with the page.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0f1115" },
+  ],
 };
 
 // Runs synchronously in <head> before first paint to set data-theme on

@@ -52,6 +52,63 @@
    * components aren't mounted (e.g. SSR, no score loaded). */
   --transport-height: 0px;
   --sidebar-offset: 0px;
+
+  /* ── Responsive design tokens ──────────────────────────────────────────
+   * Breakpoint mirror of src/lib/ui/breakpoints.ts. CSS @media CANNOT read
+   * custom properties, so these are for clamp()/calc() inputs and docs only;
+   * the JS module is the enforced source of truth and every @media px literal
+   * must equal one of these. */
+  --bp-xs: 360;
+  --bp-sm: 480;
+  --bp-md: 768;
+  --bp-lg: 1024;
+  --bp-xl: 1280;
+  --bp-xxl: 1536;
+
+  /* Fluid type scale (clamp: min → preferred(vw) → max). Floors equal today's
+   * sizes so the phone layout is unchanged; sizes grow gently toward desktop.
+   * Adopt opt-in per component — do NOT reset the global body font here. */
+  --text-xs: clamp(0.6875rem, 0.66rem + 0.14vw, 0.75rem); /* 11 → 12 */
+  --text-sm: clamp(0.75rem, 0.72rem + 0.18vw, 0.8125rem); /* 12 → 13 */
+  --text-base: clamp(0.875rem, 0.85rem + 0.18vw, 0.9375rem); /* 14 → 15 */
+  --text-md: clamp(0.9375rem, 0.9rem + 0.25vw, 1.0625rem); /* 15 → 17 */
+  --text-lg: clamp(1rem, 0.93rem + 0.5vw, 1.25rem); /* 16 → 20 */
+  --text-xl: clamp(1.125rem, 1rem + 0.8vw, 1.5rem); /* 18 → 24 */
+
+  /* Fluid space scale. EXTENDS the fixed --gap-1..8 (which stay for precise
+   * intra-component spacing); use --space-* for outer shell / page rhythm. */
+  --space-2xs: clamp(0.25rem, 0.24rem + 0.05vw, 0.375rem);
+  --space-xs: clamp(0.5rem, 0.47rem + 0.15vw, 0.75rem);
+  --space-sm: clamp(0.75rem, 0.7rem + 0.25vw, 1rem);
+  --space-md: clamp(1rem, 0.9rem + 0.5vw, 1.5rem);
+  --space-lg: clamp(1.5rem, 1.3rem + 1vw, 2.5rem);
+  --space-xl: clamp(2rem, 1.6rem + 2vw, 4rem);
+
+  /* Sizing tokens — single source for dimensions currently hardcoded across
+   * modules. Values equal today's literals (adoption is a separate, no-op
+   * swap in PR-2). --app-header-height keeps its existing name (already
+   * referenced via fallback in ChatHistoryPanel) and gets a real default. */
+  --app-header-height: 73px;
+  --sidebar-w: 280px;
+  --panel-w: 360px;
+  --score-max: 960px;
+  --score-empty-max: 720px;
+  --prompt-max: 720px;
+  --palette-w: 480px;
+  --ctx-menu-w: 240px;
+  --popover-w: 320px;
+
+  /* Notch / home-indicator safe-area insets. Non-zero only when the viewport
+   * `viewportFit: 'cover'` is set (see app/layout.tsx). Referenced as tokens
+   * so they are auditable and overridable in tests. */
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+
+  /* Minimum touch-target size (WCAG / 2026 touch guidance). Applied under
+   * @media (pointer: coarse) by the components that own touch controls. */
+  --touch-target: 44px;
 }
 
 [data-theme='dark'] {

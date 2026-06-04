@@ -25,3 +25,13 @@
   fill: #1e40af;
   stroke: #1e40af;
 }
+
+/* Interactive glyphs own all touch gestures: the surrounding .scoreArea is
+   `pan-y` (one-finger scroll), but a drag that begins on a note/rest must be
+   a pitch/position drag — never page scroll — so these opt out of browser
+   touch handling entirely. (Pointer-based drag/tap handlers are wired in
+   later PRs; this rule is inert until then.) */
+.abcjs-note,
+.abcjs-rest {
+  touch-action: none;
+}

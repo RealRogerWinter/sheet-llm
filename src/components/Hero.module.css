@@ -20,6 +20,17 @@
    * `auto` purely as a harmless safety net (it won't trigger in normal
    * use). */
   overflow-x: auto;
+  /* Touch-gesture routing for the score surface. `pan-y` lets a one-finger
+   * vertical drag scroll the page while the browser yields horizontal pan and
+   * pinch-zoom to our JS handlers (tap-to-place, note drag, pinch-zoom — wired
+   * in later PRs). Interactive note/rest glyphs additionally opt into
+   * `touch-action: none` (abcjs-overlay.css) so a vertical pitch-drag isn't
+   * stolen by page scroll. Callout/selection are suppressed so iOS long-press
+   * opens our context menu instead of the native text magnifier. */
+  touch-action: pan-y;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .viewportTools {

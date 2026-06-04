@@ -12,7 +12,7 @@
 .dialog {
   width: 100%;
   max-width: 640px;
-  max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
   display: flex;
   flex-direction: column;
   background: var(--paper);
