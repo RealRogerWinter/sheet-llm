@@ -91,6 +91,8 @@ describe('assessClientRisk', () => {
     expect(logged).toMatch(/\[ip-risk\] verdict/)
     expect(logged).toContain('datacenter_asn')
     expect(logged).toContain('64500') // observed ASN, for verifying the Transform Rule
+    expect(logged).toContain('DE') // observed country (cf-ipcountry)
+    expect(logged).toContain('"cf":true') // request trusted as Cloudflare (isCfRequest)
     expect(logged).not.toContain('9.9.9.9') // raw IP must never be logged
   })
 
