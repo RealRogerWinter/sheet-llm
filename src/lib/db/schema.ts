@@ -379,6 +379,45 @@ export const authTokens = sqliteTable(
   (table) => [index('auth_tokens_user').on(table.userId)],
 )
 
+// ============================================================================
+// request_quota — durable per-identity DAILY request counter for the hosted
+// abuse-gating layer (HOSTED sheetllm.com ONLY; OFF by default — see
+// dailyQuota.ts / SL_DAILY_QUOTA_ENABLED). One row per quota key:
+//   'u:<userId>'  verified logged-in free tier (keyed on the account)
+//   'a:<hash>'    anonymous (keyed on the pseudonymized, normalized client IP)
+//   '*'           optional instance-wide anonymous ceiling
+// Unlike the in-memory burst limiter (requestRateLimit.ts), this MUST be durable:
+// the single container is redeployed frequently and an in-memory counter resets
+// on every deploy, refilling everyone's 24h budget. 'a:' rows are short-lived IP
+// PII and are reaped (janitor.ts#reapExpiredQuotaCounters); 'u:' rows carry
+// user_id so account deletion FK-cascades them (GDPR). The whole feature is inert
+// unless SL_DAILY_QUOTA_ENABLED is set, so self-hosted/local installs never write
+// a row.
+// ============================================================================
+export const requestQuota = sqliteTable(
+  'request_quota',
+  {
+    // Class-prefixed identity key. The prefix prevents an 'a:'/'u:' collision if
+    // an IP string ever equals a userId. 'a:' values are HMAC-pseudonymized.
+    quotaKey: text('quota_key').primaryKey(),
+    // Set ONLY for 'u:' rows so GDPR erasure is automatic via the users FK
+    // cascade (foreign_keys=ON). NULL for anonymous ('a:') and instance ('*')
+    // rows, which carry no subject and rely on short retention.
+    userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
+    // Epoch seconds of the first counted hit in the current window. Reset to now
+    // when now >= window_start + WINDOW_SEC (fixed window anchored at first hit).
+    windowStart: integer('window_start').notNull(),
+    // Hits counted in the current window; incremented via a guard-in-the-write
+    // UPDATE ... WHERE count < limit so the stored value can never exceed limit.
+    count: integer('count').notNull().default(0),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => [
+    // Bounds the retention reaper scan (DELETE WHERE window_start < cutoff).
+    index('request_quota_window').on(table.windowStart),
+  ],
+)
+
 export type User = typeof users.$inferSelect
 export type NewUser = typeof users.$inferInsert
 export type Session = typeof sessions.$inferSelect
@@ -395,3 +434,5 @@ export type OAuthAccount = typeof oauthAccounts.$inferSelect
 export type NewOAuthAccount = typeof oauthAccounts.$inferInsert
 export type AuthToken = typeof authTokens.$inferSelect
 export type NewAuthToken = typeof authTokens.$inferInsert
+export type RequestQuota = typeof requestQuota.$inferSelect
+export type NewRequestQuota = typeof requestQuota.$inferInsert

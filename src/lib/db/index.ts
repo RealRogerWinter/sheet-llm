@@ -74,6 +74,11 @@ function openDb(): DbInstance {
     }
   }
   sqlite.pragma('foreign_keys = ON')
+  // A contended write (e.g. concurrent /api/chat daily-quota increments) should
+  // WAIT briefly for the WAL writer lock instead of immediately throwing
+  // SQLITE_BUSY — which would otherwise fail-open the quota check under load.
+  // Global and low-risk: it only affects how long a writer blocks before erroring.
+  sqlite.pragma('busy_timeout = 5000')
   return drizzle(sqlite, { schema })
 }
 
