@@ -126,6 +126,23 @@ export interface ProviderCallOptions {
   }
 }
 
+/**
+ * Normalised per-call token usage, mirroring the Anthropic `usage`
+ * object. The buckets are DISJOINT (together they are the whole call).
+ */
+export interface ProviderUsage {
+  /** Uncached, non-cache-creation input tokens. */
+  inputTokens?: number
+  /** Cache-READ (hit) input tokens — billed at 0.1x. */
+  cachedInputTokens?: number
+  /** Cache-WRITE (`cache_creation_input_tokens`) input tokens — billed
+   *  ABOVE base input (1.25x for the 5-min TTL). Previously dropped, which
+   *  silently under-counted the cold-cache call of every cached prefix. */
+  cacheCreationInputTokens?: number
+  /** Output tokens. */
+  outputTokens?: number
+}
+
 export interface ProviderToolResult<T> {
   /** Parsed + zod-validated tool input. */
   input: T
@@ -139,11 +156,7 @@ export interface ProviderToolResult<T> {
   /** Optional intro/explanation text emitted alongside the tool call. */
   introText?: string
   /** Token usage (for budget tracking + observability). */
-  usage?: {
-    inputTokens?: number
-    cachedInputTokens?: number
-    outputTokens?: number
-  }
+  usage?: ProviderUsage
 }
 
 /**
@@ -160,11 +173,7 @@ export type TextStreamEvent =
       finalText: string
       /** Normalised reason: 'end_turn' | 'max_tokens' | 'stop_sequence' | string. */
       stopReason?: string
-      usage?: {
-        inputTokens?: number
-        cachedInputTokens?: number
-        outputTokens?: number
-      }
+      usage?: ProviderUsage
     }
   | { type: 'error'; error: Error }
 
