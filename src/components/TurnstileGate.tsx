@@ -1,22 +1,27 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 /**
- * Renders a Cloudflare Turnstile widget (managed mode) and exchanges the token
- * for a server-side clearance cookie (POST /api/turnstile) so the LLM-cost
- * routes accept this client. Periodically re-runs the challenge to keep the
- * ~30-min clearance fresh, so a normal session never sees a `bot_check_required`.
+ * Renders a Cloudflare Turnstile widget and exchanges its token for a
+ * server-side clearance cookie (POST /api/turnstile) so the LLM-cost routes
+ * accept this client. Periodically re-runs the challenge to keep the ~30-min
+ * clearance fresh, so a normal session never sees a `bot_check_required`.
  *
- * Renders nothing when `siteKey` is empty (Turnstile not configured), so the app
- * is unchanged on non-Turnstile deploys. The site key is public (it ships to the
- * browser by design); the secret key stays server-side.
+ * Renders nothing when `siteKey` is empty (Turnstile not configured), so the
+ * app is unchanged on non-Turnstile deploys. The site key is public (it ships
+ * to the browser by design); the secret key stays server-side.
+ *
+ * This widget is **visible and self-diagnosing**: the script-load and render
+ * failure modes are surfaced (console + a small on-screen note) instead of
+ * being swallowed, because a silently-failing managed widget once blocked
+ * every user with no signal. `data-cfasync="false"` keeps Cloudflare Rocket
+ * Loader from deferring/mangling the api.js load.
  */
 
 const SCRIPT_SRC = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
 const REFRESH_MS = 25 * 60 * 1000 // before the 30-min clearance cookie expires
 
-// Minimal shape of the global Turnstile API we use.
 interface TurnstileApi {
   render: (el: HTMLElement, opts: Record<string, unknown>) => string
   reset: (id?: string) => void
@@ -28,48 +33,84 @@ declare global {
   }
 }
 
+type GateStatus = 'loading' | 'ready' | 'cleared' | 'error'
+
 export default function TurnstileGate({ siteKey }: { siteKey: string }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const widgetIdRef = useRef<string | null>(null)
+  const [status, setStatus] = useState<GateStatus>('loading')
+  const [detail, setDetail] = useState<string>('')
 
   useEffect(() => {
     if (!siteKey) return
     let cancelled = false
 
+    const fail = (msg: string) => {
+      if (cancelled) return
+      console.error('[turnstile] ' + msg)
+      setStatus('error')
+      setDetail(msg)
+    }
+
     async function clear(token: string) {
       try {
-        await fetch('/api/turnstile', {
+        const res = await fetch('/api/turnstile', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ token }),
         })
+        if (cancelled) return
+        if (res.ok) {
+          setStatus('cleared')
+          setDetail('')
+        } else {
+          fail(`server rejected verification (HTTP ${res.status})`)
+        }
       } catch {
-        /* network hiccup — the next refresh retries */
+        fail('network error posting to /api/turnstile')
       }
     }
 
-    function render() {
-      if (cancelled || widgetIdRef.current || !window.turnstile || !containerRef.current) return
-      widgetIdRef.current = window.turnstile.render(containerRef.current, {
-        sitekey: siteKey,
-        callback: (token: string) => clear(token),
-        'error-callback': () => {},
-        'timeout-callback': () => window.turnstile?.reset(widgetIdRef.current ?? undefined),
-      })
+    function renderWidget() {
+      if (cancelled || widgetIdRef.current || !containerRef.current) return
+      if (!window.turnstile) {
+        fail('turnstile global missing after script load')
+        return
+      }
+      try {
+        widgetIdRef.current = window.turnstile.render(containerRef.current, {
+          sitekey: siteKey,
+          callback: (token: string) => clear(token),
+          'error-callback': (code?: string) => {
+            // Surfaces e.g. 110200 (domain not allowed) / 110100 (invalid sitekey)
+            fail(`challenge error${code ? ' ' + code : ''}`)
+            return true
+          },
+          'timeout-callback': () =>
+            window.turnstile?.reset(widgetIdRef.current ?? undefined),
+        })
+        if (!cancelled) setStatus((s) => (s === 'cleared' ? s : 'ready'))
+      } catch (e) {
+        fail('render threw (check sitekey / domain): ' + (e instanceof Error ? e.message : String(e)))
+      }
     }
 
-    const existing = document.querySelector(`script[src^="${SCRIPT_SRC.split('?')[0]}"]`)
+    const existing = document.querySelector<HTMLScriptElement>('script[data-turnstile]')
     if (window.turnstile) {
-      render()
+      renderWidget()
     } else if (!existing) {
       const s = document.createElement('script')
       s.src = SCRIPT_SRC
       s.async = true
       s.defer = true
-      s.onload = render
+      s.setAttribute('data-turnstile', '')
+      s.setAttribute('data-cfasync', 'false') // exempt from Cloudflare Rocket Loader
+      s.onload = renderWidget
+      s.onerror = () => fail('failed to load challenges.cloudflare.com/api.js')
       document.head.appendChild(s)
     } else {
-      existing.addEventListener('load', render, { once: true })
+      existing.addEventListener('load', renderWidget, { once: true })
+      if (window.turnstile) renderWidget()
     }
 
     const iv = setInterval(() => {
@@ -93,13 +134,31 @@ export default function TurnstileGate({ siteKey }: { siteKey: string }) {
   }, [siteKey])
 
   if (!siteKey) return null
-  // Managed mode is non-interactive for most visitors; kept in a corner so a
-  // challenge is reachable if Cloudflare decides to present one.
+
+  // Visible, bottom-right. Cloudflare draws nothing in the container when a
+  // managed challenge auto-passes; if it needs interaction the user can see and
+  // complete it; if it fails to load we show why.
   return (
-    <div
-      ref={containerRef}
-      style={{ position: 'fixed', bottom: 8, right: 8, zIndex: 2147483646 }}
-      aria-hidden="true"
-    />
+    <div style={{ position: 'fixed', bottom: 12, right: 12, zIndex: 2147483646 }}>
+      <div ref={containerRef} />
+      {status === 'error' && (
+        <div
+          role="status"
+          style={{
+            marginTop: 6,
+            maxWidth: 300,
+            padding: '6px 8px',
+            fontSize: 12,
+            lineHeight: 1.3,
+            color: '#7a1f1f',
+            background: '#fde8e8',
+            border: '1px solid #f5b5b5',
+            borderRadius: 6,
+          }}
+        >
+          Bot check failed to load{detail ? `: ${detail}` : ''}.
+        </div>
+      )}
+    </div>
   )
 }
