@@ -1,6 +1,6 @@
 .menu {
   position: fixed;
-  z-index: 100;
+  z-index: var(--z-floating-menu);
   display: flex;
   align-items: center;
   gap: 4px;

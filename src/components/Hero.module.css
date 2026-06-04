@@ -3,7 +3,7 @@
   flex-direction: column;
   align-items: stretch;
   justify-content: center;
-  min-height: calc(100dvh - 73px); /* viewport minus header */
+  min-height: calc(100dvh - var(--app-header-height)); /* viewport minus header */
   padding: var(--gap-7) var(--gap-5);
   padding-bottom: calc(var(--gap-7) + var(--transport-height, 0px));
   gap: var(--gap-7);
@@ -11,7 +11,7 @@
 
 .scoreArea {
   width: 100%;
-  max-width: 960px;
+  max-width: var(--score-max);
   margin: 0 auto;
   color: var(--ink);
   /* Zoom is reflow-based (staffwidth + responsive), so the score always
@@ -39,7 +39,7 @@
 
 .scoreArea.empty {
   color: var(--rule);
-  max-width: 720px;
+  max-width: var(--score-empty-max);
 }
 
 .promptArea {

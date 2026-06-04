@@ -3,7 +3,7 @@
   bottom: calc(32px + var(--transport-height, 0px));
   left: 50%;
   transform: translateX(-50%);
-  z-index: 80;
+  z-index: var(--z-toast);
   display: flex;
   align-items: center;
   gap: var(--gap-3);

@@ -4,7 +4,7 @@
 
 .menu {
   position: fixed;
-  z-index: 200;
+  z-index: var(--z-context-menu);
   min-width: 200px;
   max-width: 300px;
   background: var(--paper);

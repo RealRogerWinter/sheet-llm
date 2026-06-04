@@ -1,6 +1,6 @@
 .coachmark {
   position: absolute;
-  z-index: 50;
+  z-index: var(--z-overlay);
   display: flex;
   flex-direction: column;
   gap: 8px;

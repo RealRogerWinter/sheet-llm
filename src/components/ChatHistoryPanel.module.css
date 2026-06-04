@@ -2,7 +2,7 @@
 .backdrop {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  z-index: var(--z-panel-backdrop);
   background: rgba(10, 10, 10, 0.06);
   animation: fade 140ms ease-out;
 }
@@ -12,7 +12,7 @@
   position: fixed;
   background: var(--paper);
   color: var(--ink);
-  z-index: 81;
+  z-index: var(--z-panel);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -22,10 +22,10 @@
  * animation. Overlays the right edge of the viewport; the score area stays
  * centered in the full window rather than reserving room for the panel. */
 .panel[data-mode='docked'] {
-  top: var(--app-header-height, 73px);
+  top: var(--app-header-height);
   right: 0;
-  width: 360px;
-  height: calc(100dvh - var(--app-header-height, 73px));
+  width: var(--panel-w);
+  height: calc(100dvh - var(--app-header-height));
   border-left: 1px solid var(--rule);
   box-shadow: -8px 0 24px rgba(10, 10, 10, 0.06);
 }
@@ -34,7 +34,7 @@
 .panel[data-mode='drawer'] {
   top: 0;
   right: 0;
-  width: min(360px, 92vw);
+  width: min(var(--panel-w), 92vw);
   height: 100dvh;
   border-left: 1px solid var(--rule);
   box-shadow: -8px 0 24px rgba(10, 10, 10, 0.06);

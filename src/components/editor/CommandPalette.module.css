@@ -2,7 +2,7 @@
  * search-input-wide frame and a vertical-scrollable command list. */
 
 .palette {
-  width: 480px;
+  width: var(--palette-w);
   max-width: calc(100vw - 16px);
   padding: 8px 10px 10px;
 }

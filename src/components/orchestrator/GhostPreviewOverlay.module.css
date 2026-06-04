@@ -12,7 +12,7 @@
   left: 50%;
   bottom: 96px;
   transform: translateX(-50%);
-  z-index: 900;
+  z-index: var(--z-ghost-overlay);
   display: flex;
   flex-direction: column;
   align-items: center;
