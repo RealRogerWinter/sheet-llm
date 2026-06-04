@@ -62,6 +62,12 @@ export function useStaffInteractions(scoreRef: RefObject<HTMLDivElement | null>)
       hasDown = true
     }
 
+    // Drop the armed tap if the gesture is cancelled (system gesture takeover,
+    // pinch, etc.) so a later pointerup can't be mistaken for a tap.
+    function onPointerCancel() {
+      hasDown = false
+    }
+
     function onPointerUp(e: PointerEvent) {
       if (!container) return
       // Only the primary pointer places a note — a second finger (e.g. during
@@ -208,10 +214,12 @@ export function useStaffInteractions(scoreRef: RefObject<HTMLDivElement | null>)
 
     container.addEventListener('pointerdown', onPointerDown)
     container.addEventListener('pointerup', onPointerUp)
+    container.addEventListener('pointercancel', onPointerCancel)
     document.addEventListener('pointerdown', onDocumentPointerDown)
     return () => {
       container.removeEventListener('pointerdown', onPointerDown)
       container.removeEventListener('pointerup', onPointerUp)
+      container.removeEventListener('pointercancel', onPointerCancel)
       document.removeEventListener('pointerdown', onDocumentPointerDown)
     }
   }, [scoreRef])
