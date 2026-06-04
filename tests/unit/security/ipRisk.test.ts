@@ -77,4 +77,32 @@ describe('assessClientRisk', () => {
     // attacker sends a benign ASN; the edge appends the real one → "7922, 24940"
     expect(assessClientRisk(req({ ...CF, 'x-sl-client-asn': '7922, 24940' })).risky).toBe(false)
   })
+
+  it('logs a verdict under SL_IP_RISK_DEBUG (reason/asn/country, never the raw IP)', async () => {
+    vi.stubEnv('SL_IP_RISK_ENABLED', '1')
+    vi.stubEnv('SL_IP_RISK_ASN', '1')
+    vi.stubEnv('SL_IP_RISK_DEBUG', '1')
+    vi.stubEnv('SL_IP_RISK_EXTRA_DENY_ASNS', '64500')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { assessClientRisk } = await import('@/lib/security/ipRisk')
+    assessClientRisk(req({ ...CF, 'x-sl-client-asn': '64500', 'cf-ipcountry': 'DE' }))
+    const logged = warn.mock.calls.map((c) => c.join(' ')).join('\n')
+    warn.mockRestore()
+    expect(logged).toMatch(/\[ip-risk\] verdict/)
+    expect(logged).toContain('datacenter_asn')
+    expect(logged).toContain('64500') // observed ASN, for verifying the Transform Rule
+    expect(logged).toContain('DE') // observed country (cf-ipcountry)
+    expect(logged).toContain('"cf":true') // request trusted as Cloudflare (isCfRequest)
+    expect(logged).not.toContain('9.9.9.9') // raw IP must never be logged
+  })
+
+  it('does not log a verdict when SL_IP_RISK_DEBUG is off', async () => {
+    vi.stubEnv('SL_IP_RISK_ENABLED', '1')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { assessClientRisk } = await import('@/lib/security/ipRisk')
+    assessClientRisk(req({ ...CF, 'cf-ipcountry': 'US' }))
+    const logged = warn.mock.calls.map((c) => c.join(' ')).join('\n')
+    warn.mockRestore()
+    expect(logged).not.toMatch(/\[ip-risk\] verdict/)
+  })
 })
