@@ -457,8 +457,11 @@ export const creditWallets = sqliteTable(
     updatedAt: integer('updated_at').notNull(),
   },
   () => [
-    // Overdraft + negative hold impossible at the storage layer.
-    check('credit_wallets_nonneg', sql`balance >= 0 AND held >= 0`),
+    // Overdraft AND a hold exceeding the balance are both impossible at the
+    // storage layer — available = balance - held can never go negative. The
+    // settle path updates balance + held in ONE atomic UPDATE so it never
+    // transiently violates this.
+    check('credit_wallets_solvent', sql`balance >= 0 AND held >= 0 AND held <= balance`),
   ],
 )
 
@@ -499,6 +502,12 @@ export const usageLedger = sqliteTable(
       onDelete: 'set null',
     }),
     requestId: text('request_id').notNull(),
+    // The hold this debit settled (NULL for a direct debit with no prior hold).
+    // Durable link for reconciliation/replay — request_id alone is non-unique
+    // (sectional generation places one hold + one ledger row per section).
+    holdId: text('hold_id').references((): AnySQLiteColumn => creditHolds.id, {
+      onDelete: 'set null',
+    }),
     idempotencyKey: text('idempotency_key').notNull().unique(), // retried request must not double-debit
     kind: text('kind').notNull(), // 'chat_generate' | 'chat_edit' | ... (app-validated)
     model: text('model'),
@@ -531,6 +540,9 @@ export const creditHolds = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     requestId: text('request_id').notNull(),
+    // Idempotency for hold PLACEMENT — a retried request (or a sectional
+    // section) re-finds its hold instead of stacking duplicates. UNIQUE.
+    idempotencyKey: text('idempotency_key').notNull().unique(),
     credits: integer('credits').notNull(), // reserved credits (conservative worst-case at hold time)
     status: text('status').notNull().default('active'), // 'active' | 'settled' | 'released'
     expiresAt: integer('expires_at').notNull(), // crash-recovery janitor releases 'active' holds past this
