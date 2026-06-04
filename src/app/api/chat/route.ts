@@ -14,7 +14,7 @@ import {
   getConversation,
   hasConversation,
 } from '@/lib/llm/conversations'
-import { maybeReapStalePartials } from '@/lib/db/maybeReap'
+import { maybeReapStalePartials, maybeReapStaleQuota } from '@/lib/db/maybeReap'
 import { getRequestUser } from '@/lib/auth/session'
 import { attachRecoveryHeader } from '@/lib/auth/attachRecovery'
 import type { AssistantContentBlock, ChatMessage } from '@/lib/llm/wrapper'
@@ -24,6 +24,7 @@ import { scoreToAbc } from '@/lib/music/scoreToAbc'
 import { ScoreSchema, type Score } from '@/lib/music/types'
 import { ValidationError } from '@/lib/music/errors'
 import type {
+  ChatCta,
   ChatErrorCode,
   ChatResponse,
   TranscriptResponse,
@@ -49,6 +50,8 @@ import { scoreHash } from '@/lib/orchestrator/scoreVersion'
 import { computeDeadlineAt } from '@/lib/orchestrator/deadline'
 import { resolveGenerationTier, BOUNDED_EMIT_CEILING } from '@/lib/orchestrator/generationTier'
 import type { GenerationTier } from '@/lib/orchestrator/generationTier'
+import { evaluateRequestQuota, isDailyQuotaEnabled } from '@/lib/orchestrator/dailyQuota'
+import { quotaErrorBody } from '@/lib/chat/quotaMessages'
 import { computeKeyStatus } from '@/lib/orchestrator/keyStatus'
 import type { ChatDebugPayload } from '@/lib/shared/types'
 
@@ -98,13 +101,15 @@ export function errorResponse(
   status: number,
   error: string,
   chatId?: string,
+  cta?: ChatCta,
 ) {
   // chatId is included so the client can keep its store pointed at
   // the same session and recover the orphan user row written by the
   // early `appendMessages([userTurn])` call. Omitted for errors that
   // fire before chatId resolution (parse / size / origin / lookup).
-  const body: { code: ChatErrorCode; error: string; chatId?: string } = { code, error }
+  const body: { code: ChatErrorCode; error: string; chatId?: string; cta?: ChatCta } = { code, error }
   if (chatId) body.chatId = chatId
+  if (cta) body.cta = cta
   return NextResponse.json(body, { status })
 }
 
@@ -362,15 +367,23 @@ export async function POST(request: Request) {
   // dedicated cron without leaving stale `partial` rows around between
   // server restarts.
   maybeReapStalePartials()
+  // Same opportunistic, throttled sweep for the daily-quota counters — gated so a
+  // self-hosted instance with the quota feature off does nothing.
+  if (isDailyQuotaEnabled()) maybeReapStaleQuota()
 
   // Per-request API key override (from debug panel) is threaded through
   // ProviderCallOptions.apiKeyOverride rather than mutating process.env —
   // env mutation raced with long-lived streams.
-  const response = await handleChat(session.userId, parsed)
+  const response = await handleChat(session.userId, session.authenticated, parsed, request)
   return attachRecoveryHeader(response, session)
 }
 
-async function handleChat(userId: string, parsed: z.infer<typeof ChatRequestSchema>) {
+async function handleChat(
+  userId: string,
+  authenticated: boolean,
+  parsed: z.infer<typeof ChatRequestSchema>,
+  request: Request,
+) {
   // Resolve chat id.
   let chatId: string
   if (parsed.chatId) {
@@ -487,6 +500,20 @@ async function handleChat(userId: string, parsed: z.infer<typeof ChatRequestSche
   // caller could POST debug.generationTier='pro' and bypass the paywall.
   // See isTierOverrideAllowed in generationTier.ts.
   const generationTier = await resolveGenerationTier(userId, parsed.debug?.generationTier)
+
+  // Daily request-quota gate (hosted abuse-gating layer; OFF by default — inert
+  // for self-hosters). Slotted AFTER identity + tier are known and BEFORE any
+  // orchestrator/LLM dispatch or SSE stream, so only requests that would actually
+  // spend tokens are counted. The increment is intentionally pre-dispatch and is
+  // NEVER refunded — moving token dispatch above this line, or adding a refund,
+  // reopens an abuse oracle. Pre-LLM rejects above (origin/burst/turnstile/parse/
+  // turn-cap/stale-score) never reach here, so they don't burn quota.
+  const quota = evaluateRequestQuota({ userId, authenticated }, generationTier, request)
+  if (!quota.ok) {
+    const body = quotaErrorBody(quota)
+    return errorResponse(body.code, body.httpStatus, body.message, chatId, body.cta)
+  }
+
   let orchestratorOutcome: Awaited<ReturnType<typeof runOrchestrator>> = null
   const tOrchStart = Date.now()
   try {
