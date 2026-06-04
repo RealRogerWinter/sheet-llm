@@ -191,6 +191,15 @@ export function settleHold(
       .where(eq(usageLedger.idempotencyKey, input.idempotencyKey))
       .get()
     if (existingLedger) {
+      // The idempotency_key namespace is SHARED with refund() but the two write
+      // opposite signs (charge >= 0, refund < 0). A negative row here means a
+      // refund key was reused as a settle key — a caller bug that would
+      // otherwise return a charge of a negative amount. Fail loud.
+      if (existingLedger.creditsCharged < 0) {
+        throw new Error(
+          `settleHold: idempotencyKey ${input.idempotencyKey} already names a REFUND row — settle/refund keys must be namespaced`,
+        )
+      }
       return {
         ok: true,
         ledgerId: existingLedger.id,
@@ -398,6 +407,12 @@ export type RefundResult =
  * can't mint unlimited credits. WHEN/how-much is decided by classifyRefund()
  * in refundPolicy.ts (this primitive only moves money safely).
  *
+ * IDEMPOTENCY-KEY NAMESPACE: `idempotencyKey` lives in the SAME UNIQUE column as
+ * settleHold()'s ledger key. Callers MUST namespace them (e.g. a `refund:`
+ * prefix derived server-side from the requestId + failure class) so one failure
+ * yields exactly one refund and a settle key is never reused. A reused settle
+ * key is caught — it throws rather than reporting a money-less "success".
+ *
  * NEVER call this for a user-initiated abort or a delivered result — that is
  * the policy's job to exclude.
  */
@@ -435,6 +450,15 @@ export function refund(
       .where(eq(usageLedger.idempotencyKey, input.idempotencyKey))
       .get()
     if (existing) {
+      // SHARED idempotency_key namespace with settleHold(), opposite sign. A
+      // non-negative row here means a settle (charge) key was reused as a refund
+      // key — without this guard refund() would short-circuit BEFORE crediting
+      // the wallet and report a bogus `reused` success that moved no money.
+      if (existing.creditsCharged > 0) {
+        throw new Error(
+          `refund: idempotencyKey ${input.idempotencyKey} already names a CHARGE row — settle/refund keys must be namespaced`,
+        )
+      }
       return {
         ok: true,
         ledgerId: existing.id,

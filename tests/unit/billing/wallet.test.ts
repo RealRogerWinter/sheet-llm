@@ -15,6 +15,7 @@ import {
   releaseHold,
   settleHold,
 } from '@/lib/billing/wallet'
+import { PER_FAILURE_REFUND_CAP_CREDITS } from '@/lib/billing/refundPolicy'
 
 type Db = ReturnType<typeof makeTestDb>
 
@@ -198,12 +199,38 @@ describe('wallet refund (service failures)', () => {
     expect(net).toBe(0)
   })
 
-  it('is idempotent on idempotencyKey (no double-credit)', () => {
+  it('is idempotent on idempotencyKey (no double-credit), and the reused row echoes the same amounts', () => {
     const a = refund({ userId: 'u1', requestId: 'r1', credits: 30, reason: 'error', idempotencyKey: 'rf-1' }, db)
     const b = refund({ userId: 'u1', requestId: 'r1', credits: 30, reason: 'error', idempotencyKey: 'rf-1' }, db)
     expect(a.ok && b.ok).toBe(true)
-    if (b.ok) expect(b.reused).toBe(true)
+    if (a.ok) {
+      expect(a.reused).toBe(false)
+      expect(a.creditsRefunded).toBe(30)
+    }
+    if (b.ok) {
+      expect(b.reused).toBe(true)
+      expect(b.creditsRefunded).toBe(30) // echoes the original, not 0 / not negated-twice
+      expect(b.balanceAfter).toBe(100)
+    }
     expect(getWallet('u1', db).balance).toBe(100) // credited exactly once, not 130
+  })
+
+  it('THROWS if a settle key is reused as a refund key (shared idempotency namespace)', () => {
+    // beforeEach already settled a charge under key 'led-1'. Refunding with the
+    // same key would otherwise short-circuit and report a money-less success.
+    expect(() =>
+      refund({ userId: 'u1', requestId: 'r1', credits: 30, reason: 'error', idempotencyKey: 'led-1' }, db),
+    ).toThrow(/namespaced/)
+    expect(getWallet('u1', db).balance).toBe(70) // unchanged — nothing credited
+  })
+
+  it('THROWS if a refund key is reused as a settle key (the symmetric guard)', () => {
+    refund({ userId: 'u1', requestId: 'r1', credits: 20, reason: 'error', idempotencyKey: 'rf-shared' }, db)
+    const h = placeHold({ userId: 'u1', requestId: 'r2', idempotencyKey: 'k-sym', credits: 10 }, db)
+    if (!h.ok) throw new Error('hold failed')
+    expect(() =>
+      settleHold({ holdId: h.holdId, creditsCharged: 5, kind: 'chat_generate', requestId: 'r2', idempotencyKey: 'rf-shared' }, db),
+    ).toThrow(/namespaced/)
   })
 
   it('enforces the daily COUNT ceiling', () => {
@@ -244,5 +271,21 @@ describe('wallet refund (service failures)', () => {
     const c = refund({ userId: 'u1', requestId: 'r1', credits: 5, reason: 'error', idempotencyKey: 'rf-c' }, db)
     expect(c.ok).toBe(true)
     expect(getWallet('u1', db).balance).toBe(70 + near + 5)
+  })
+
+  it('links the refund ledger row to a real holdId (FK)', () => {
+    const h = placeHold({ userId: 'u1', requestId: 'r9', idempotencyKey: 'k9', credits: 10 }, db)
+    if (!h.ok) throw new Error('hold failed')
+    settleHold({ holdId: h.holdId, creditsCharged: 8, kind: 'chat_generate', requestId: 'r9', idempotencyKey: 'led-9' }, db)
+    const r = refund({ userId: 'u1', requestId: 'r9', holdId: h.holdId, credits: 8, reason: 'error', idempotencyKey: 'rf-9' }, db)
+    expect(r.ok).toBe(true)
+    const row = db.select().from(usageLedger).where(eq(usageLedger.idempotencyKey, 'rf-9')).get()
+    expect(row?.holdId).toBe(h.holdId)
+  })
+
+  it('per-failure cap stays safely below the daily ceiling (sizing invariant)', () => {
+    // Defense-in-depth: if a future tuning edit inverted these, a single
+    // first-of-day refund could bypass the unguarded INSERT path.
+    expect(PER_FAILURE_REFUND_CAP_CREDITS).toBeLessThan(DAILY_REFUND_MAX_CREDITS)
   })
 })
