@@ -6,6 +6,7 @@ import { getStaffMeasureAt, getStaffMeasures, getVoiceMeasureAt } from '@/lib/mu
 import { resolveClickPosition } from '@/lib/music/scoreToAbcWithMap'
 import { DURATION_32NDS } from '@/lib/music/measureBalance'
 import { snapTargetAtX, dragSnapIsReorder, type SnapTarget } from './snapTargetAtX'
+import { touchGestureBus } from './touchGestureBus'
 import type { Event } from '@/lib/music/types'
 
 function cumulativeBoundaries(events: readonly Event[]): number[] {
@@ -134,6 +135,13 @@ export function useNoteDrag(scoreRef: RefObject<HTMLDivElement | null>) {
     let drag: DragState | undefined
 
     function onPointerDown(e: PointerEvent) {
+      // A second concurrent touch (a pinch starting) while a drag is in flight
+      // aborts the drag eagerly — don't wait for finger 1 to move, and don't
+      // let finger 1's later release dispatch a stray edit.
+      if (drag && e.pointerType === 'touch' && !e.isPrimary) {
+        cancelDrag()
+        return
+      }
       if (!e.isPrimary || e.button !== 0) return
       const target = e.target as Element | null
       const noteEl = target?.closest('.abcjs-note') as SVGGElement | null
@@ -162,6 +170,14 @@ export function useNoteDrag(scoreRef: RefObject<HTMLDivElement | null>) {
 
     function onPointerMove(e: PointerEvent) {
       if (!drag) return
+      // A second finger started a pinch-zoom — abort the drag (clears the
+      // notehead transform + drag state). Under touch-action:none the browser
+      // won't auto-pointercancel the first finger, so this is the explicit
+      // hand-off to usePinchZoom.
+      if (touchGestureBus.isPinchActive()) {
+        cancelDrag()
+        return
+      }
       if (!drag.noteEl.isConnected) {
         drag = undefined
         return
@@ -217,6 +233,13 @@ export function useNoteDrag(scoreRef: RefObject<HTMLDivElement | null>) {
 
     function onPointerUp(e: PointerEvent) {
       if (!drag) return
+      // If a pinch is active (the eager abort may have been missed, e.g. the
+      // 2nd pointerdown reached usePinchZoom but not here), discard the drag
+      // without dispatching an edit.
+      if (touchGestureBus.isPinchActive()) {
+        cancelDrag()
+        return
+      }
       const { sel, noteEl, stepPx, lastSnapTarget, moved } = drag
       const dx = e.clientX - drag.startX
       const dy = e.clientY - drag.startY

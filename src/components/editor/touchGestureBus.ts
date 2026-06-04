@@ -16,6 +16,7 @@
  */
 let contextMenuFromTouchUntil = 0
 let rangeArmed = false
+let pinchActive = false
 
 export const touchGestureBus = {
   /** Mark that a touch/pen gesture is in progress (call on pointerdown). */
@@ -36,9 +37,21 @@ export const touchGestureBus = {
   isRangeArmed(): boolean {
     return rangeArmed
   },
+  /**
+   * True while a two-finger pinch-zoom is in progress. useNoteDrag reads this
+   * to abort an in-flight note drag when a second finger lands (the browser
+   * won't auto-`pointercancel` under `touch-action: none`).
+   */
+  setPinchActive(v: boolean): void {
+    pinchActive = v
+  },
+  isPinchActive(): boolean {
+    return pinchActive
+  },
   /** Clear all transient state (effect cleanup + tests). */
   reset(): void {
     contextMenuFromTouchUntil = 0
     rangeArmed = false
+    pinchActive = false
   },
 }
