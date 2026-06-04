@@ -75,6 +75,7 @@
   --text-md: clamp(0.9375rem, 0.9rem + 0.25vw, 1.0625rem); /* 15 → 17 */
   --text-lg: clamp(1rem, 0.93rem + 0.5vw, 1.25rem); /* 16 → 20 */
   --text-xl: clamp(1.125rem, 1rem + 0.8vw, 1.5rem); /* 18 → 24 */
+  --text-2xl: clamp(1.375rem, 1.2rem + 0.85vw, 1.75rem); /* 22 → 28 (hero headline) */
 
   /* Fluid space scale. EXTENDS the fixed --gap-1..8 (which stay for precise
    * intra-component spacing); use --space-* for outer shell / page rhythm. */

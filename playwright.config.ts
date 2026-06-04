@@ -51,6 +51,10 @@ export default defineConfig({
       // server over plain HTTP, and the auth layer's Secure-by-default
       // cookie would otherwise be dropped.
       SL_INSECURE_COOKIE_OK: '1',
+      // Turn off the dev Debug panel — a fixed overlay that intercepts pointer
+      // events along its edges (it otherwise breaks touch/click e2e). The
+      // explicit 'off' is honored even in dev (see isDebugPanelEnabled).
+      NEXT_PUBLIC_DEBUG_PANEL: 'off',
     },
   },
 })

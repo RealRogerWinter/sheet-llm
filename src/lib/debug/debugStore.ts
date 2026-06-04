@@ -94,9 +94,12 @@ export function buildDebugOverrides(
 /**
  * Returns true when the debug panel should be available in the UI.
  * Enabled in dev (NODE_ENV=development) OR when explicitly turned on
- * via NEXT_PUBLIC_DEBUG_PANEL=true (also accepts '1').
+ * via NEXT_PUBLIC_DEBUG_PANEL=true (also accepts '1'). An explicit
+ * NEXT_PUBLIC_DEBUG_PANEL=off wins everywhere (incl. dev) so e2e — and
+ * devs who don't want the overlay — can disable it.
  */
 export function isDebugPanelEnabled(): boolean {
+  if (process.env.NEXT_PUBLIC_DEBUG_PANEL === 'off') return false
   if (process.env.NODE_ENV === 'development') return true
   const flag = process.env.NEXT_PUBLIC_DEBUG_PANEL
   return flag === 'true' || flag === '1'
