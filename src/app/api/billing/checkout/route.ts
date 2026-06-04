@@ -72,8 +72,8 @@ export async function POST(request: Request) {
 
   // Throttle checkout-session creation per claimed user + per IP — the cheap
   // front half of card-testing is opening sessions in a loop. Checked AFTER
-  // eligibility so only real account holders consume budget; one layer beneath
-  // Stripe Radar + 3DS (launch checklist).
+  // eligibility so only real account holders consume budget; one soft layer
+  // beneath Stripe Radar + 3DS (operator launch config).
   const rate = checkCheckoutRate(user!.userId, extractClientIp(request))
   if (!rate.ok) {
     return NextResponse.json(

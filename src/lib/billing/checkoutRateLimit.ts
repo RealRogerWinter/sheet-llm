@@ -7,9 +7,10 @@
  *
  * Mirrors `orchestrator/requestRateLimit`: single-process, `globalThis`-cached
  * (HMR-safe), `MAX_ENTRIES` fail-closed, env-overridable. Behind N nodes the
- * budget is N× — a Redis swap is the documented P1, same as the request limiter.
- * This is ONE layer: pair it with Stripe Radar + 3DS at the dashboard (see the
- * launch checklist) for the actual payment-fraud controls.
+ * budget is N× and resets on deploy — a shared-store (Redis) swap is the planned
+ * multi-node upgrade, same as the request limiter. This is ONE soft layer: the
+ * real payment-fraud controls are Stripe Radar + 3DS at the dashboard (operator
+ * launch steps live in the PR-11 description; folded into the billing docs in PR-14).
  *
  * DARK with the rest of billing — the route only calls this when Stripe is on.
  */
@@ -20,7 +21,7 @@ export { extractClientIp }
 const WINDOW_MS = 60 * 60 * 1000 // 1 hour
 const DEFAULT_USER_LIMIT = 10 // checkout-session creations / hour / claimed user
 const DEFAULT_IP_LIMIT = 20 // ... / hour / IP (multi-account from one host)
-const MAX_ENTRIES = 50_000
+const DEFAULT_MAX_ENTRIES = 50_000 // store-size cap; SL_CHECKOUT_RATE_MAX_ENTRIES overrides
 
 interface Bucket {
   hits: number[]
@@ -42,11 +43,18 @@ function envLimit(name: string, fallback: number): number {
   return Number.isInteger(n) && n > 0 ? n : fallback
 }
 
-/** Prune a key's hits to the window in place; return the survivors (or []). */
+/** Prune a key's hits to the window in place; return the survivors (or []).
+ *  Evicts a bucket that prunes empty so a re-touched expired key doesn't linger
+ *  toward MAX_ENTRIES. (Keys never touched again still linger until a periodic
+ *  sweep — tracked for PR-13; this keeps the common churn bounded.) */
 function prunedHits(store: Map<string, Bucket>, key: string, cutoff: number): number[] {
   const b = store.get(key)
   if (!b) return []
   b.hits = b.hits.filter((t) => t >= cutoff)
+  if (b.hits.length === 0) {
+    store.delete(key)
+    return []
+  }
   return b.hits
 }
 
@@ -79,7 +87,7 @@ export function checkCheckoutRate(userId: string, ip: string): { ok: boolean; re
   // Fail closed before allocating new keys so an attacker spraying userIds / IPs
   // can't OOM the process.
   const newKeys = (store.has(userKey) ? 0 : 1) + (store.has(ipKey) ? 0 : 1)
-  if (store.size + newKeys > MAX_ENTRIES) {
+  if (store.size + newKeys > envLimit('SL_CHECKOUT_RATE_MAX_ENTRIES', DEFAULT_MAX_ENTRIES)) {
     return { ok: false, retryAfterSec }
   }
 

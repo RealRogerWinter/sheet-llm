@@ -2,7 +2,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { __resetForTesting, checkCheckoutRate } from '@/lib/billing/checkoutRateLimit'
 
-const ENV_KEYS = ['SL_CHECKOUT_USER_RATE_LIMIT', 'SL_CHECKOUT_IP_RATE_LIMIT'] as const
+const ENV_KEYS = [
+  'SL_CHECKOUT_USER_RATE_LIMIT',
+  'SL_CHECKOUT_IP_RATE_LIMIT',
+  'SL_CHECKOUT_RATE_MAX_ENTRIES',
+] as const
 const saved: Record<string, string | undefined> = {}
 
 beforeEach(() => {
@@ -49,6 +53,23 @@ describe('checkCheckoutRate', () => {
     expect(checkCheckoutRate('u1', '3.3.3.3').ok).toBe(false) // user-capped; must not record an ip hit
     // If the reject had recorded an ip hit, ip would be 2 and this would reject.
     expect(checkCheckoutRate('u2', '3.3.3.3').ok).toBe(true) // ip hits = 2
+  })
+
+  it('an IP-capped reject does NOT consume the USER budget (two-phase, mirror)', () => {
+    process.env.SL_CHECKOUT_IP_RATE_LIMIT = '1'
+    process.env.SL_CHECKOUT_USER_RATE_LIMIT = '1'
+    expect(checkCheckoutRate('uA', '5.5.5.5').ok).toBe(true) // ip 5.5.5.5 = 1, uA = 1
+    expect(checkCheckoutRate('uB', '5.5.5.5').ok).toBe(false) // IP-capped; must not record a uB hit
+    // If uB's user budget had been burned, this fresh-IP attempt would reject.
+    expect(checkCheckoutRate('uB', '6.6.6.6').ok).toBe(true)
+  })
+
+  it('fails CLOSED for a new key once MAX_ENTRIES is reached', () => {
+    process.env.SL_CHECKOUT_RATE_MAX_ENTRIES = '2' // room for exactly one (user,ip) pair
+    expect(checkCheckoutRate('u1', '1.1.1.1').ok).toBe(true) // allocates u:u1 + ip:1.1.1.1 → store full
+    expect(checkCheckoutRate('u2', '2.2.2.2').ok).toBe(false) // needs 2 new keys, none free → fail closed
+    // The SAME pair reuses existing keys (no new allocation) → still served.
+    expect(checkCheckoutRate('u1', '1.1.1.1').ok).toBe(true)
   })
 
   it('slides the window — budget refreshes after the window passes', () => {
