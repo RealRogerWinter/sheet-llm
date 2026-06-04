@@ -25,6 +25,10 @@ function readRect(): ViewportRect {
   const vv = window.visualViewport
   const width = vv?.width || document.documentElement.clientWidth || window.innerWidth
   const height = vv?.height || document.documentElement.clientHeight || window.innerHeight
+  // Deliberate, idempotent memo write inside getSnapshot: we only mint a new
+  // object when the measured size actually changed, so repeated calls return an
+  // identity-stable value (required by useSyncExternalStore to avoid a render
+  // loop) while still reflecting live size changes.
   if (width !== cached.width || height !== cached.height) {
     cached = { width, height }
   }
