@@ -1,4 +1,5 @@
 import { recordTurn, type RecordTurnFields } from './observability'
+import { runWithUsageMeter, currentMeterTotals, toMicroUsd } from '@/lib/billing/usageMeter'
 import { checkCopyright } from './copyright/filter'
 import { classify, ClassifierSchemaError } from './classifier'
 import { isDeadlineApproaching } from './deadline'
@@ -195,8 +196,24 @@ function maybeAttachGhostProposal(
  * request ran under. (Declared as a function so it hoists above the callers.)
  */
 function recordTurnT(input: OrchestratorInput, fields: RecordTurnFields): Promise<void> {
+  // Merge the request-scoped usage meter so every persisted turn carries the
+  // COMPLETE cost (dispatcher + handler + retries), not just the usage a
+  // single handler returned. Caller-set fields win; the meter backfills the
+  // token / cost columns the call sites don't set.
+  const m = currentMeterTotals()
+  const merged: RecordTurnFields =
+    m && m.callCount > 0
+      ? {
+          ...fields,
+          inputTokens: fields.inputTokens ?? m.inputTokens,
+          cachedInputTokens: fields.cachedInputTokens ?? m.cachedInputTokens,
+          cacheCreationInputTokens: fields.cacheCreationInputTokens ?? m.cacheCreationInputTokens,
+          outputTokens: fields.outputTokens ?? m.outputTokens,
+          costMicroUsd: fields.costMicroUsd ?? toMicroUsd(m.costUsd),
+        }
+      : fields
   return recordTurn(
-    input.generationTier ? { ...fields, generationTier: input.generationTier } : fields,
+    input.generationTier ? { ...merged, generationTier: input.generationTier } : merged,
   )
 }
 
@@ -632,6 +649,13 @@ async function recordTurnForResult(
  * rather than propagating. The legacy path is always the safety net.
  */
 export async function run(input: OrchestratorInput): Promise<OrchestratorRunOutcome> {
+  // Wrap the whole turn in a request-scoped usage meter so every provider
+  // call (dispatcher, handler, retries) accumulates into one per-request cost
+  // total. recordTurnT (within this scope) persists it to orchestrator_turns.
+  return runWithUsageMeter(input.requestId, () => runInner(input))
+}
+
+async function runInner(input: OrchestratorInput): Promise<OrchestratorRunOutcome> {
   const t0 = Date.now()
   // Mode gating is the caller's job (route.ts honors env + debug
   // overrides + kill switch). Once we're here, we run.

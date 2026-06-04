@@ -36,7 +36,10 @@ export interface LogTurnFields {
   confidence?: number
   inputTokens?: number
   cachedInputTokens?: number
+  cacheCreationInputTokens?: number
   outputTokens?: number
+  /** Raw Anthropic API cost for the whole turn, micro-USD (1e-6 USD). */
+  costMicroUsd?: number
   opValidationErrors?: number
   finalStatus: OrchestratorFinalStatus
   error?: string
@@ -200,7 +203,9 @@ export async function recordTurn(fields: RecordTurnFields): Promise<void> {
         appliedOpsCount: appliedOpsCount ?? null,
         inputTokens: fields.inputTokens ?? null,
         cachedInputTokens: fields.cachedInputTokens ?? null,
+        cacheCreationInputTokens: fields.cacheCreationInputTokens ?? null,
         outputTokens: fields.outputTokens ?? null,
+        costMicroUsd: fields.costMicroUsd ?? null,
         error: truncatedError ?? null,
         replacementBlocked: fields.replacementBlocked ? 1 : 0,
       })

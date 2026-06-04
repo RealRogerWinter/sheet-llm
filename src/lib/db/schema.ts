@@ -280,6 +280,14 @@ export const orchestratorTurns = sqliteTable(
     inputTokens: integer('input_tokens'),
     cachedInputTokens: integer('cached_input_tokens'),
     outputTokens: integer('output_tokens'),
+    // Cache-WRITE (cache_creation) input tokens, billed at 1.25x. Captured at
+    // the provider since PR-2; persisted here for the first time.
+    cacheCreationInputTokens: integer('cache_creation_input_tokens'),
+    // Raw Anthropic API cost for the WHOLE turn, in micro-USD (1e-6 USD),
+    // summed across every provider call (dispatcher + handler + retries) via
+    // the request-scoped usage meter. This is our COST, not the customer
+    // charge (billing marks it up). NULL when no priced call ran this turn.
+    costMicroUsd: integer('cost_micro_usd'),
     error: text('error'),
     /**
      * M3.5-PR-4 — telemetry flag. Set to 1 when the
