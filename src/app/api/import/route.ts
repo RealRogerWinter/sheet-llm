@@ -21,6 +21,7 @@ import {
 } from '@/lib/music/import'
 import type { ImportFormat } from '@/lib/shared/types'
 import { checkRequestIp, extractClientIp } from '@/lib/orchestrator/requestRateLimit'
+import { hasClearance } from '@/lib/security/turnstile'
 import type {
   ImportErrorResponse,
   ImportResponse,
@@ -254,6 +255,10 @@ export async function POST(request: Request) {
   // with /api/chat). The client IP comes from CF-Connecting-IP behind Cloudflare.
   if (!checkRequestIp(extractClientIp(request)).ok) {
     return errorResponse('rate_limited', 429, 'Too many requests — please slow down and try again shortly.')
+  }
+  // Bot-gate (Cloudflare Turnstile) — no-op unless configured.
+  if (!(await hasClearance(request))) {
+    return errorResponse('bot_check_required', 403, 'Please complete the bot check and try again.')
   }
   const t0 = Date.now()
   // Resolve identity up-front so the seed conversation has an owner.
