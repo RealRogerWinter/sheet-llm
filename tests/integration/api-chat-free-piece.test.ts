@@ -40,11 +40,20 @@ const VALID_SCORE: Score = {
   ],
 }
 
+const cfg = vi.hoisted(() => ({ outcome: 'stream' as 'stream' | 'fallthrough' }))
+
 vi.mock('@/lib/orchestrator', async (importActual) => {
   const actual = await importActual<typeof import('@/lib/orchestrator')>()
   return {
     ...actual,
     run: async (input: { requestId: string; chatId?: string }) => {
+      if (cfg.outcome === 'fallthrough') {
+        // Orchestrator bails (low confidence) → handleChat drops to the legacy
+        // path, where a free piece MUST be refused (not served free-unbounded).
+        return { fellThrough: true, reason: 'low_confidence', latencyMs: 5 } as unknown as Awaited<
+          ReturnType<typeof actual.run>
+        >
+      }
       const events = (async function* () {
         yield { type: 'section', score: VALID_SCORE, sectionIndex: 0, totalSections: 1, label: 'A' }
         // Real provider cost — proves the free piece does NOT charge it (and a
@@ -86,7 +95,7 @@ function setVerified(verified: boolean, usedAt: number | null = null): Promise<v
 
 // POST a from-scratch (no chatId) message and drain the SSE; returns the chatId
 // parsed from the header frame so a follow-up can reuse the now-scored chat.
-async function postFresh(message: string): Promise<{ chatId: string }> {
+async function postFresh(message: string): Promise<{ status: number; chatId: string }> {
   const res = await POST(
     new Request('http://localhost:3000/api/chat', {
       method: 'POST',
@@ -97,7 +106,7 @@ async function postFresh(message: string): Promise<{ chatId: string }> {
   const body = await res.text()
   const header = body.match(/event: header\ndata: (.*)/)
   const chatId = header ? (JSON.parse(header[1]).chatId as string) : ''
-  return { chatId }
+  return { status: res.status, chatId }
 }
 
 async function postOnChat(chatId: string, message: string): Promise<void> {
@@ -126,6 +135,7 @@ async function ledgerCount(): Promise<number> {
 describe('/api/chat free full piece (PR-7b-3)', () => {
   installTestDb()
   beforeEach(() => {
+    cfg.outcome = 'stream'
     vi.stubEnv('SESSION_SECRET', 'test-session-secret-at-least-32-bytes!')
     vi.stubEnv('SL_PAID_GENERATION', '1')
     vi.stubEnv('SL_GENERATION_TIER', 'pro')
@@ -150,6 +160,17 @@ describe('/api/chat free full piece (PR-7b-3)', () => {
     expect((await getDb()).select().from(creditHolds).all()[0].status).toBe('settled')
     expect(await ledgerCount()).toBe(1) // charged
     expect(getWallet(TEST_USER_ID).balance).toBeLessThan(1000)
+  })
+
+  it('a free piece that FALLS THROUGH to legacy is REFUSED, grant NOT consumed (no free unbounded legacy)', async () => {
+    await setVerified(true)
+    cfg.outcome = 'fallthrough'
+    creditWallet({ userId: TEST_USER_ID, creditsDelta: 1000, source: 'test' })
+    const { status } = await postFresh('compose something vague')
+    expect(status).toBe(422) // refused, not served free via the uncharged legacy path
+    expect(await freePieceUsed()).toBe(false) // grant survives → a retry gets the real (consumed) free piece
+    expect(await holdCount()).toBe(0)
+    expect(await ledgerCount()).toBe(0)
   })
 
   it('an UNVERIFIED account never gets the free piece (paid path)', async () => {

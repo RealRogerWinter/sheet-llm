@@ -542,6 +542,14 @@ async function handleChat(
   const freePiece =
     isPaidGenerationEnabled() && authenticated && !orchestratorScore && isFreePieceEligible(userId)
   if (freePiece) generationTier = 'pro'
+  // KNOWN (deferred to the pre-launch hardening, with PR-7b-2c): eligibility is
+  // read here but the grant is consumed only on DELIVERY, so a CONCURRENT burst
+  // of from-scratch requests could each run a free piece before the first
+  // consumes (the idempotent flag still prevents a second persisted grant — only
+  // the concurrent COST leaks). Bounded by the per-IP burst limiter + Turnstile +
+  // the verified-account requirement; the robust fix is a pre-dispatch
+  // reservation (claim → release-on-non-delivery, symmetric with the credit
+  // hold). Dark until SL_PAID_GENERATION, so no live exposure.
 
   // Daily request-quota gate (hosted abuse-gating layer; OFF by default — inert
   // for self-hosters). Slotted AFTER identity + tier are known and BEFORE any
@@ -778,25 +786,33 @@ async function handleChat(
     )
   }
 
-  // A PAID request must NEVER be served by the uncharged legacy single-shot path
-  // (PR-7b-1 does not meter or charge legacy). Reaching here on the paid path
-  // means a non-deadline fall-through (low_confidence / handler_error) or mode
-  // off / shadow / kill — refuse instead of handing out a free Pro generation.
-  // The hold was already released above. (Deadline + free-tier fall-throughs are
-  // handled above; a Pro user is never on the free tier.) This is the backstop
-  // behind the debug.orchestrator gate: even an operator kill switch can't leak a
-  // free paid generation.
-  if (paidGeneration) {
-    console.warn('[paywall] paid request would hit the uncharged legacy path — refusing', {
+  // A PAID or FREE-PIECE request must NEVER be served by the uncharged legacy
+  // single-shot path (PR-7b-1 does not meter or charge legacy). Reaching here
+  // means a non-deadline fall-through (low_confidence / handler_error), a
+  // from-scratch converse (no score ⇒ falls through), or mode off / shadow /
+  // kill — refuse instead of handing out a free Pro generation.
+  //   - PAID (PR-7b-1): else an uncharged Pro delivery.
+  //   - FREE PIECE (PR-7b-3): the free piece is consumed ONLY on an orchestrator
+  //     delivery (the two responders). Serving it via legacy would deliver a free
+  //     UNBOUNDED Pro generation that NEVER consumes the grant → unlimited free
+  //     Pro, repeatable. Refusing keeps the grant unspent so a retry gets the
+  //     real (orchestrator, consumed) free piece. This also closes the converse
+  //     path (respondWithConverseStream is unreachable from-scratch).
+  // The hold was already released above (no-op for a free piece — no hold). This
+  // is the backstop behind the debug.orchestrator gate: even an operator kill
+  // switch can't leak a free Pro generation.
+  if (paidGeneration || freePiece) {
+    console.warn('[paywall] paid/free-piece request would hit the uncharged legacy path — refusing', {
       requestId,
       chatId,
       mode,
+      freePiece,
       fallThroughReason: fallThrough?.reason,
     })
     return errorResponse(
       'refused',
       422,
-      "I couldn't complete that on the Pro path just now. Try rephrasing it as a smaller, specific change, then try again.",
+      "I couldn't complete that on the Pro path just now. Please try again in a moment.",
       chatId,
     )
   }
@@ -1403,6 +1419,10 @@ async function respondWithConverseStream(
   generationTier: GenerationTier,
   requestId: string,
   holdId?: string,
+  // NB: no `freePiece` param by design — a free piece is from-scratch (no score),
+  // but converse requires an existing score, so it falls through (and is refused
+  // by the paid/free-piece legacy backstop) rather than ever reaching here. So a
+  // free piece never streams a converse and never consumes the grant on a Q&A.
 ): Promise<Response> {
   const toolUseId = synthToolUseId()
   const keyConfigured = !!process.env.ANTHROPIC_API_KEY
