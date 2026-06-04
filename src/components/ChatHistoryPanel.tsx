@@ -1,11 +1,9 @@
 'use client'
 
 import {
-  useCallback,
   useLayoutEffect,
   useRef,
   useState,
-  useSyncExternalStore,
   type FormEvent,
   type KeyboardEvent,
   type MouseEvent,
@@ -15,34 +13,17 @@ import remarkGfm from 'remark-gfm'
 import { useChatStore } from '@/lib/chat/state'
 import { useSubmitPrompt } from '@/lib/chat/useSubmitPrompt'
 import { usePromptHistory } from '@/lib/chat/usePromptHistory'
+import { mq } from '@/lib/ui/breakpoints'
+import { useMatchMedia } from '@/lib/ui/useMatchMedia'
 import type { RevertRequest, RevertResponse, TranscriptTurn } from '@/lib/shared/types'
 import styles from './ChatHistoryPanel.module.css'
 
 type PanelMode = 'docked' | 'drawer' | 'sheet'
 
-const DOCK_BREAKPOINT = '(min-width: 1280px)'
-const SHEET_BREAKPOINT = '(max-width: 767px)'
-
-function useMatchMedia(query: string): boolean {
-  // useSyncExternalStore avoids the "setState in effect" anti-pattern and
-  // gives correct SSR behaviour: the server snapshot is `false` (matches
-  // the layout's no-offset default), the client snapshot is the live
-  // mql.matches at hydration time.
-  const subscribe = useCallback(
-    (notify: () => void) => {
-      if (typeof window === 'undefined') return () => {}
-      const mql = window.matchMedia(query)
-      mql.addEventListener('change', notify)
-      return () => mql.removeEventListener('change', notify)
-    },
-    [query],
-  )
-  const getSnapshot = useCallback(
-    () => (typeof window === 'undefined' ? false : window.matchMedia(query).matches),
-    [query],
-  )
-  return useSyncExternalStore(subscribe, getSnapshot, () => false)
-}
+// Docked at xl (≥1280px), full-height bottom sheet below md (<768px), and a
+// right-edge drawer in between. Canonical breakpoints from src/lib/ui.
+const DOCK_BREAKPOINT = mq.up('xl')
+const SHEET_BREAKPOINT = mq.down('md')
 
 /**
  * Resolve the human-readable failure message for an errored assistant

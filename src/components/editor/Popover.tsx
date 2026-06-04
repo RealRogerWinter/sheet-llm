@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, type CSSProperties, type ReactNode } from 'react'
+import { useViewportRect } from '@/lib/ui/useViewportRect'
 import styles from './Popover.module.css'
 
 export interface PopoverProps {
@@ -55,6 +56,11 @@ export default function Popover({
   style,
   children,
 }: PopoverProps) {
+  // Reactive viewport size — re-clamps the popover on resize / rotate /
+  // mobile-keyboard / pinch instead of going stale at the render-time
+  // innerWidth/innerHeight it was first positioned with.
+  const viewport = useViewportRect()
+
   // Close on Escape. The handler stop-propagates so the surrounding
   // NoteFloatingMenu Escape watcher doesn't also fire and dismiss
   // the selection underneath us.
@@ -72,14 +78,15 @@ export default function Popover({
 
   if (!open) return null
 
-  const wantBelow = anchorY + estimatedHeight < window.innerHeight - 8
+  // Fall back to window.* if the reactive rect hasn't resolved yet (e.g. the
+  // SSR 0,0 snapshot on a synchronous first open before the store reads).
+  const vw = viewport.width || window.innerWidth
+  const vh = viewport.height || window.innerHeight
+  const wantBelow = anchorY + estimatedHeight < vh - 8
   const top = wantBelow
-    ? Math.min(anchorY + 8, window.innerHeight - estimatedHeight - 8)
+    ? Math.min(anchorY + 8, vh - estimatedHeight - 8)
     : Math.max(8, anchorY - estimatedHeight - 8)
-  const left = Math.max(
-    8,
-    Math.min(anchorX - estimatedWidth / 2, window.innerWidth - estimatedWidth - 8),
-  )
+  const left = Math.max(8, Math.min(anchorX - estimatedWidth / 2, vw - estimatedWidth - 8))
 
   return (
     <div

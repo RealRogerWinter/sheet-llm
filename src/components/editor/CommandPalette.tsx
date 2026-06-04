@@ -8,6 +8,7 @@ import {
   useState,
 } from 'react'
 import { useChatStore } from '@/lib/chat/state'
+import { useViewportRect } from '@/lib/ui/useViewportRect'
 import Popover from './Popover'
 import {
   applyAvailabilityFilter,
@@ -53,6 +54,9 @@ export default function CommandPalette({
   // invalidated by a background score edit while the palette is open.
   const [availableCommands, setAvailableCommands] = useState<readonly PaletteCommand[]>(commands)
   const inputRef = useRef<HTMLInputElement>(null)
+  // Reactive viewport so the palette re-centers on resize / rotate while open,
+  // rather than sticking at the innerWidth/innerHeight of its first render.
+  const viewport = useViewportRect()
 
   // Reset query + selection + focus the input on each closed→open
   // transition (wasOpen pattern, matches BarlinePopover/VoltaPopover/
@@ -113,8 +117,10 @@ export default function CommandPalette({
   // clamps to viewport bounds, so we don't need precision here —
   // anchorY=innerHeight/3 places the top of the palette around the
   // upper third of the screen, the conventional spot for ⌘K palettes.
-  const anchorX = typeof window !== 'undefined' ? window.innerWidth / 2 : 400
-  const anchorY = typeof window !== 'undefined' ? Math.floor(window.innerHeight / 3) : 120
+  const vw = viewport.width || (typeof window !== 'undefined' ? window.innerWidth : 800)
+  const vh = viewport.height || (typeof window !== 'undefined' ? window.innerHeight : 360)
+  const anchorX = vw / 2
+  const anchorY = Math.floor(vh / 3)
 
   return (
     <Popover
