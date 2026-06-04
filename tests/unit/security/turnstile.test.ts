@@ -100,3 +100,21 @@ describe('verifyTurnstileToken (siteverify)', () => {
     expect(warn.mock.calls.flat().join(' ')).toContain('siteverify_http_error')
   })
 })
+
+describe('GET /api/turnstile (runtime widget config)', () => {
+  it('returns enabled + the public site key from the RUNTIME env', async () => {
+    // Regression: the root layout is statically prerendered, so the site key
+    // must come from this runtime endpoint, not a build-frozen server prop.
+    vi.stubEnv('TURNSTILE_SITE_KEY', '0xsite')
+    vi.stubEnv('TURNSTILE_SECRET_KEY', '0xsecret')
+    const { GET } = await import('@/app/api/turnstile/route')
+    const body = await (await GET()).json()
+    expect(body).toEqual({ enabled: true, siteKey: '0xsite' })
+  })
+
+  it('reports disabled (and no key) when Turnstile is unconfigured', async () => {
+    const { GET } = await import('@/app/api/turnstile/route')
+    const body = await (await GET()).json()
+    expect(body.enabled).toBe(false)
+  })
+})

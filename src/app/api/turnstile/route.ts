@@ -8,14 +8,26 @@ import {
 import { checkRequestIp, extractClientIp } from '@/lib/orchestrator/requestRateLimit'
 
 /**
- * POST /api/turnstile — verify a Cloudflare Turnstile token and, on success,
- * set the short-lived IP-bound clearance cookie that the LLM-cost routes require.
- * No-op (200) when Turnstile is not configured.
+ * /api/turnstile:
+ *   GET  — return the RUNTIME widget config `{ enabled, siteKey }`. The site key
+ *          is public; this exists because the root layout is statically
+ *          prerendered, so reading `process.env` there freezes the build-time
+ *          (empty) value. The client fetches it here at runtime instead.
+ *   POST — verify a Cloudflare Turnstile token and, on success, set the
+ *          short-lived IP-bound clearance cookie the LLM-cost routes require.
+ *          No-op (200) when Turnstile is not configured.
  */
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const Body = z.object({ token: z.string().min(1).max(4096) })
+
+export async function GET() {
+  return NextResponse.json(
+    { enabled: isTurnstileEnabled(), siteKey: process.env.TURNSTILE_SITE_KEY ?? '' },
+    { status: 200, headers: { 'cache-control': 'no-store' } },
+  )
+}
 
 export async function POST(request: Request) {
   if (!isTurnstileEnabled()) {
