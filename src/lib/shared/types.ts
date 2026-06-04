@@ -424,14 +424,44 @@ export type ChatErrorCode =
   | 'import_failed'
   | 'output_too_large'
   | 'deadline_exceeded'
+  // Daily request-quota gate (hosted abuse-gating layer; off by default).
+  // 'quota_exceeded' = the anon/free daily cap was hit (429; carries a `cta` +
+  // reset hint). 'login_required' = a risky-IP anonymous request that must sign
+  // in to continue (403; carries a `cta`). Both also populate the plain `error`.
+  | 'quota_exceeded'
+  | 'login_required'
   // Recovery against an identity that has been upgraded to a real account.
   // The anonymous recovery path is closed for claimed accounts; the client
   // branches on this to prompt a sign-in instead of clearing its backup.
   | 'account_claimed'
 
+/**
+ * A structured call-to-action attached to a quota/login error so the chat UI can
+ * render a button (sign up / log in / Pro waitlist) instead of only plain text.
+ * `primaryAction:'openLogin'` opens the in-app auth modal; otherwise `primaryHref`
+ * is a link. The plain `error` string is ALWAYS populated alongside this, so an
+ * older client that ignores `cta` still shows a message. (Client rendering of the
+ * card/modal lands in a later PR; the server emits this now.)
+ */
+export interface ChatCta {
+  kind: 'signup' | 'waitlist' | 'login' | 'busy'
+  title: string
+  body: string
+  primaryLabel: string
+  primaryHref?: string
+  primaryAction?: 'openLogin'
+  secondaryLabel?: string
+  secondaryHref?: string
+  secondaryAction?: 'openLogin'
+  /** Whole hours until the quota window resets; omitted for the login gate. */
+  resetsInHours?: number
+}
+
 export interface ChatErrorResponse {
   error: string
   code: ChatErrorCode
+  /** Structured CTA for quota_exceeded / login_required (see ChatCta). */
+  cta?: ChatCta
   /**
    * Set when the failure happens after the server has resolved a
    * session id (i.e. the user turn may already be persisted as an
