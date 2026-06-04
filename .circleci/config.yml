@@ -134,7 +134,7 @@ jobs:
     steps:
       - attach_workspace: { at: /tmp/deploy }
       - add_ssh_keys:
-          fingerprints: ["SHA256:REPLACE_WITH_DEPLOY_KEY_FINGERPRINT"]
+          fingerprints: ["6b:bc:75:93:c2:72:ee:1d:d7:8b:7f:b8:d2:08:52:41"]
       - run:
           name: Pin the VPS host key (no trust-on-first-use)
           command: |
