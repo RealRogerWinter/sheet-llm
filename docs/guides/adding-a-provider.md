@@ -4,7 +4,7 @@ subsystem: providers-llm
 audience: [contributor, ai-agent]
 status: current
 last_verified: 2026-06-03
-verified_against: 150cb15
+verified_against: c078040
 source_paths:
   - src/lib/providers/types.ts
   - src/lib/providers/registry.ts
@@ -88,10 +88,11 @@ mapping correctly — another reason to subclass it.
 `ProviderCallOptions.systemPrompt` is `string | SystemBlock[]`. If you write a
 bespoke provider:
 
-- Per-block prompt caching (Anthropic ephemeral): walk the blocks and emit one
-  cache marker per `cache: true` block. See `buildSystemBlocks`
-  (`src/lib/providers/anthropic.ts:360`); note the **3-marker cap** (the tool
-  definition consumes the 4th of Anthropic's 4-marker limit).
+- Per-block prompt caching (Anthropic ephemeral): a `cache_control` breakpoint
+  caches the cumulative prefix, so mark the **last** `cache: true` block to cache
+  the whole static prefix in one breakpoint. See `buildSystemBlocks`
+  (`src/lib/providers/anthropic.ts`); Anthropic allows 4 breakpoints per request
+  (the tool definition consumes one).
 - No per-block caching: call `flattenSystemPrompt(options.systemPrompt)`
   (`src/lib/providers/systemBlocks.ts:18`) to collapse the blocks into one
   blank-line-joined string. This is what the OpenAI-compatible base does.
