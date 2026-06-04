@@ -29,10 +29,13 @@ test.describe('touch editing', () => {
 
   test('tapping a notehead selects it and opens the editing menu', async ({ page }) => {
     await importAbc(page, 'X:1\nK:C\nL:1/4\nCDEF|')
-    // force: the notehead is an SVG <g> whose tap point Playwright sees as
-    // "covered" by the parent <svg>; nothing real is intercepting (debug panel +
-    // coachmark are suppressed), so tap the known target directly.
-    await page.locator('.abcjs-note').first().tap({ force: true })
+    // Genuine coordinate touch (NOT force-tap): this respects z-order, so if a
+    // real overlay regressed back over the score the tap would miss and the
+    // menu wouldn't open — which is the regression class this test guards.
+    const note = page.locator('.abcjs-note').first()
+    await expect(note).toBeVisible()
+    const box = await note.boundingBox()
+    await page.touchscreen.tap(box!.x + box!.width / 2, box!.y + box!.height / 2)
     await expect(page.getByRole('toolbar', { name: /edit selected note/i })).toBeVisible({
       timeout: 5_000,
     })
