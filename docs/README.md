@@ -92,6 +92,7 @@ be detected mechanically — see
 | [Self-Hosted VPS Deployment](guides/deploy-vps.md) | Production topology: Cloudflare → Caddy → Docker → Litestream/R2; image, container start sequence, host layout, pull-based deploy. |
 | [Security Hardening & Threat Model](guides/security-hardening.md) | Defense-in-depth: origin lock (ufw CF-IP + AOP mTLS), host hardening, secret hygiene, LLM cost-abuse controls (rate limit + Turnstile). |
 | [CI/CD Pipeline & Build-in-Public](guides/ci-cd-pipeline.md) | The CircleCI gate (timing-split tests, schema-drift), build→approve→deploy, and the build-in-public philosophy. |
+| [Host Monitoring & Alerting](guides/monitoring.md) | Five host checks (health, litestream, disk, AOP-cert, cf-ufw) behind a systemd timer, alerting over email/webhook. |
 | [Local models (Ollama)](local-models.md) | Run sheet-llm against a local Ollama LLM for offline/zero-cost dev. |
 
 ## Reference
