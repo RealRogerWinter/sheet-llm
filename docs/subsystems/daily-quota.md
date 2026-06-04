@@ -1,7 +1,7 @@
 ---
 title: Daily Request Quota & Abuse Gating
 subsystem: daily-quota
-audience: [contributor, ai-agent, operator]
+audience: [contributor, ai-agent]
 status: current
 last_verified: 2026-06-04
 verified_against: ab82027
@@ -70,7 +70,9 @@ request.
 - **IP key**: `CF-Connecting-IP`, trusted only when `isCfRequest()`, normalized to
   `/24` (v4) or `/56` (v6, closes the `/64` self‑rotation multiplier; `ipMath.ts`
   also fixes the abbreviated‑IPv6 bug the shared `normalizeIp` has), then
-  `HMAC(SESSION_SECRET, …)` so no raw IP is stored at rest.
+  `HMAC(SESSION_SECRET, …)` so no raw IP is stored at rest. Off‑CF (self‑host), the
+  IP comes from the hop‑aware `extractClientIp` **only when `TRUSTED_PROXY_HOPS` is
+  set**; otherwise the request bypasses entirely (never a shared `local` bucket).
 - **Window**: a fixed 24h window anchored at first hit, one durable `request_quota`
   row per key (`schema.ts`). One synchronous `db.transaction` evaluates the
   instance ceiling + per‑key bucket and commits both only if both pass; a
@@ -117,12 +119,18 @@ by default). Limits: `SL_DAILY_QUOTA_ANON` (5), `SL_DAILY_QUOTA_FREE` (10),
    - `x-sl-edge-auth` = `<a long random secret>`
 2. **Origin** `.env` (`/opt/sheet-llm/.env`): set `SL_EDGE_AUTH_SECRET` to that same
    secret, then `SL_DAILY_QUOTA_ENABLED=1`, `SL_IP_RISK_ENABLED=1`, `SL_IP_RISK_TOR=1`,
-   `SL_IP_RISK_ASN=1`, `SL_PRO_WAITLIST_NOTIFY=<email>`, and (recommended)
-   `SL_DAILY_QUOTA_ANON_GLOBAL=<N>` as the aggregate backstop. Keep limits at the
-   defaults or tune. Restart the container.
+   `SL_IP_RISK_ASN=1`, `SL_PRO_WAITLIST_NOTIFY=<email>`, and
+   `SL_DAILY_QUOTA_ANON_GLOBAL=<N>`. Treat the global ceiling as **required on prod,
+   not optional**: because the per‑row admission cap fails *open*, the global
+   ceiling + the Anthropic org spend cap are the only controls that bound total
+   anon spend under distinct‑key spray / IP rotation. Keep limits at the defaults
+   or tune. Restart the container.
 3. **Cloudflare WAF** (recommended, defense‑in‑depth): a Managed Challenge custom
    rule for `ip.geoip.country eq "T1"` and the datacenter ASNs, and a rate‑limit
-   rule on `/api/chat`. Use **Challenge**, not Block, so the sign‑in path survives.
+   rule on `/api/chat`. Use **Challenge**, not Block, so the sign‑in path survives:
+   the quota gate answers `login_required` with **403 + a sign‑in CTA** (a nudge,
+   not a hard block; quota/ceiling limits answer **429**), and a WAF Block would
+   stop a real user from ever reaching the sign‑in surface.
 4. **Anthropic org spend cap**: set a monthly USD limit in the Anthropic console —
    the final hard stop that bounds total spend regardless of any in‑app bypass.
 
