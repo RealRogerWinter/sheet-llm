@@ -1,0 +1,169 @@
+import type Stripe from 'stripe'
+import { eq, inArray } from 'drizzle-orm'
+import { getDb } from '@/lib/db'
+import { stripeEvents } from '@/lib/db/schema'
+import { getPack } from './packs'
+import { creditWallet } from './wallet'
+
+/**
+ * Stripe webhook PROCESSING — turns a verified `checkout.session.completed` into
+ * a credit grant. The route verifies the signature; this module owns the grant
+ * logic + the raw-events inbox + reconciliation. DARK until STRIPE_* keys exist.
+ *
+ * TRUST MODEL (red-team #5/#6): the ONLY field trusted from the session metadata
+ * is `packId`; the credit count and the expected price are RE-DERIVED from the
+ * server-side catalog, and the AMOUNT PAID is verified against the pack price, so
+ * a tampered session can't grant a $50 pack for a $5 charge. The grant is
+ * idempotent on the checkout-session id (so an event redelivery — or a
+ * `checkout.session.completed` vs `payment_intent.succeeded` double — credits at
+ * most once), AND the inbox is idempotent on the Stripe event id.
+ */
+
+type Db = ReturnType<typeof getDb>
+
+const nowSec = (): number => Math.floor(Date.now() / 1000)
+
+const HANDLED_TYPE = 'checkout.session.completed'
+
+export type ProcessOutcome =
+  | { status: 'processed'; userId: string; creditsGranted: number }
+  | { status: 'ignored'; reason: string }
+  | { status: 'failed'; reason: string; userId?: string }
+
+/**
+ * Apply ONE event's grant. Pure w.r.t. the inbox (caller records/marks). Trusts
+ * only packId from metadata; re-derives credits + verifies the paid amount.
+ */
+export function processStripeEvent(event: Stripe.Event, db: Db = getDb()): ProcessOutcome {
+  if (event.type !== HANDLED_TYPE) return { status: 'ignored', reason: `unhandled_type:${event.type}` }
+  const session = event.data.object as Stripe.Checkout.Session
+  if (session.payment_status !== 'paid') {
+    return { status: 'ignored', reason: `not_paid:${session.payment_status}` }
+  }
+
+  const userId = session.client_reference_id ?? session.metadata?.userId ?? null
+  if (!userId) return { status: 'failed', reason: 'no_user_ref' }
+
+  const packId = session.metadata?.packId
+  const pack = packId ? getPack(packId) : undefined
+  if (!pack) return { status: 'failed', reason: `unknown_pack:${packId ?? 'none'}`, userId }
+
+  // Verify what was actually PAID matches the pack. Stripe Tax is exclusive, so
+  // our price is the PRE-TAX subtotal; tax sits in amount_total. NEVER trust
+  // metadata.credits — re-derive from the pack.
+  const currency = (session.currency ?? '').toLowerCase()
+  if (currency !== 'usd') return { status: 'failed', reason: `bad_currency:${currency}`, userId }
+  if (session.amount_subtotal == null || session.amount_subtotal !== pack.priceUsdCents) {
+    return { status: 'failed', reason: `amount_mismatch:${session.amount_subtotal}!=${pack.priceUsdCents}`, userId }
+  }
+
+  // Idempotent grant. external_ref = the checkout-session id: stable across event
+  // redeliveries and across event TYPES for the same payment, so credits land once.
+  const externalRef = `cs:${session.id}`
+  let applied: ReturnType<typeof creditWallet>
+  try {
+    applied = creditWallet(
+      {
+        userId,
+        creditsDelta: pack.totalCredits,
+        source: 'stripe',
+        externalRef,
+        amountMinorUsd: session.amount_total ?? pack.priceUsdCents,
+        currency: 'usd',
+      },
+      db,
+    )
+  } catch (e) {
+    // e.g. the user was erased between checkout and webhook (FK violation) — a
+    // permanent failure; the event stays in the inbox for manual reconciliation.
+    return { status: 'failed', reason: `grant_error:${e instanceof Error ? e.message : 'unknown'}`, userId }
+  }
+  if (!applied.applied) {
+    // A duplicate grant is a SUCCESS for idempotency; any other refusal is a fault.
+    if (applied.reason === 'duplicate') return { status: 'processed', userId, creditsGranted: pack.totalCredits }
+    return { status: 'failed', reason: `grant_refused:${applied.reason}`, userId }
+  }
+  return { status: 'processed', userId, creditsGranted: pack.totalCredits }
+}
+
+/**
+ * Inbox-aware entry point used by the webhook route. Records the event to the
+ * raw-events inbox (idempotent on event id), processes it, and marks the
+ * outcome. A previously-terminal event short-circuits as 'duplicate'.
+ */
+export function handleStripeEvent(
+  event: Stripe.Event,
+  db: Db = getDb(),
+  now: number = nowSec(),
+): ProcessOutcome | { status: 'duplicate' } {
+  const ins = db
+    .insert(stripeEvents)
+    .values({ eventId: event.id, type: event.type, status: 'received', payload: JSON.stringify(event), receivedAt: now })
+    .onConflictDoNothing()
+    .run()
+  if (ins.changes !== 1) {
+    // Already in the inbox. If it reached a terminal-GOOD state, skip; otherwise
+    // (a prior 'received'/'failed') fall through and (re)process — idempotent.
+    const prior = db
+      .select({ status: stripeEvents.status })
+      .from(stripeEvents)
+      .where(eq(stripeEvents.eventId, event.id))
+      .get()
+    if (prior?.status === 'processed' || prior?.status === 'ignored') return { status: 'duplicate' }
+  }
+
+  const outcome = processStripeEvent(event, db)
+  markEvent(db, event.id, outcome, now)
+  return outcome
+}
+
+function markEvent(db: Db, eventId: string, outcome: ProcessOutcome, now: number): void {
+  db.update(stripeEvents)
+    .set({
+      status: outcome.status,
+      processedAt: now,
+      ...('userId' in outcome && outcome.userId ? { userId: outcome.userId } : {}),
+      ...(outcome.status === 'processed' ? { creditsGranted: outcome.creditsGranted } : {}),
+      ...('reason' in outcome ? { reason: outcome.reason } : {}),
+    })
+    .where(eq(stripeEvents.eventId, eventId))
+    .run()
+}
+
+/**
+ * RECONCILIATION auto-heal (red-team #5): re-process inbox events that never
+ * reached a terminal-good state ('received' = crashed mid-process; 'failed' =
+ * transient grant error). Idempotent — the grant's external_ref dedups, so a
+ * row that already granted simply re-confirms as 'processed'. Run periodically
+ * (opportunistic reaper / cron). Returns counts for observability.
+ */
+export function reconcileStripeEvents(
+  db: Db = getDb(),
+  opts: { limit?: number; now?: number } = {},
+): { scanned: number; healed: number; stillFailing: number } {
+  const now = opts.now ?? nowSec()
+  const limit = opts.limit ?? 100
+  const stuck = db
+    .select({ eventId: stripeEvents.eventId, payload: stripeEvents.payload })
+    .from(stripeEvents)
+    .where(inArray(stripeEvents.status, ['received', 'failed']))
+    .limit(limit)
+    .all()
+  let healed = 0
+  let stillFailing = 0
+  for (const row of stuck) {
+    let event: Stripe.Event
+    try {
+      event = JSON.parse(row.payload) as Stripe.Event
+    } catch {
+      markEvent(db, row.eventId, { status: 'failed', reason: 'corrupt_payload' }, now)
+      stillFailing++
+      continue
+    }
+    const outcome = processStripeEvent(event, db)
+    markEvent(db, row.eventId, outcome, now)
+    if (outcome.status === 'processed' || outcome.status === 'ignored') healed++
+    else stillFailing++
+  }
+  return { scanned: stuck.length, healed, stillFailing }
+}

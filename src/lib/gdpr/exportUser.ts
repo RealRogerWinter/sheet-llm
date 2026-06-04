@@ -143,11 +143,18 @@ type Db = ReturnType<typeof getDb>
  * TODO(PR-14, prepaid-credits): the financial-PII tables added in migrations
  * 0009 (credit_purchases, usage_ledger, credit_holds) and 0011
  * (refund_counters) are NOT yet in this export envelope. Account ERASURE
- * already covers them (the single `DELETE FROM users` FK-cascades all five),
+ * already covers those five (the single `DELETE FROM users` FK-cascades them),
  * but GDPR Art. 15 ACCESS must add them when the credits feature ships — land a
  * `foreign_key_list`-introspection guard test then so a future users-FK'd table
  * can't silently escape the export, and decide anonymize-vs-delete for the
  * immutable financial ledgers against record-retention.
+ *
+ * SEPARATE CASE: `stripe_events` (0012, the webhook inbox) DELIBERATELY has NO
+ * users FK, so erasure does NOT cascade it — its payload carries PII (Stripe
+ * customer email/address) but it is a financial/tax record with a retention
+ * basis. PR-14 + the launch attorney memo must settle the retention window and
+ * whether erasure redacts the payload vs. keeps it under a legal-obligation
+ * lawful basis. Do NOT add a naive cascade here without that decision.
  */
 export async function buildUserExport(
   db: Db,

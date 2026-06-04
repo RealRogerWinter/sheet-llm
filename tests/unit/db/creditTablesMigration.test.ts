@@ -149,3 +149,24 @@ describe('0010 + 0011 refinements migration', () => {
     expect(() => insert.run('u-ok', 0, 1, 5, 0)).not.toThrow()
   })
 })
+
+// 0012 added the Stripe webhook raw-events inbox.
+describe('0012_stripe_events migration', () => {
+  const raw = (db: ReturnType<typeof makeTestDb>): Database.Database => db.$client
+
+  it('creates stripe_events with event_id as the PK and the reaper indexes', () => {
+    const client = raw(makeTestDb())
+    const cols = client.pragma('table_info(stripe_events)') as Array<{ name: string; pk: number }>
+    expect(cols.length, 'stripe_events table missing').toBeGreaterThan(0)
+    expect(cols.find((c) => c.name === 'event_id')?.pk).toBe(1)
+    const idx = (client.pragma('index_list(stripe_events)') as Array<{ name: string }>).map((i) => i.name)
+    expect(idx).toContain('stripe_events_status')
+    expect(idx).toContain('stripe_events_received')
+  })
+
+  it('stripe_events deliberately has NO users FK (a retained financial record survives erasure)', () => {
+    const client = raw(makeTestDb())
+    const fks = client.pragma('foreign_key_list(stripe_events)') as Array<{ table: string }>
+    expect(fks.length).toBe(0)
+  })
+})
