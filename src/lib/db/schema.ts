@@ -426,6 +426,132 @@ export const requestQuota = sqliteTable(
   ],
 )
 
+// ============================================================================
+// PREPAID CREDITS (HOSTED sheetllm.com ONLY; the whole paid layer is OFF by
+// default behind SL_* flags — self-hosted / BYOK installs never write a row).
+//
+// Money is NEVER a float. The customer-facing unit is an integer CREDIT
+// (1 credit = 1 cent of customer value); our raw Anthropic cost is tracked
+// separately in micro-USD. Three append-only ledgers — credit_purchases
+// (money in), usage_ledger (money out), credit_holds (in-flight reservations)
+// — plus one mutable cache (credit_wallets.balance) reconcilable from them.
+// All FK users.id ON DELETE cascade so GDPR erasure is automatic.
+// ============================================================================
+
+// credit_wallets — the single MUTABLE money row: spendable balance per user.
+// `available = balance - held`. Debited via guard-in-the-write
+// (UPDATE ... WHERE balance - held >= :n) so an overdraft is structurally
+// impossible. Reconcilable from SUM(credit_purchases) - SUM(usage_ledger).
+export const creditWallets = sqliteTable(
+  'credit_wallets',
+  {
+    userId: text('user_id')
+      .primaryKey()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // Spendable balance, integer CREDITS (1 credit = 1 cent of value).
+    balance: integer('balance').notNull().default(0),
+    // Sum of currently-active holds (reserved, not yet settled).
+    held: integer('held').notNull().default(0),
+    // Bumped on every write — optimistic-concurrency guard / drift audit.
+    version: integer('version').notNull().default(0),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  () => [
+    // Overdraft + negative hold impossible at the storage layer.
+    check('credit_wallets_nonneg', sql`balance >= 0 AND held >= 0`),
+  ],
+)
+
+// credit_purchases — IMMUTABLE, append-only: every credit grant (Stripe
+// payment, promo, refund as a NEGATIVE row, manual adjustment). external_ref is
+// the Stripe event / PaymentIntent id, UNIQUE so a replayed webhook can't
+// double-credit (INSERT ... ON CONFLICT DO NOTHING).
+export const creditPurchases = sqliteTable(
+  'credit_purchases',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    source: text('source').notNull(), // 'stripe' | 'promo' | 'refund' | 'manual' (app-validated)
+    externalRef: text('external_ref').unique(), // Stripe event/PI id → webhook idempotency
+    creditsDelta: integer('credits_delta').notNull(), // +grant / -refund
+    amountMinorUsd: integer('amount_minor_usd'), // money paid, cents; NULL for non-cash grants
+    currency: text('currency'), // 'usd'
+    status: text('status').notNull().default('settled'), // 'settled' | 'pending' | 'reversed'
+    createdAt: integer('created_at').notNull(),
+  },
+  (table) => [index('credit_purchases_user_created').on(table.userId, table.createdAt)],
+)
+
+// usage_ledger — IMMUTABLE, append-only: one row per BILLED (settled) action.
+// The FINANCIAL record: carries BOTH our raw cost (cost_micro_usd) and the
+// customer charge (credits_charged), plus the post-debit balance for drift
+// detection. idempotency_key (UNIQUE) makes a retried settle a no-op.
+export const usageLedger = sqliteTable(
+  'usage_ledger',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    sessionId: text('session_id').references((): AnySQLiteColumn => sessions.id, {
+      onDelete: 'set null',
+    }),
+    requestId: text('request_id').notNull(),
+    idempotencyKey: text('idempotency_key').notNull().unique(), // retried request must not double-debit
+    kind: text('kind').notNull(), // 'chat_generate' | 'chat_edit' | ... (app-validated)
+    model: text('model'),
+    generationTier: text('generation_tier'), // 'free' | 'pro' at time of call
+    inputTokens: integer('input_tokens'),
+    cachedInputTokens: integer('cached_input_tokens'),
+    cacheCreationInputTokens: integer('cache_creation_input_tokens'),
+    outputTokens: integer('output_tokens'),
+    costMicroUsd: integer('cost_micro_usd'), // our RAW Anthropic cost
+    creditsCharged: integer('credits_charged').notNull(), // the CUSTOMER charge (markup applied)
+    balanceAfter: integer('balance_after'), // wallet balance after this debit (drift check)
+    createdAt: integer('created_at').notNull(),
+  },
+  (table) => [
+    index('usage_ledger_user_created').on(table.userId, table.createdAt),
+    index('usage_ledger_request').on(table.requestId),
+  ],
+)
+
+// credit_holds — durable pre-authorization holds. We debit BEFORE an Anthropic
+// call by placing a hold (true cost is only known once the stream finishes),
+// then SETTLE to the actual cost or RELEASE on failure. Durable so a crash
+// between hold and settle is recoverable: a janitor releases 'active' holds
+// past expires_at (those credits were never really spent).
+export const creditHolds = sqliteTable(
+  'credit_holds',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    requestId: text('request_id').notNull(),
+    credits: integer('credits').notNull(), // reserved credits (conservative worst-case at hold time)
+    status: text('status').notNull().default('active'), // 'active' | 'settled' | 'released'
+    expiresAt: integer('expires_at').notNull(), // crash-recovery janitor releases 'active' holds past this
+    createdAt: integer('created_at').notNull(),
+    settledAt: integer('settled_at'),
+  },
+  (table) => [
+    index('credit_holds_user').on(table.userId),
+    index('credit_holds_expires').on(table.expiresAt), // bounds the reaper scan
+  ],
+)
+
+export type CreditWallet = typeof creditWallets.$inferSelect
+export type NewCreditWallet = typeof creditWallets.$inferInsert
+export type CreditPurchase = typeof creditPurchases.$inferSelect
+export type NewCreditPurchase = typeof creditPurchases.$inferInsert
+export type UsageLedgerRow = typeof usageLedger.$inferSelect
+export type NewUsageLedgerRow = typeof usageLedger.$inferInsert
+export type CreditHold = typeof creditHolds.$inferSelect
+export type NewCreditHold = typeof creditHolds.$inferInsert
+
 export type User = typeof users.$inferSelect
 export type NewUser = typeof users.$inferInsert
 export type Session = typeof sessions.$inferSelect

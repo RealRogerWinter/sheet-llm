@@ -139,6 +139,15 @@ type Db = ReturnType<typeof getDb>
  * For a power user with 100 sessions × 100 versions × 5 KB JSON each,
  * worst case ≈ 50 MB in memory. Realistic p99 well under 5 MB. NDJSON
  * streaming deferred until somebody hits this ceiling in production.
+ *
+ * TODO(PR-14, prepaid-credits): the financial-PII tables added in migration
+ * 0009 (credit_purchases, usage_ledger, credit_holds) are NOT yet in this
+ * export envelope. Account ERASURE already covers them (the single
+ * `DELETE FROM users` FK-cascades all four), but GDPR Art. 15 ACCESS must add
+ * them when the credits feature ships — land a `foreign_key_list`-introspection
+ * guard test then so a future users-FK'd table can't silently escape the
+ * export, and decide anonymize-vs-delete for the immutable financial ledgers
+ * against record-retention.
  */
 export async function buildUserExport(
   db: Db,
