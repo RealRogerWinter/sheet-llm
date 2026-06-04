@@ -44,26 +44,38 @@ export function usePinchZoom(ref: RefObject<HTMLElement | null>, enabled = true)
     let startDist = 0
     let startZoom: ZoomLevel = useEditorPrefsStore.getState().zoom
 
+    /** Distance between the first two active pointers (insertion order). */
     function distance(): number {
       const pts = [...pointers.values()]
       if (pts.length < 2) return 0
       return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)
     }
 
-    function onPointerDown(e: PointerEvent) {
-      if (e.pointerType !== 'touch') return
-      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
-      if (pointers.size === 2) {
+    // Re-baseline whenever the active-pointer count changes. Called on every
+    // down/up so a 3rd finger then a lift back to two re-arms cleanly (no
+    // frozen zoom), and a fresh single touch (size 1) clears any pinchActive
+    // that got stuck from a missed pointerup — self-healing the drag guard.
+    function refreshBaseline(): void {
+      if (pointers.size >= 2) {
         startDist = distance()
         startZoom = useEditorPrefsStore.getState().zoom
         touchGestureBus.setPinchActive(true)
+      } else {
+        startDist = 0
+        touchGestureBus.setPinchActive(false)
       }
+    }
+
+    function onPointerDown(e: PointerEvent) {
+      if (e.pointerType !== 'touch') return
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      refreshBaseline()
     }
 
     function onPointerMove(e: PointerEvent) {
       if (!pointers.has(e.pointerId)) return
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
-      if (pointers.size !== 2 || startDist === 0) return
+      if (pointers.size < 2 || startDist === 0) return
       // Own the gesture — stop the browser treating it as page zoom/scroll.
       e.preventDefault()
       const ratio = distance() / startDist
@@ -74,10 +86,7 @@ export function usePinchZoom(ref: RefObject<HTMLElement | null>, enabled = true)
 
     function endPointer(e: PointerEvent) {
       if (!pointers.delete(e.pointerId)) return
-      if (pointers.size < 2) {
-        startDist = 0
-        touchGestureBus.setPinchActive(false)
-      }
+      refreshBaseline()
     }
 
     el.addEventListener('pointerdown', onPointerDown)

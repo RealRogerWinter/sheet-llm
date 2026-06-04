@@ -79,4 +79,24 @@ describe('usePinchZoom', () => {
     firePointer(el, 'pointermove', { ...P2, clientX: 230, clientY: 100 }) // dist 130 → 1.3 → nearest 1.25
     expect(useEditorPrefsStore.getState().zoom).toBe(1.25)
   })
+
+  it('re-baselines and stays active when a third finger lifts back to two', () => {
+    const P3 = { pointerId: 3, pointerType: 'touch' as const, isPrimary: false }
+    mount()
+    firePointer(el, 'pointerdown', { ...P1, clientX: 100, clientY: 100 })
+    firePointer(el, 'pointerdown', { ...P2, clientX: 200, clientY: 100 })
+    firePointer(el, 'pointerdown', { ...P3, clientX: 300, clientY: 100 })
+    firePointer(el, 'pointerup', { ...P3, clientX: 300, clientY: 100 }) // back to 2 → re-baseline
+    expect(touchGestureBus.isPinchActive()).toBe(true)
+    // A spread from the new baseline still zooms (not frozen).
+    firePointer(el, 'pointermove', { ...P2, clientX: 300, clientY: 100 }) // 100→200 = 2×
+    expect(useEditorPrefsStore.getState().zoom).toBe(2.0)
+  })
+
+  it('a fresh single touch clears a stuck pinchActive (self-heal)', () => {
+    touchGestureBus.setPinchActive(true) // simulate a missed pointerup
+    mount()
+    firePointer(el, 'pointerdown', { ...P1, clientX: 100, clientY: 100 })
+    expect(touchGestureBus.isPinchActive()).toBe(false)
+  })
 })
