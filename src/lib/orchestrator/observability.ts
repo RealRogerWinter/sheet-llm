@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { eq, sql } from 'drizzle-orm'
+import { desc, eq, sql } from 'drizzle-orm'
 import { getDb } from '@/lib/db'
 import { orchestratorTurns } from '@/lib/db/schema'
 import type { Score } from '@/lib/music/types'
@@ -270,6 +270,58 @@ export function updateTurnUsageByRequestId(
       requestId,
       error: e instanceof Error ? e.message : String(e),
     })
+  }
+}
+
+/** The persisted turn cost the paywall settles a NON-STREAMING turn against. */
+export interface TurnCostRow {
+  /** Raw Anthropic cost for the whole turn (µUSD). NULL when recordTurn never
+   *  wrote it (a DB miss / skip) — the caller fails closed (NULL ≠ free). */
+  costMicroUsd: number | null
+  inputTokens: number | null
+  cachedInputTokens: number | null
+  cacheCreationInputTokens: number | null
+  outputTokens: number | null
+  handlerModel: string | null
+  finalStatus: OrchestratorFinalStatus
+}
+
+/**
+ * Read the orchestrator_turns row the paywall settles against, by request id.
+ * A NON-STREAMING request writes exactly one turn (recordTurnForResult); the
+ * `orchestrator_turns_request` index (migration 0013) backs this lookup. When
+ * more than one row somehow shares the id, the most recent wins. Returns
+ * undefined when no row exists OR on any DB error, so the caller treats an
+ * unreadable cost as fail-closed rather than as a $0 turn.
+ */
+export function readTurnCostByRequestId(
+  requestId: string,
+  db: ReturnType<typeof getDb> = getDb(),
+): TurnCostRow | undefined {
+  try {
+    const row = db
+      .select({
+        costMicroUsd: orchestratorTurns.costMicroUsd,
+        inputTokens: orchestratorTurns.inputTokens,
+        cachedInputTokens: orchestratorTurns.cachedInputTokens,
+        cacheCreationInputTokens: orchestratorTurns.cacheCreationInputTokens,
+        outputTokens: orchestratorTurns.outputTokens,
+        handlerModel: orchestratorTurns.handlerModel,
+        finalStatus: orchestratorTurns.finalStatus,
+      })
+      .from(orchestratorTurns)
+      .where(eq(orchestratorTurns.requestId, requestId))
+      .orderBy(desc(orchestratorTurns.createdAt))
+      .limit(1)
+      .get()
+    if (!row) return undefined
+    return { ...row, finalStatus: row.finalStatus as OrchestratorFinalStatus }
+  } catch (e) {
+    console.warn('[orchestrator] turn cost read failed', {
+      requestId,
+      error: e instanceof Error ? e.message : String(e),
+    })
+    return undefined
   }
 }
 

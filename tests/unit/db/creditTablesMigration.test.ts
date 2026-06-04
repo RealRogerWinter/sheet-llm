@@ -170,3 +170,24 @@ describe('0012_stripe_events migration', () => {
     expect(fks.length).toBe(0)
   })
 })
+
+// 0013 added a plain index on orchestrator_turns.request_id so the credit
+// paywall (PR-7b) can settle a non-streaming turn off its cost by request id.
+describe('0013_orchestrator_turns_request_index migration', () => {
+  const raw = (db: ReturnType<typeof makeTestDb>): Database.Database => db.$client
+
+  it('indexes orchestrator_turns.request_id (NON-unique — a streaming turn + its backfill share one)', () => {
+    const client = raw(makeTestDb())
+    const indexes = client.pragma('index_list(orchestrator_turns)') as Array<{
+      name: string
+      unique: number
+    }>
+    const reqIdx = indexes.find((i) => i.name === 'orchestrator_turns_request')
+    expect(reqIdx, 'orchestrator_turns_request index missing').toBeDefined()
+    expect(reqIdx!.unique).toBe(0) // plain index, not unique
+    const cols = (
+      client.pragma('index_info(orchestrator_turns_request)') as Array<{ name: string }>
+    ).map((c) => c.name)
+    expect(cols).toEqual(['request_id'])
+  })
+})

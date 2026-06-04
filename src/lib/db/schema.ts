@@ -302,6 +302,10 @@ export const orchestratorTurns = sqliteTable(
   (table) => [
     index('orchestrator_turns_session_created').on(table.sessionId, table.createdAt),
     index('orchestrator_turns_status').on(table.finalStatus, table.createdAt),
+    // The credit paywall (PR-7b) settles a non-streaming turn off its cost by
+    // request_id; request_id is NOT unique (a streaming turn + its backfill
+    // share one), so this is a plain index, not a uniqueIndex.
+    index('orchestrator_turns_request').on(table.requestId),
     check(
       'orchestrator_turns_status_valid',
       sql`final_status IN ('ok', 'refused', 'fell_through', 'error')`,

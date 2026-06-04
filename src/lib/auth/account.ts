@@ -16,6 +16,19 @@ export function isAccountsEnabled(): boolean {
 }
 
 /**
+ * Paid-generation feature flag — OFF by default. When unset, `/api/chat` never
+ * touches the credit wallet and behaves exactly as today (no hold, no settle,
+ * no charge). Flipping `SL_PAID_GENERATION` makes an authenticated Pro
+ * generation SPEND CREDITS, so it is an operator action gated on the launch
+ * checklist (Stripe keys, attorney memo, Anthropic ToS confirmation). Read
+ * fresh per request; no redeploy. Mirrors {@link isAccountsEnabled}.
+ */
+export function isPaidGenerationEnabled(): boolean {
+  const v = process.env.SL_PAID_GENERATION
+  return v === '1' || v?.toLowerCase() === 'true'
+}
+
+/**
  * THE single normalization point for email (lowercase + trim). EVERY
  * signup/login/oauth/reset path funnels through this so the plain unique index
  * on `users.email` enforces case-insensitive uniqueness without an expression
