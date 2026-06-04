@@ -11,6 +11,7 @@ const MESSAGES: Record<string, string> = {
   invalid_request: 'Please check the form and try again.',
   invalid_token: 'That link is invalid or has expired — request a new one.',
   rate_limited: 'Too many attempts. Please wait a minute and try again.',
+  bot_check_required: 'Please complete the bot check and try again.',
   already_authenticated: 'You are already signed in.',
   unauthenticated: 'Please sign in first.',
   not_found: 'Accounts are not available right now.',
