@@ -18,6 +18,7 @@ import CheatSheet from './editor/CheatSheet'
 import CommandPalette from './editor/CommandPalette'
 import { useCommandPalette } from './editor/useCommandPalette'
 import { useScoreWheelZoom } from './editor/useScoreWheelZoom'
+import { usePinchZoom } from './editor/usePinchZoom'
 import UndoToast from './editor/UndoToast'
 import { MeasureDeleteConfirmModal } from './editor/MeasureDeleteConfirmModal'
 import StatusStrip from './editor/StatusStrip'
@@ -63,6 +64,9 @@ export default function Hero() {
   // left alone so the page still scrolls. Only active with a score.
   const scoreAreaRef = useRef<HTMLDivElement>(null)
   useScoreWheelZoom(scoreAreaRef, !!abc)
+  // Two-finger pinch-zoom for touchscreens (the wheel handler only covers
+  // trackpad pinch via synthesized ctrlKey-wheel).
+  usePinchZoom(scoreAreaRef, !!abc)
 
   return (
     <main className={styles.hero}>

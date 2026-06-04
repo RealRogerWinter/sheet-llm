@@ -6,6 +6,7 @@ import { getStaffMeasureAt, getStaffMeasures, getVoiceMeasureAt } from '@/lib/mu
 import { resolveClickPosition } from '@/lib/music/scoreToAbcWithMap'
 import { DURATION_32NDS } from '@/lib/music/measureBalance'
 import { snapTargetAtX, dragSnapIsReorder, type SnapTarget } from './snapTargetAtX'
+import { touchGestureBus } from './touchGestureBus'
 import type { Event } from '@/lib/music/types'
 
 function cumulativeBoundaries(events: readonly Event[]): number[] {
@@ -162,6 +163,14 @@ export function useNoteDrag(scoreRef: RefObject<HTMLDivElement | null>) {
 
     function onPointerMove(e: PointerEvent) {
       if (!drag) return
+      // A second finger started a pinch-zoom — abort the drag (clears the
+      // notehead transform + drag state). Under touch-action:none the browser
+      // won't auto-pointercancel the first finger, so this is the explicit
+      // hand-off to usePinchZoom.
+      if (touchGestureBus.isPinchActive()) {
+        cancelDrag()
+        return
+      }
       if (!drag.noteEl.isConnected) {
         drag = undefined
         return
