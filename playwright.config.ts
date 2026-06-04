@@ -15,6 +15,17 @@ import { defineConfig, devices } from '@playwright/test'
 const E2E_SESSION_SECRET =
   process.env.SESSION_SECRET ?? 'e2e-test-session-secret-not-for-production-use-32b+'
 
+/**
+ * Test-only RECOVERY_SECRET. The auth layer signs recovery tokens on user
+ * creation and REQUIRES this to be present and DIFFERENT from SESSION_SECRET
+ * (so the two can be rotated independently). Without it, any e2e flow that
+ * creates a user (i.e. anything hitting /api/sessions or sending a prompt)
+ * 500s. Non-secret — it only signs ephemeral tokens in the Playwright dev
+ * server. Override via the RECOVERY_SECRET env var if needed.
+ */
+const E2E_RECOVERY_SECRET =
+  process.env.RECOVERY_SECRET ?? 'e2e-test-recovery-secret-distinct-from-session-32b+'
+
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: true,
@@ -35,10 +46,15 @@ export default defineConfig({
     timeout: 120_000,
     env: {
       SESSION_SECRET: E2E_SESSION_SECRET,
+      RECOVERY_SECRET: E2E_RECOVERY_SECRET,
       // Permit the insecure-cookie path: Playwright drives the dev
       // server over plain HTTP, and the auth layer's Secure-by-default
       // cookie would otherwise be dropped.
       SL_INSECURE_COOKIE_OK: '1',
+      // The dev-only Debug panel is a fixed overlay that intercepts pointer
+      // events and overflows narrow viewports — it's never in production, so
+      // turn it off for e2e instead of fighting it per-test.
+      NEXT_PUBLIC_DEBUG_PANEL: 'off',
     },
   },
 })

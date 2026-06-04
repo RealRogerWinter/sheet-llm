@@ -1,7 +1,21 @@
 .header {
+  grid-area: header;
+  /* Sticky so the toolbar stays reachable when a tall score scrolls. z-header
+   * (20) sits above the score/overlay layer (2) but below the sidebar (40) so
+   * the docked sidebar keeps painting over the header's left edge as before.
+   * The paper background keeps scrolling content from showing through. */
+  position: sticky;
+  top: 0;
+  z-index: var(--z-header);
+  background: var(--paper);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  /* Wrap on narrow viewports so the 7 nav buttons never overflow the width
+   * (the ResizeObserver in AppHeader republishes the taller height so Hero's
+   * top offset tracks it). */
+  flex-wrap: wrap;
+  gap: var(--gap-2);
   padding: var(--gap-4) var(--gap-5);
   border-bottom: 1px solid var(--rule);
 }
@@ -15,5 +29,7 @@
 .right {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: var(--gap-3);
 }
