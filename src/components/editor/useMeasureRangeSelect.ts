@@ -2,9 +2,7 @@
 
 import { useEffect, type RefObject } from 'react'
 import { useChatStore } from '@/lib/chat/state'
-import { clickInsertSlot } from './clickInsertSlot'
-import { resolveStaffFromY } from './staffResolver'
-import { getStaffCount } from '@/lib/music/scoreAccessors'
+import { resolveMeasureAt } from './resolveMeasureAt'
 
 /**
  * Cmd/Ctrl+click on the staff area selects the measure at the click
@@ -55,35 +53,24 @@ export function useMeasureRangeSelect(scoreRef: RefObject<HTMLDivElement | null>
       if (!editedScore) return
       if (!store.editMap) return
 
-      // Resolve the logical staff under the click Y.
-      const resolved = resolveStaffFromY(svg, e.clientY, getStaffCount(editedScore))
-      if (!resolved) return
-
-      // Resolve the measureIdx via the click-insert slot helper. We
-      // discard insertAfterIdx — measure-range selection only needs
-      // the bar identity, not the within-measure event slot.
-      const slot = clickInsertSlot(
-        svg,
-        e.clientX,
-        store.editMap,
-        resolved.staffIdx,
-        resolved.systemEl,
-      )
-      if (!slot || slot.measureIdx < 0) return
+      // Resolve the global measureIdx (staff from Y, measure from X) via the
+      // shared helper — also used by the touch range-extend path.
+      const measureIdx = resolveMeasureAt(svg, e.clientX, e.clientY, editedScore, store.editMap)
+      if (measureIdx === undefined) return
 
       // Preempt the default browser/system gesture (Cmd+click can
       // toggle multiple selection in some contexts) and the parent
-      // mouseup handlers (insert-note, deselect) which run on a plain
+      // pointerup handlers (insert-note, deselect) which run on a plain
       // click — we don't want them firing for our modified click.
       e.preventDefault()
       e.stopPropagation()
 
       if (e.shiftKey) {
-        store.extendMeasureRangeTo(slot.measureIdx)
+        store.extendMeasureRangeTo(measureIdx)
       } else {
         store.selectMeasureRange({
-          fromStart: slot.measureIdx,
-          fromEnd: slot.measureIdx,
+          fromStart: measureIdx,
+          fromEnd: measureIdx,
         })
       }
       // Always clear per-event selection when the click mutates the
@@ -104,12 +91,12 @@ export function useMeasureRangeSelect(scoreRef: RefObject<HTMLDivElement | null>
       }
     }
 
-    // Capture phase so we preempt useStaffInteractions' mouseup-based
-    // insert-note path (capture-phase listener can stopPropagation
-    // BEFORE the deeper handler runs). mouseDOWN here (vs. mouseup)
-    // because the modifier-aware gesture should fire on press, not
-    // release — feels snappier and avoids the "click then release"
-    // delay the insert-note gesture has.
+    // mouseDOWN (not up) so the modifier-aware gesture fires on press — snappier
+    // than waiting for release. Capture phase + preventDefault preempts the
+    // system Cmd+click behavior. (The sibling insert-note path now runs on
+    // pointerup and gates itself out on Cmd/Ctrl, so this is the desktop-only
+    // modifier channel; touch uses long-press-to-arm instead, see
+    // useScoreContextMenu + touchGestureBus.)
     container.addEventListener('mousedown', onMouseDown, { capture: true })
     return () => {
       container.removeEventListener('mousedown', onMouseDown, { capture: true })

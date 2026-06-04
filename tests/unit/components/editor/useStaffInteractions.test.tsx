@@ -3,6 +3,7 @@ import { renderHook } from '@testing-library/react'
 import { useRef } from 'react'
 import { useStaffInteractions } from '@/components/editor/useStaffInteractions'
 import { useChatStore } from '@/lib/chat/state'
+import { touchGestureBus } from '@/components/editor/touchGestureBus'
 import type { Score } from '@/lib/music/types'
 import { firePointer } from '../../../helpers/pointer'
 
@@ -24,6 +25,7 @@ const SELECTION = { staffIdx: 0, voiceIdx: 0, measureIdx: 0, eventIdx: 0 }
 
 afterEach(() => {
   document.body.innerHTML = ''
+  touchGestureBus.reset()
   vi.restoreAllMocks()
 })
 
@@ -79,5 +81,24 @@ describe('useStaffInteractions — pointer migration', () => {
     mount(container)
     firePointer(document.body, 'pointerdown', { clientX: 5, clientY: 5 })
     expect(useChatStore.getState().selection).toBeUndefined()
+  })
+
+  it('while range-armed, a tap that resolves no bar finishes (disarms) and does not insert', () => {
+    const { container, svg } = seed(false)
+    mount(container)
+    touchGestureBus.armRange()
+    // The bare seed SVG has no SourceMap geometry, so the tap resolves no
+    // measure → the armed branch disarms and returns without inserting.
+    firePointer(svg, 'pointerdown', { clientX: 500, clientY: 120 })
+    firePointer(svg, 'pointerup', { clientX: 500, clientY: 120 })
+    expect(touchGestureBus.isRangeArmed()).toBe(false)
+  })
+
+  it('an outside press also ends a range-select session', () => {
+    const { container } = seed(false)
+    mount(container)
+    touchGestureBus.armRange()
+    firePointer(document.body, 'pointerdown', { clientX: 5, clientY: 5 })
+    expect(touchGestureBus.isRangeArmed()).toBe(false)
   })
 })

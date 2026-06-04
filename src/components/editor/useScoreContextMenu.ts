@@ -7,6 +7,8 @@ import { isRest } from '@/lib/music/eventKind'
 import { classifyContextTarget } from './contextTarget'
 import { contextMenuSections } from './contextMenuItems'
 import { isContextMenuEnabled } from './contextMenuFlag'
+import { createLongPress } from './useLongPress'
+import { touchGestureBus } from './touchGestureBus'
 
 type Store = ReturnType<typeof useChatStore.getState>
 
@@ -76,6 +78,13 @@ export function useScoreContextMenu(scoreRef: RefObject<HTMLDivElement | null>, 
 
     function onContextMenu(e: MouseEvent) {
       if (!container) return
+      // Android fires a native `contextmenu` on long-press in ADDITION to our
+      // pointer-timer detector. If the long-press already handled this gesture
+      // (opened the menu or armed range-select), swallow the native one.
+      if (touchGestureBus.isContextMenuSuppressed()) {
+        e.preventDefault()
+        return
+      }
       if (!isContextMenuEnabled()) return
       // macOS Ctrl+click synthesizes a contextmenu event but is owned by
       // useMeasureRangeSelect — let it through to the native menu rather
@@ -113,10 +122,55 @@ export function useScoreContextMenu(scoreRef: RefObject<HTMLDivElement | null>, 
       }
     }
 
+    // Touch long-press: the iOS equivalent of right-click (iOS Safari never
+    // fires `contextmenu` from a hold). A hold on a bar arms touch range-select
+    // (a core gesture, NOT gated by the menu flag); a hold on a note/rest opens
+    // the context menu (gated by the flag, like the mouse path). Either way it
+    // suppresses the redundant Android-native `contextmenu`.
+    function onLongPress(e: PointerEvent) {
+      if (!container) return
+      const store = useChatStore.getState()
+      const editedScore = store.editedScore
+      const editMap = store.editMap
+      if (!editedScore || !editMap) return
+      const svg = container.querySelector('svg') as SVGSVGElement | null
+      if (!svg) return
+
+      const target = classifyContextTarget(svg, e, editMap, editedScore, store.measureRangeSelection)
+
+      if (target.kind === 'measure' || target.kind === 'barline') {
+        store.selectMeasureRange({ fromStart: target.measureIdx, fromEnd: target.measureIdx })
+        store.select(undefined)
+        touchGestureBus.armRange()
+        touchGestureBus.suppressContextMenu()
+        store.showStatusMessage(`Bar ${target.measureIdx + 1} — tap bars to extend the range`)
+        return
+      }
+
+      if (!isContextMenuEnabled()) return
+      if (openForTarget(store, target, e.clientX, e.clientY)) {
+        touchGestureBus.suppressContextMenu()
+      }
+    }
+
+    const longPress = createLongPress({ onLongPress })
+
     container.addEventListener('contextmenu', onContextMenu)
+    // Capture phase so the timer starts even for holds on a notehead, where
+    // useNoteDrag stop-propagates the bubbling pointerdown (a hold that then
+    // moves >tolerance cancels and lets the drag proceed).
+    container.addEventListener('pointerdown', longPress.onPointerDown, true)
+    container.addEventListener('pointermove', longPress.onPointerMove, true)
+    container.addEventListener('pointerup', longPress.onPointerUp, true)
+    container.addEventListener('pointercancel', longPress.onPointerCancel, true)
     document.addEventListener('keydown', onKeyDown, true)
     return () => {
       container.removeEventListener('contextmenu', onContextMenu)
+      container.removeEventListener('pointerdown', longPress.onPointerDown, true)
+      container.removeEventListener('pointermove', longPress.onPointerMove, true)
+      container.removeEventListener('pointerup', longPress.onPointerUp, true)
+      container.removeEventListener('pointercancel', longPress.onPointerCancel, true)
+      longPress.dispose()
       document.removeEventListener('keydown', onKeyDown, true)
     }
   }, [scoreRef, enabled])
