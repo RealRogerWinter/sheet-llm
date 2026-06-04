@@ -11,13 +11,14 @@ import styles from './AuthNavButton.module.css'
  * nothing until `useAuthSync` reads the session, the ThemeToggle deferred-read
  * pattern; a brief logged-out flash on authed loads is accepted). Hidden
  * entirely when accounts are disabled.
- *   - anon:   Log in (opens the modal) + Sign up (→ /signup)
+ *   - anon:   Log in + Sign up (both open the auth modal, login/signup form)
  *   - authed: the account email (→ /settings) + Log out
  */
 export default function AuthNavButton() {
   const status = useAuthStore((s) => s.status)
   const email = useAuthStore((s) => s.email)
   const openLogin = useAuthStore((s) => s.openLogin)
+  const openSignup = useAuthStore((s) => s.openSignup)
   const [loggingOut, setLoggingOut] = useState(false)
 
   if (status === 'loading' || status === 'disabled') return null
@@ -49,9 +50,9 @@ export default function AuthNavButton() {
       <button type="button" className={styles.button} onClick={openLogin}>
         Log in
       </button>
-      <Link href="/signup" className={`${styles.button} ${styles.primary}`}>
+      <button type="button" className={`${styles.button} ${styles.primary}`} onClick={openSignup}>
         Sign up
-      </Link>
+      </button>
     </div>
   )
 }

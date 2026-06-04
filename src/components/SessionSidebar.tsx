@@ -8,6 +8,7 @@ import {
   type KeyboardEvent,
 } from 'react'
 import { useChatStore } from '@/lib/chat/state'
+import { useAuthStore } from '@/lib/auth/authStore'
 import { mq as bp } from '@/lib/ui/breakpoints'
 import type {
   SessionListResponse,
@@ -43,6 +44,10 @@ export default function SessionSidebar() {
   const setSidebarOpen = useChatStore((s) => s.setSidebarOpen)
   const sidebarCollapsed = useChatStore((s) => s.sidebarCollapsed)
   const setSidebarCollapsed = useChatStore((s) => s.setSidebarCollapsed)
+  // Sessions are user-scoped, so the list must follow auth state: logging in
+  // should surface the account's saved sessions and logging out should clear
+  // them — both without a manual page reload.
+  const authStatus = useAuthStore((s) => s.status)
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [loading, setLoading] = useState<boolean>(false)
   const [error, setError] = useState<string | undefined>(undefined)
@@ -64,9 +69,9 @@ export default function SessionSidebar() {
   }, [])
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetchSessions toggles loading/error state; this is a real fetch-on-mount/chatId-change sync, not derivable from render
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetchSessions toggles loading/error state; this is a real fetch-on-mount/chatId-/auth-change sync, not derivable from render
     void fetchSessions()
-  }, [chatId, fetchSessions])
+  }, [chatId, authStatus, fetchSessions])
 
   useEffect(() => {
     function onVisible() {

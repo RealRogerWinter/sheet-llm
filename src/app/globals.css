@@ -164,6 +164,30 @@
   --ink-mist:       color-mix(in oklab, var(--score-ink) 14%, transparent);
   --ink-ghost:      color-mix(in oklab, var(--score-ink) 45%, transparent);
   --accent-compose: color-mix(in oklab, var(--playing)   35%, transparent);
+
+  /* ── Surface/control aliases for modal + panel CSS modules ──────────────
+   * AuthModal, AuthPage, AppHeader, PromptBar, the orchestrator modals, etc.
+   * were authored against a generic surface vocabulary (--surface / --text /
+   * --border / --bg / --text-muted / --surface-hover and the danger/ok sets)
+   * that was never actually defined — so every `var(--surface, #fff)` silently
+   * fell back to its hardcoded LIGHT value, leaving those components light even
+   * in dark mode. Defining the vocabulary ONLY here (under the dark theme) maps
+   * it onto the real palette tokens for dark mode while leaving light mode
+   * byte-identical (light still uses each declaration's own fallback). --accent
+   * is intentionally left to its #3b5bdb fallback — a brand blue that reads on
+   * both themes and keeps white button text legible. */
+  --surface: var(--paper);
+  --surface-hover: var(--paper-warm);
+  --text: var(--ink);
+  --text-muted: var(--graphite);
+  --border: var(--rule);
+  --bg: var(--paper-warm);
+  --danger-text: var(--signal);
+  --danger-bg: color-mix(in oklab, var(--signal) 14%, var(--paper));
+  --danger-border: color-mix(in oklab, var(--signal) 38%, var(--paper));
+  --ok-text: #4ade80;
+  --ok-bg: #102a1a;
+  --ok-border: #1f5132;
 }
 
 * {

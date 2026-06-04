@@ -3,10 +3,11 @@
 import Link from 'next/link'
 import { useCallback, useRef, useState, type FormEvent } from 'react'
 import { useAuthStore } from '@/lib/auth/authStore'
-import { login } from '@/lib/auth/authClient'
+import { login, signup } from '@/lib/auth/authClient'
 import { clearBackup } from '@/lib/auth/clientBackup'
 import { useChatStore } from '@/lib/chat/state'
 import { useFocusTrap } from './useFocusTrap'
+import { GoogleIcon, GitHubIcon } from './ProviderIcons'
 import styles from './AuthModal.module.css'
 
 // Identity-scoped keys cleared when the user DISCARDS pre-login anonymous work
@@ -19,16 +20,21 @@ const DISCARD_KEYS = [
 ]
 
 /**
- * Login modal — a real focus-trapped `<form>` dialog (NOT a copy of
+ * Auth modal — a real focus-trapped `<form>` dialog (NOT a copy of
  * MeasureDeleteConfirmModal: it has a proper focus trap, no global capture-phase
  * key handler that would hijack Enter-submit, and no backdrop-click-close that
- * would eat input). Correct autocomplete (username / current-password). After a
- * successful login, if there's unsaved local work, offers keep-or-discard so the
- * anon work is never silently lost.
+ * would eat input). Hosts BOTH the login and signup forms (toggled in place via
+ * the auth store's `mode`), so Sign up opens here as a modal rather than routing
+ * to the standalone `/signup` page. Correct autocomplete (username /
+ * current-password vs new-password). After a successful login, if there's
+ * unsaved local work, offers keep-or-discard so the anon work is never silently
+ * lost; signup adopts the current anon work, so it just closes.
  */
 export default function AuthModal() {
   const open = useAuthStore((s) => s.loginOpen)
   const close = useAuthStore((s) => s.closeLogin)
+  const mode = useAuthStore((s) => s.mode)
+  const setMode = useAuthStore((s) => s.setMode)
   const providers = useAuthStore((s) => s.oauthProviders)
   const dialogRef = useRef<HTMLDivElement>(null)
   const [email, setEmail] = useState('')
@@ -37,6 +43,7 @@ export default function AuthModal() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [keepDiscard, setKeepDiscard] = useState(false)
+  const isSignup = mode === 'signup'
 
   // Reset all local state on close — the modal is permanently mounted (returns
   // null while closed), so without this a stale keep/discard panel or stale
@@ -53,6 +60,14 @@ export default function AuthModal() {
 
   useFocusTrap(dialogRef, open, closeModal)
 
+  // Toggle login↔signup in place. Clears the error/keep-discard panel but keeps
+  // the typed email/password so switching after a typo isn't punishing.
+  const switchMode = useCallback(() => {
+    setError(null)
+    setKeepDiscard(false)
+    setMode(useAuthStore.getState().mode === 'signup' ? 'login' : 'signup')
+  }, [setMode])
+
   if (!open) return null
 
   async function onSubmit(e: FormEvent) {
@@ -60,14 +75,17 @@ export default function AuthModal() {
     if (submitting) return
     setSubmitting(true)
     setError(null)
-    const res = await login(email, password, remember)
+    const res = isSignup ? await signup(email, password) : await login(email, password, remember)
     setSubmitting(false)
     if (!res.ok) {
       setError(res.message)
       return
     }
-    // Signed in. If there's unsaved local work, ask keep/discard; else finish.
-    if (useChatStore.getState().abc) setKeepDiscard(true)
+    // Signup creates a fresh account that adopts the current browser's work, so
+    // there's nothing to reconcile — just finish. Login may collide with work
+    // from a previous anon session: if there's unsaved local work, ask
+    // keep/discard so it's never silently lost.
+    if (!isSignup && useChatStore.getState().abc) setKeepDiscard(true)
     else closeModal()
   }
 
@@ -121,7 +139,7 @@ export default function AuthModal() {
         ) : (
           <form onSubmit={onSubmit} className={styles.form}>
             <h2 id="auth-modal-title" className={styles.title}>
-              Log in
+              {isSignup ? 'Create your account' : 'Log in'}
             </h2>
             {error && (
               <div role="alert" className={styles.error}>
@@ -146,18 +164,28 @@ export default function AuthModal() {
                 className={styles.input}
                 type="password"
                 name="password"
-                autoComplete="current-password"
+                autoComplete={isSignup ? 'new-password' : 'current-password'}
                 required
+                minLength={isSignup ? 10 : undefined}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
+              {isSignup && <span className={styles.hint}>At least 10 characters.</span>}
             </label>
-            <label className={styles.checkbox}>
-              <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-              <span>Keep me signed in</span>
-            </label>
+            {!isSignup && (
+              <label className={styles.checkbox}>
+                <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+                <span>Keep me signed in</span>
+              </label>
+            )}
             <button type="submit" className={`${styles.btn} ${styles.primary} ${styles.full}`} disabled={submitting}>
-              {submitting ? 'Signing in…' : 'Log in'}
+              {isSignup
+                ? submitting
+                  ? 'Creating…'
+                  : 'Create account'
+                : submitting
+                  ? 'Signing in…'
+                  : 'Log in'}
             </button>
             {providers.length > 0 && (
               <div className={styles.oauth}>
@@ -166,23 +194,36 @@ export default function AuthModal() {
                 </div>
                 {providers.includes('google') && (
                   <a className={styles.oauthBtn} href="/api/auth/oauth/google/start">
-                    Continue with Google
+                    <GoogleIcon />
+                    <span>Continue with Google</span>
                   </a>
                 )}
                 {providers.includes('github') && (
                   <a className={styles.oauthBtn} href="/api/auth/oauth/github/start">
-                    Continue with GitHub
+                    <GitHubIcon />
+                    <span>Continue with GitHub</span>
                   </a>
                 )}
               </div>
             )}
             <div className={styles.links}>
-              <Link href="/reset" onClick={closeModal}>
-                Forgot password?
-              </Link>
-              <Link href="/signup" onClick={closeModal}>
-                Create account
-              </Link>
+              {isSignup ? (
+                <>
+                  <span />
+                  <button type="button" className={styles.linkBtn} onClick={switchMode}>
+                    Already have an account? Log in
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Link href="/reset" onClick={closeModal}>
+                    Forgot password?
+                  </Link>
+                  <button type="button" className={styles.linkBtn} onClick={switchMode}>
+                    Create account
+                  </button>
+                </>
+              )}
             </div>
           </form>
         )}

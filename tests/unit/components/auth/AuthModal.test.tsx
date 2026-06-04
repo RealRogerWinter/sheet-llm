@@ -11,20 +11,20 @@ vi.mock('next/link', () => ({
     </a>
   ),
 }))
-vi.mock('@/lib/auth/authClient', () => ({ login: vi.fn() }))
+vi.mock('@/lib/auth/authClient', () => ({ login: vi.fn(), signup: vi.fn() }))
 vi.mock('@/lib/auth/clientBackup', () => ({ clearBackup: vi.fn() }))
 // AuthModal only reads useChatStore.getState().abc imperatively.
 const chatMock = vi.hoisted(() => ({ abc: undefined as unknown }))
 vi.mock('@/lib/chat/state', () => ({ useChatStore: { getState: () => ({ abc: chatMock.abc }) } }))
 
 import AuthModal from '@/components/auth/AuthModal'
-import { login } from '@/lib/auth/authClient'
+import { login, signup } from '@/lib/auth/authClient'
 
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
   chatMock.abc = undefined
-  useAuthStore.setState({ loginOpen: false, oauthProviders: [], csrfToken: 't' })
+  useAuthStore.setState({ loginOpen: false, mode: 'login', oauthProviders: [], csrfToken: 't' })
 })
 
 describe('AuthModal', () => {
@@ -61,11 +61,45 @@ describe('AuthModal', () => {
     expect(useAuthStore.getState().loginOpen).toBe(true)
   })
 
-  it('renders only the configured OAuth buttons', () => {
+  it('renders only the configured OAuth buttons, each with a brand logo', () => {
     useAuthStore.setState({ loginOpen: true, oauthProviders: ['google'] })
     render(<AuthModal />)
-    expect(screen.getByText('Continue with Google')).toBeInTheDocument()
+    const google = screen.getByText('Continue with Google').closest('a')
+    expect(google).toBeInTheDocument()
+    expect(google?.querySelector('svg')).toBeInTheDocument() // Google logo
     expect(screen.queryByText('Continue with GitHub')).not.toBeInTheDocument()
+  })
+
+  it('opens on the signup form when mode is signup; submits signup and closes', async () => {
+    ;(signup as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true })
+    chatMock.abc = 'X:1\nK:C\nCDEF|' // unsaved work — signup adopts it, so NO keep/discard
+    useAuthStore.setState({ loginOpen: true, mode: 'signup', oauthProviders: [], csrfToken: 't' })
+    const user = userEvent.setup()
+    render(<AuthModal />)
+    expect(screen.getByRole('heading', { name: 'Create your account' })).toBeInTheDocument()
+    expect(screen.queryByText('Keep me signed in')).not.toBeInTheDocument()
+    await user.type(screen.getByLabelText('Email'), 'new@b.c')
+    // In signup mode the label wraps the "At least 10 characters" hint, so the
+    // accessible name is "Password …" — match by prefix.
+    await user.type(screen.getByLabelText(/^Password/), 'longpassword1')
+    await user.click(screen.getByRole('button', { name: 'Create account' }))
+    expect(signup).toHaveBeenCalledWith('new@b.c', 'longpassword1')
+    expect(login).not.toHaveBeenCalled()
+    expect(screen.queryByText('Keep my work')).not.toBeInTheDocument()
+    expect(useAuthStore.getState().loginOpen).toBe(false)
+  })
+
+  it('toggles between login and signup in place (no navigation)', async () => {
+    useAuthStore.setState({ loginOpen: true, mode: 'login', oauthProviders: [] })
+    const user = userEvent.setup()
+    render(<AuthModal />)
+    expect(screen.getByRole('heading', { name: 'Log in' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Create account' }))
+    expect(useAuthStore.getState().mode).toBe('signup')
+    expect(screen.getByRole('heading', { name: 'Create your account' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /already have an account/i }))
+    expect(useAuthStore.getState().mode).toBe('login')
+    expect(screen.getByRole('heading', { name: 'Log in' })).toBeInTheDocument()
   })
 
   it('login with unsaved work shows keep/discard; closing via × resets it (no stale panel on reopen)', async () => {

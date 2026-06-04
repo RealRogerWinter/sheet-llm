@@ -11,6 +11,7 @@ beforeEach(() => {
     csrfToken: null,
     oauthProviders: [],
     loginOpen: false,
+    mode: 'login',
   })
 })
 
@@ -52,10 +53,25 @@ describe('authStore.setSession', () => {
 })
 
 describe('authStore modal flag', () => {
-  it('openLogin / closeLogin toggle loginOpen', () => {
+  it('openLogin / closeLogin toggle loginOpen (login mode)', () => {
+    useAuthStore.setState({ mode: 'signup' })
     useAuthStore.getState().openLogin()
     expect(useAuthStore.getState().loginOpen).toBe(true)
+    expect(useAuthStore.getState().mode).toBe('login')
     useAuthStore.getState().closeLogin()
     expect(useAuthStore.getState().loginOpen).toBe(false)
+  })
+
+  it('openSignup opens the modal on the signup form', () => {
+    useAuthStore.getState().openSignup()
+    expect(useAuthStore.getState().loginOpen).toBe(true)
+    expect(useAuthStore.getState().mode).toBe('signup')
+  })
+
+  it('setMode toggles the form without touching loginOpen', () => {
+    useAuthStore.getState().openLogin()
+    useAuthStore.getState().setMode('signup')
+    expect(useAuthStore.getState().mode).toBe('signup')
+    expect(useAuthStore.getState().loginOpen).toBe(true)
   })
 })
