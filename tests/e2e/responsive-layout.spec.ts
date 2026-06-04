@@ -53,6 +53,22 @@ test.describe('overlay containment guard', () => {
   })
 })
 
+// Push/reflow guard: at the dock breakpoint the chat panel must occupy the
+// `panel` grid track and sit BESIDE the score (no horizontal overlap), not
+// overlay it. If it regressed to a fixed overlay, panel.left would fall inside
+// main's box.
+test.describe('docked panel push @ desktop', () => {
+  test.use({ viewport: { width: 1440, height: 900 } })
+  test('the docked chat panel reflows the score (no overlap)', async ({ page }) => {
+    await importAbc(page, SCALE_ABC)
+    const panel = page.getByRole('complementary', { name: /chat history/i })
+    await expect(panel).toBeVisible()
+    const main = await page.locator('main').boundingBox()
+    const pb = await panel.boundingBox()
+    expect(pb!.x).toBeGreaterThanOrEqual(main!.x + main!.width - 1)
+  })
+})
+
 for (const vp of VIEWPORTS) {
   test.describe(`responsive layout @ ${vp.name}`, () => {
     test.use({ viewport: { width: vp.width, height: vp.height } })

@@ -10,7 +10,9 @@
   position: fixed;
   top: 0;
   right: 0;
-  width: var(--panel-w);
+  /* Cap at the viewport so the fixed-overlay variant (below xl, where this
+   * panel has no drawer/sheet fallback) doesn't overflow a ~320px phone. */
+  width: min(var(--panel-w), 100vw);
   height: 100dvh;
   z-index: var(--z-ghost-panel);
   background: var(--paper, #fff);
@@ -23,6 +25,21 @@
   padding: 16px;
   font-size: 13px;
   animation: slide-in-right 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* At xl the diff panel pushes the score column instead of overlaying it: it
+ * occupies the app-shell `panel` grid track (matching the docked chat panel).
+ * Below xl it stays the fixed full-height overlay above. Mirror the 1280px
+ * dock breakpoint (mq.up('xl')). */
+@media (min-width: 1280px) {
+  .panel {
+    position: sticky;
+    grid-area: panel;
+    align-self: start;
+    top: var(--app-header-height);
+    height: calc(100dvh - var(--app-header-height));
+    box-shadow: none;
+  }
 }
 
 @keyframes slide-in-right {

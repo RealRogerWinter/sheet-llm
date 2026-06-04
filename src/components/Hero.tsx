@@ -26,7 +26,6 @@ import BlankScoreHint from './editor/BlankScoreHint'
 import { ReplacementConfirmModal } from './orchestrator/ReplacementConfirmModal'
 import { GhostPreviewAmber } from './orchestrator/GhostPreviewAmber'
 import { GhostPreviewOverlay } from './orchestrator/GhostPreviewOverlay'
-import { GhostPreviewPanel } from './orchestrator/GhostPreviewPanel'
 import { ResumeProposalToast } from './orchestrator/ResumeProposalToast'
 import styles from './Hero.module.css'
 
@@ -106,7 +105,6 @@ export default function Hero() {
       <ReplacementConfirmModal />
       <GhostPreviewAmber />
       <GhostPreviewOverlay />
-      <GhostPreviewPanel />
       <ResumeProposalToast />
     </main>
   )
