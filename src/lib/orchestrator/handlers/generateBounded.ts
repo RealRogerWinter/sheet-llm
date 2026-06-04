@@ -37,8 +37,9 @@ export class GenerateBoundedError extends Error {
 }
 
 // Frozen role FIRST (no per-request interpolation), then the large shared
-// references (cache: true) that fill the 3 system cache markers; the
-// render_score tool schema anchors the front of the cached prefix.
+// references (cache: true). A single breakpoint on the LAST one caches the
+// whole static prefix (see buildSystemBlocks); the render_score tool schema is
+// cached separately on the tool definition.
 const BOUNDED_SYSTEM_BLOCKS: SystemBlock[] = [
   { text: BOUNDED_GENERATION_RULES },
   { text: MULTI_STAFF_REFERENCE, cache: true },
