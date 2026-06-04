@@ -53,6 +53,7 @@ import { currentMeterTotals, runWithUsageMeter, toMicroUsd } from '@/lib/billing
 import { isPaidGenerationEnabled } from '@/lib/auth/account'
 import { ensureWallet, placeHold, refund, releaseHold, settleHold, type SettleResult } from '@/lib/billing/wallet'
 import { maybeReapExpiredHolds } from '@/lib/billing/reap'
+import { consumeFreePiece, isFreePieceEligible } from '@/lib/billing/freePiece'
 import {
   costToCredits,
   fallbackCreditsForKind,
@@ -529,7 +530,26 @@ async function handleChat(
   // IGNORES it in production unless SL_ALLOW_TIER_OVERRIDE is set — otherwise any
   // caller could POST debug.generationTier='pro' and bypass the paywall.
   // See isTierOverrideAllowed in generationTier.ts.
-  const generationTier = await resolveGenerationTier(userId, parsed.debug?.generationTier)
+  let generationTier = await resolveGenerationTier(userId, parsed.debug?.generationTier)
+
+  // ── Free full piece (PR-7b-3): a VERIFIED account's ONE-TIME pro-scope
+  // generation, free + OFF the money path (a charge-SKIP, never a credit grant —
+  // which would open refund farming). DARK with the paid layer. Restricted to
+  // FROM-SCRATCH requests (no existing score ⇒ always a generation, never a free
+  // edit/converse, so it can't be farmed). When eligible, upgrade THIS request to
+  // pro scope (the full product) and skip the hold below; the grant is consumed
+  // on successful DELIVERY (not on failure) so a failed piece doesn't burn it.
+  const freePiece =
+    isPaidGenerationEnabled() && authenticated && !orchestratorScore && isFreePieceEligible(userId)
+  if (freePiece) generationTier = 'pro'
+  // KNOWN (deferred to the pre-launch hardening, with PR-7b-2c): eligibility is
+  // read here but the grant is consumed only on DELIVERY, so a CONCURRENT burst
+  // of from-scratch requests could each run a free piece before the first
+  // consumes (the idempotent flag still prevents a second persisted grant — only
+  // the concurrent COST leaks). Bounded by the per-IP burst limiter + Turnstile +
+  // the verified-account requirement; the robust fix is a pre-dispatch
+  // reservation (claim → release-on-non-delivery, symmetric with the credit
+  // hold). Dark until SL_PAID_GENERATION, so no live exposure.
 
   // Daily request-quota gate (hosted abuse-gating layer; OFF by default — inert
   // for self-hosters). Slotted AFTER identity + tier are known and BEFORE any
@@ -554,7 +574,8 @@ async function handleChat(
   // respondWithOrchestratorResult (non-streaming) and released on every other
   // outcome — streaming settle is PR-7b-2. A crashed request self-heals via
   // reapExpiredHolds.
-  const paidGeneration = isPaidGenerationEnabled() && authenticated && generationTier === 'pro'
+  const paidGeneration =
+    isPaidGenerationEnabled() && authenticated && generationTier === 'pro' && !freePiece
   let holdId: string | undefined
   if (paidGeneration) {
     try {
@@ -689,7 +710,9 @@ async function handleChat(
     }
     if (isOrchestratorScoreStream(orchestratorOutcome)) {
       // PR-7b-2: settled at `done` off the (backfilled) full sectional cost.
-      return await respondWithScoreStream(userId, chatId, orchestratorOutcome, mode, generationTier, requestId, holdId)
+      // PR-7b-3: a from-scratch free piece (holdId undefined) consumes the grant
+      // at `done` instead of settling.
+      return await respondWithScoreStream(userId, chatId, orchestratorOutcome, mode, generationTier, requestId, holdId, freePiece)
     }
     if (!('fellThrough' in orchestratorOutcome)) {
       // Non-streaming result: respondWithOrchestratorResult OWNS the hold's
@@ -703,6 +726,7 @@ async function handleChat(
         generationTier,
         requestId,
         holdId,
+        freePiece,
       )
     }
     // fellThrough — drop through to the legacy path below; the
@@ -762,25 +786,33 @@ async function handleChat(
     )
   }
 
-  // A PAID request must NEVER be served by the uncharged legacy single-shot path
-  // (PR-7b-1 does not meter or charge legacy). Reaching here on the paid path
-  // means a non-deadline fall-through (low_confidence / handler_error) or mode
-  // off / shadow / kill — refuse instead of handing out a free Pro generation.
-  // The hold was already released above. (Deadline + free-tier fall-throughs are
-  // handled above; a Pro user is never on the free tier.) This is the backstop
-  // behind the debug.orchestrator gate: even an operator kill switch can't leak a
-  // free paid generation.
-  if (paidGeneration) {
-    console.warn('[paywall] paid request would hit the uncharged legacy path — refusing', {
+  // A PAID or FREE-PIECE request must NEVER be served by the uncharged legacy
+  // single-shot path (PR-7b-1 does not meter or charge legacy). Reaching here
+  // means a non-deadline fall-through (low_confidence / handler_error), a
+  // from-scratch converse (no score ⇒ falls through), or mode off / shadow /
+  // kill — refuse instead of handing out a free Pro generation.
+  //   - PAID (PR-7b-1): else an uncharged Pro delivery.
+  //   - FREE PIECE (PR-7b-3): the free piece is consumed ONLY on an orchestrator
+  //     delivery (the two responders). Serving it via legacy would deliver a free
+  //     UNBOUNDED Pro generation that NEVER consumes the grant → unlimited free
+  //     Pro, repeatable. Refusing keeps the grant unspent so a retry gets the
+  //     real (orchestrator, consumed) free piece. This also closes the converse
+  //     path (respondWithConverseStream is unreachable from-scratch).
+  // The hold was already released above (no-op for a free piece — no hold). This
+  // is the backstop behind the debug.orchestrator gate: even an operator kill
+  // switch can't leak a free Pro generation.
+  if (paidGeneration || freePiece) {
+    console.warn('[paywall] paid/free-piece request would hit the uncharged legacy path — refusing', {
       requestId,
       chatId,
       mode,
+      freePiece,
       fallThroughReason: fallThrough?.reason,
     })
     return errorResponse(
       'refused',
       422,
-      "I couldn't complete that on the Pro path just now. Try rephrasing it as a smaller, specific change, then try again.",
+      "I couldn't complete that on the Pro path just now. Please try again in a moment.",
       chatId,
     )
   }
@@ -1144,6 +1176,7 @@ async function respondWithOrchestratorResult(
   generationTier: GenerationTier,
   requestId?: string,
   holdId?: string,
+  freePiece?: boolean,
 ) {
   try {
     validateScore(result.score)
@@ -1277,6 +1310,13 @@ async function respondWithOrchestratorResult(
     throw e
   }
 
+  // PR-7b-3: a delivered from-scratch free piece consumes the one-time grant
+  // (idempotent; off the money path). Only on success — a failure above already
+  // returned/threw before here, leaving the grant for a retry. freePiece is only
+  // set for a from-scratch (no prior score) request, which is always a
+  // generation, so this never burns the grant on an edit/converse.
+  if (freePiece) consumeFreePiece(userId)
+
   const keyConfigured = !!process.env.ANTHROPIC_API_KEY
   const debug: ChatDebugPayload = {
     classification: {
@@ -1379,6 +1419,10 @@ async function respondWithConverseStream(
   generationTier: GenerationTier,
   requestId: string,
   holdId?: string,
+  // NB: no `freePiece` param by design — a free piece is from-scratch (no score),
+  // but converse requires an existing score, so it falls through (and is refused
+  // by the paid/free-piece legacy backstop) rather than ever reaching here. So a
+  // free piece never streams a converse and never consumes the grant on a Q&A.
 ): Promise<Response> {
   const toolUseId = synthToolUseId()
   const keyConfigured = !!process.env.ANTHROPIC_API_KEY
@@ -1602,6 +1646,7 @@ async function respondWithScoreStream(
   generationTier: GenerationTier,
   requestId: string,
   holdId?: string,
+  freePiece?: boolean,
 ): Promise<Response> {
   const keyConfigured = !!process.env.ANTHROPIC_API_KEY
   const debug: ChatDebugPayload = {
@@ -1728,6 +1773,9 @@ async function respondWithScoreStream(
               }
               try {
                 const persisted = await persist(ev.score, ev.introText, ev.toolUseId)
+                // PR-7b-3: a delivered from-scratch free piece (no hold) consumes
+                // the one-time grant here (idempotent; off the money path).
+                if (freePiece) consumeFreePiece(userId)
                 write('done', {
                   abc: persisted.abc,
                   scoreJson: ev.score,
