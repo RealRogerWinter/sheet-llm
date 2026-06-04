@@ -17,7 +17,7 @@ import AuthNavButton from '@/components/auth/AuthNavButton'
 
 afterEach(() => {
   cleanup()
-  useAuthStore.setState({ status: 'loading', email: null, loginOpen: false })
+  useAuthStore.setState({ status: 'loading', email: null, loginOpen: false, mode: 'login' })
 })
 
 describe('AuthNavButton', () => {
@@ -30,7 +30,7 @@ describe('AuthNavButton', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('shows Log in + Sign up when anon; Log in opens the modal', async () => {
+  it('shows Log in + Sign up when anon; Log in opens the modal on the login form', async () => {
     const user = userEvent.setup()
     useAuthStore.setState({ status: 'anon' })
     render(<AuthNavButton />)
@@ -38,6 +38,18 @@ describe('AuthNavButton', () => {
     expect(screen.getByText('Sign up')).toBeInTheDocument()
     await user.click(screen.getByText('Log in'))
     expect(useAuthStore.getState().loginOpen).toBe(true)
+    expect(useAuthStore.getState().mode).toBe('login')
+  })
+
+  it('Sign up opens the modal on the signup form (no navigation to /signup)', async () => {
+    const user = userEvent.setup()
+    useAuthStore.setState({ status: 'anon' })
+    render(<AuthNavButton />)
+    const signupBtn = screen.getByText('Sign up')
+    expect(signupBtn.tagName).toBe('BUTTON') // a button, not an <a href="/signup">
+    await user.click(signupBtn)
+    expect(useAuthStore.getState().loginOpen).toBe(true)
+    expect(useAuthStore.getState().mode).toBe('signup')
   })
 
   it('shows the email + Log out when authed; Log out calls logout()', async () => {

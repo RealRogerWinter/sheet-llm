@@ -152,12 +152,39 @@
   border: 1px solid var(--border, #d0d0d8);
   background: var(--surface, #fff);
   color: var(--text, #1a1a1a);
-  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   text-decoration: none;
+}
+
+.oauthBtn svg {
+  flex: 0 0 auto;
 }
 
 .oauthBtn:hover {
   background: var(--surface-hover, #f3f3f7);
+}
+
+.hint {
+  font-size: 0.78rem;
+  color: var(--text-muted, #888);
+}
+
+.linkBtn {
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent, #3b5bdb);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.linkBtn:hover {
+  text-decoration: underline;
 }
 
 .links {

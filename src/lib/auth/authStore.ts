@@ -31,12 +31,21 @@ interface AuthState {
   /** Double-submit CSRF token for the next auth POST (rotated each session read). */
   csrfToken: string | null
   oauthProviders: string[]
-  /** Login modal visibility (the modal lives in the client shell). */
+  /** Auth modal visibility (the modal lives in the client shell). */
   loginOpen: boolean
+  /** Which form the (single) auth modal shows — login or signup. */
+  mode: AuthMode
   setSession: (s: SessionPayload) => void
+  /** Open the modal on the login form. */
   openLogin: () => void
+  /** Open the modal on the signup form (so Sign up is a modal, not a page). */
+  openSignup: () => void
+  /** Switch the open modal between login/signup without closing it. */
+  setMode: (mode: AuthMode) => void
   closeLogin: () => void
 }
+
+export type AuthMode = 'login' | 'signup'
 
 export const useAuthStore = create<AuthState>((set) => ({
   status: 'loading',
@@ -46,6 +55,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   csrfToken: null,
   oauthProviders: [],
   loginOpen: false,
+  mode: 'login',
   setSession: (s) =>
     set({
       status: !s.enabled ? 'disabled' : s.authenticated ? 'authed' : 'anon',
@@ -55,6 +65,8 @@ export const useAuthStore = create<AuthState>((set) => ({
       csrfToken: s.csrfToken ?? null,
       oauthProviders: s.oauthProviders ?? [],
     }),
-  openLogin: () => set({ loginOpen: true }),
+  openLogin: () => set({ loginOpen: true, mode: 'login' }),
+  openSignup: () => set({ loginOpen: true, mode: 'signup' }),
+  setMode: (mode) => set({ mode }),
   closeLogin: () => set({ loginOpen: false }),
 }))

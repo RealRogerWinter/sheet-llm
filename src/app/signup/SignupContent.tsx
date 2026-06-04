@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useState, type FormEvent } from 'react'
 import { useAuthStore } from '@/lib/auth/authStore'
 import { refreshSession, signup } from '@/lib/auth/authClient'
+import { GoogleIcon, GitHubIcon } from '@/components/auth/ProviderIcons'
 import styles from '@/components/auth/AuthPage.module.css'
 
 export default function SignupContent() {
@@ -91,13 +92,15 @@ export default function SignupContent() {
               <span>or</span>
             </div>
             {providers.includes('google') && (
-              <a className={`${styles.btn} ${styles.secondary}`} href="/api/auth/oauth/google/start">
-                Continue with Google
+              <a className={`${styles.btn} ${styles.secondary} ${styles.oauthBtn}`} href="/api/auth/oauth/google/start">
+                <GoogleIcon />
+                <span>Continue with Google</span>
               </a>
             )}
             {providers.includes('github') && (
-              <a className={`${styles.btn} ${styles.secondary}`} href="/api/auth/oauth/github/start">
-                Continue with GitHub
+              <a className={`${styles.btn} ${styles.secondary} ${styles.oauthBtn}`} href="/api/auth/oauth/github/start">
+                <GitHubIcon />
+                <span>Continue with GitHub</span>
               </a>
             )}
           </div>

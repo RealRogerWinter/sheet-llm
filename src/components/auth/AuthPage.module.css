@@ -107,6 +107,17 @@
   background: var(--surface-hover, #f3f3f7);
 }
 
+.oauthBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.oauthBtn svg {
+  flex: 0 0 auto;
+}
+
 .error {
   font-size: 0.85rem;
   color: var(--danger-text, #b91c1c);
