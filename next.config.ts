@@ -38,7 +38,9 @@ const nextConfig: NextConfig = {
   // the server output or the prebuilt .node fails to load at runtime
   // (ERR_DLOPEN / NODE_MODULE_VERSION). Keep it external so the standalone
   // trace copies the real module + its compiled .node.
-  serverExternalPackages: ["better-sqlite3"],
+  // nodemailer (SMTP email provider) uses dynamic requires that the bundler
+  // mishandles; keep it external so the standalone trace copies the real module.
+  serverExternalPackages: ["better-sqlite3", "nodemailer"],
   // The Drizzle migrations dir is read at boot by ensureMigrationsApplied()
   // (src/lib/db) via path.resolve(process.cwd(), 'drizzle'); it is NOT a route
   // asset, so standalone tracing won't include it on its own. Trace it in for

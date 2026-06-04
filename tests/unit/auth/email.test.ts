@@ -27,6 +27,37 @@ describe('email provider selection', () => {
     setEmailProviderForTesting(undefined)
     expect(getEmailProvider().name).toBe('resend')
   })
+
+  it('uses the SMTP provider when SMTP_HOST/USER/PASS + EMAIL_FROM are set', async () => {
+    vi.stubEnv('EMAIL_FROM', 'sheet-llm <noreply@example.com>')
+    vi.stubEnv('SMTP_HOST', 'smtp-relay.brevo.com')
+    vi.stubEnv('SMTP_USER', 'user@example.com')
+    vi.stubEnv('SMTP_PASS', 'smtp-key')
+    const { getEmailProvider, setEmailProviderForTesting } = await import('@/lib/auth/email')
+    setEmailProviderForTesting(undefined)
+    expect(getEmailProvider().name).toBe('smtp')
+  })
+
+  it('prefers SMTP over Resend when both are configured', async () => {
+    vi.stubEnv('EMAIL_FROM', 'sheet-llm <noreply@example.com>')
+    vi.stubEnv('RESEND_API_KEY', 're_test_key')
+    vi.stubEnv('SMTP_HOST', 'smtp-relay.brevo.com')
+    vi.stubEnv('SMTP_USER', 'user@example.com')
+    vi.stubEnv('SMTP_PASS', 'smtp-key')
+    const { getEmailProvider, setEmailProviderForTesting } = await import('@/lib/auth/email')
+    setEmailProviderForTesting(undefined)
+    expect(getEmailProvider().name).toBe('smtp')
+  })
+
+  it('falls back to console when EMAIL_FROM is missing even with SMTP creds', async () => {
+    vi.stubEnv('EMAIL_FROM', '')
+    vi.stubEnv('SMTP_HOST', 'smtp-relay.brevo.com')
+    vi.stubEnv('SMTP_USER', 'user@example.com')
+    vi.stubEnv('SMTP_PASS', 'smtp-key')
+    const { getEmailProvider, setEmailProviderForTesting } = await import('@/lib/auth/email')
+    setEmailProviderForTesting(undefined)
+    expect(getEmailProvider().name).toBe('console')
+  })
 })
 
 describe('console provider', () => {
