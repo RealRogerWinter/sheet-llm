@@ -4,7 +4,7 @@ subsystem: evals-testing
 audience: [ai-agent, contributor]
 status: current
 last_verified: 2026-06-04
-verified_against: 4fcabd9
+verified_against: 213d7c1
 source_paths:
   - evals/lib/assertions.ts
   - evals/lib/buildLiveCase.ts
