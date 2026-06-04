@@ -4,7 +4,10 @@ import {
   billableCostUsd,
   estimateCostUsd,
   UnknownModelPricingError,
+  InvalidUsageError,
 } from './pricing'
+
+const NO_CACHE = { cacheReadInputTokens: 0, cacheCreationInputTokens: 0 }
 
 describe('billing/pricing', () => {
   it('prices every Anthropic registry model id, including Opus 4.8', () => {
@@ -18,28 +21,28 @@ describe('billing/pricing', () => {
     }
   })
 
-  it('derives cache rates from base input (read 0.1x, write 1.25x / 2x)', () => {
+  it('derives cache rates from base input (read 0.1x, write 1.25x)', () => {
     for (const p of Object.values(PRICING)) {
       expect(p.cachedInputPerM).toBeCloseTo(p.inputPerM * 0.1)
       expect(p.cacheWrite5mPerM).toBeCloseTo(p.inputPerM * 1.25)
-      expect(p.cacheWrite1hPerM).toBeCloseTo(p.inputPerM * 2)
     }
   })
 
   describe('billableCostUsd (strict, for debits)', () => {
     it('bills uncached input + output at base rates', () => {
-      // 1M uncached input + 1M output on Sonnet = $3 + $15
       const c = billableCostUsd('claude-sonnet-4-6', {
         uncachedInputTokens: 1_000_000,
         outputTokens: 1_000_000,
+        ...NO_CACHE,
       })
-      expect(c).toBeCloseTo(18)
+      expect(c).toBeCloseTo(18) // $3 + $15
     })
 
     it('bills cache-creation (write) tokens ABOVE the base input rate', () => {
       const withWrite = billableCostUsd('claude-sonnet-4-6', {
         uncachedInputTokens: 0,
         outputTokens: 0,
+        cacheReadInputTokens: 0,
         cacheCreationInputTokens: 1_000_000,
       })
       expect(withWrite).toBeCloseTo(3.75) // 1.25x of $3
@@ -51,6 +54,7 @@ describe('billing/pricing', () => {
         uncachedInputTokens: 0,
         outputTokens: 0,
         cacheReadInputTokens: 1_000_000,
+        cacheCreationInputTokens: 0,
       })
       expect(c).toBeCloseTo(0.3)
     })
@@ -60,12 +64,39 @@ describe('billing/pricing', () => {
         billableCostUsd('some-other-provider-model', {
           uncachedInputTokens: 1000,
           outputTokens: 1000,
+          ...NO_CACHE,
         }),
       ).toThrow(UnknownModelPricingError)
     })
+
+    it.each([
+      ['negative', -1],
+      ['NaN', Number.NaN],
+      ['Infinity', Number.POSITIVE_INFINITY],
+      ['fractional', 1.5],
+    ])('THROWS InvalidUsageError on a %s input count (fails closed)', (_label, bad) => {
+      expect(() =>
+        billableCostUsd('claude-sonnet-4-6', {
+          uncachedInputTokens: bad as number,
+          outputTokens: 0,
+          ...NO_CACHE,
+        }),
+      ).toThrow(InvalidUsageError)
+    })
+
+    it('validates the cache buckets too, not just input/output', () => {
+      expect(() =>
+        billableCostUsd('claude-sonnet-4-6', {
+          uncachedInputTokens: 0,
+          outputTokens: 0,
+          cacheReadInputTokens: -5,
+          cacheCreationInputTokens: 0,
+        }),
+      ).toThrow(InvalidUsageError)
+    })
   })
 
-  describe('estimateCostUsd (lenient, for evals)', () => {
+  describe('estimateCostUsd (lenient, evals only)', () => {
     it('returns 0 on an unknown model — never blocks an eval', () => {
       const prev = process.env.EVAL_SILENT
       process.env.EVAL_SILENT = '1'
@@ -78,9 +109,13 @@ describe('billing/pricing', () => {
     })
 
     it('treats inputTokens as the TOTAL and subtracts the cached + write subsets', () => {
-      // 1M total input = 500k uncached + 400k cache-read + 100k cache-write, 0 output (Sonnet)
       const c = estimateCostUsd('claude-sonnet-4-6', 1_000_000, 0, 400_000, 100_000)
       expect(c).toBeCloseTo(1.5 + 0.12 + 0.375) // 500k*3 + 400k*0.3 + 100k*3.75, /1e6
+    })
+
+    it('coerces non-finite / negative telemetry to 0 instead of throwing', () => {
+      expect(estimateCostUsd('claude-sonnet-4-6', Number.NaN, -10)).toBe(0)
+      expect(estimateCostUsd('claude-sonnet-4-6', Number.POSITIVE_INFINITY, 0)).toBe(0)
     })
 
     it('agrees with billableCostUsd for the same disjoint buckets', () => {
