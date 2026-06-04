@@ -3,9 +3,11 @@
  *
  * CSS `@media` queries cannot read CSS custom properties, so this module is
  * the single source of truth that JS (matchMedia call-sites) consumes, and
- * every `@media` px literal in a `.module.css` MUST mirror one of these
- * values. The matching CSS mirror lives in `globals.css` as `--bp-*` (for
- * `clamp()`/`calc()` inputs and documentation only — not usable in @media).
+ * new `@media` px literals in a `.module.css` should mirror one of these
+ * values. (A few legacy queries at 600/640/820px predate this scale and are
+ * being consolidated onto it incrementally.) The matching CSS mirror lives in
+ * `globals.css` as `--bp-*` (for `clamp()`/`calc()` inputs and docs only —
+ * not usable in @media).
  *
  * Values (px), mobile-first:
  *   xs  360  large phones

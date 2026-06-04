@@ -35,3 +35,13 @@
 .abcjs-rest {
   touch-action: none;
 }
+
+/* Suppress text selection + the iOS long-press callout/magnifier on the score
+   SVG glyph layer ONLY (the abcjs render target), so a long-press opens our
+   context menu rather than native text selection. Scoped to the SVG so sibling
+   chrome (StatusStrip, ExportBar, EditedPill) stays selectable on desktop. */
+[data-testid='score-stage'] svg {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}

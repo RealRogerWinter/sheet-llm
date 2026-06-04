@@ -25,12 +25,10 @@
    * pinch-zoom to our JS handlers (tap-to-place, note drag, pinch-zoom — wired
    * in later PRs). Interactive note/rest glyphs additionally opt into
    * `touch-action: none` (abcjs-overlay.css) so a vertical pitch-drag isn't
-   * stolen by page scroll. Callout/selection are suppressed so iOS long-press
-   * opens our context menu instead of the native text magnifier. */
+   * stolen by page scroll. Selection/callout suppression is scoped to the SVG
+   * glyph layer (abcjs-overlay.css), NOT this wrapper — sibling chrome such as
+   * StatusStrip / ExportBar text must stay selectable on desktop. */
   touch-action: pan-y;
-  -webkit-touch-callout: none;
-  -webkit-user-select: none;
-  user-select: none;
 }
 
 .viewportTools {

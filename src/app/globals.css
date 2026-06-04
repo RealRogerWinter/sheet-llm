@@ -56,8 +56,9 @@
   /* ── Responsive design tokens ──────────────────────────────────────────
    * Breakpoint mirror of src/lib/ui/breakpoints.ts. CSS @media CANNOT read
    * custom properties, so these are for clamp()/calc() inputs and docs only;
-   * the JS module is the enforced source of truth and every @media px literal
-   * must equal one of these. */
+   * the JS module is the enforced source of truth and new @media px literals
+   * should equal one of these (a few legacy 600/640/820px queries predate the
+   * scale and are being consolidated onto it). */
   --bp-xs: 360;
   --bp-sm: 480;
   --bp-md: 768;
