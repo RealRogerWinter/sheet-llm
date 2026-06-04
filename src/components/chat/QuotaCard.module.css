@@ -1,29 +1,30 @@
 /* Limit-reached CTA card (in-transcript) + shared CTA buttons. Uses the app's
-   design tokens (with fallbacks) so it tracks light/dark like the rest of the UI. */
+   real design tokens (--ink/--paper/--rule/--graphite/--playing, all with
+   fallbacks) so it tracks light/dark like the chat panel. */
 .card {
-  margin-top: var(--gap-2, 0.5rem);
-  padding: var(--gap-4, 1rem);
-  border: 1px solid var(--border, #d0d0d8);
-  border-radius: var(--radius, 12px);
-  background: var(--surface, #fff);
-  color: var(--text, #1a1a1a);
+  margin-top: var(--gap-2, 8px);
+  padding: var(--gap-4, 16px);
+  border: 1px solid var(--rule, #d4d4d2);
+  border-radius: 12px;
+  background: var(--paper-warm, #f4f4f2);
+  color: var(--ink, #0a0a0a);
   max-width: 34rem;
 }
 .title {
-  margin: 0 0 var(--gap-2, 0.5rem);
+  margin: 0 0 var(--gap-2, 8px);
   font-size: 1rem;
   font-weight: 650;
 }
 .body {
-  margin: 0 0 var(--gap-3, 0.75rem);
-  color: var(--text-muted, #555);
+  margin: 0 0 var(--gap-3, 12px);
+  color: var(--graphite, #6b6b6b);
   font-size: 0.9rem;
   line-height: 1.5;
 }
 .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--gap-2, 0.5rem);
+  gap: var(--gap-2, 8px);
 }
 .btn {
   display: inline-flex;
@@ -31,27 +32,27 @@
   justify-content: center;
   padding: 0.5rem 0.9rem;
   border-radius: 8px;
-  border: 1px solid var(--border, #d0d0d8);
-  background: var(--surface, #fff);
-  color: var(--text, #1a1a1a);
+  border: 1px solid var(--rule, #d4d4d2);
+  background: var(--paper, #fff);
+  color: var(--ink, #0a0a0a);
   font: inherit;
   font-size: 0.875rem;
   cursor: pointer;
   text-decoration: none;
 }
 .btn:hover {
-  background: var(--surface-hover, #f3f3f7);
+  background: var(--hover, #0a0a0a08);
 }
 .primary {
-  background: var(--accent, #3b5bdb);
-  border-color: var(--accent, #3b5bdb);
+  background: var(--playing, #1e40af);
+  border-color: var(--playing, #1e40af);
   color: #fff;
 }
 .primary:hover {
-  background: var(--accent-hover, #364fc7);
+  background: color-mix(in oklab, var(--playing, #1e40af) 88%, #000);
 }
 .reset {
-  margin: var(--gap-3, 0.75rem) 0 0;
+  margin: var(--gap-3, 12px) 0 0;
   font-size: 0.8rem;
-  color: var(--text-muted, #888);
+  color: var(--graphite, #6b6b6b);
 }
