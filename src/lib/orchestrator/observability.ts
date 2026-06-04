@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { eq, sql } from 'drizzle-orm'
 import { getDb } from '@/lib/db'
 import { orchestratorTurns } from '@/lib/db/schema'
 import type { Score } from '@/lib/music/types'
@@ -217,6 +218,57 @@ export async function recordTurn(fields: RecordTurnFields): Promise<void> {
     logTurn({
       ...logFields,
       error: `orchestrator_turns_insert_failed: ${msg.slice(0, RECOVERY_ERROR_MAX_LEN)}`,
+    })
+  }
+}
+
+export interface TurnUsage {
+  inputTokens?: number
+  cachedInputTokens?: number
+  cacheCreationInputTokens?: number
+  outputTokens?: number
+  /** Raw Anthropic cost for the whole turn, micro-USD. */
+  costMicroUsd?: number
+}
+
+/**
+ * Backfill the token / cost columns on an already-recorded turn. STREAMING
+ * outcomes (converse / sectional) record their turn at dispatch with only the
+ * IN-run() cost so far (the classifier, and the Sonnet dispatcher on the
+ * converse path) — the streamed generation itself runs later, in the route's
+ * pump, outside `run()`'s meter scope. The route wraps the pump in its own meter
+ * scope and calls this on `message-stop` / `done` with the STREAMED usage.
+ *
+ * ADDITIVE: it SUMS the streamed usage into the columns rather than overwriting,
+ * so the pre-call (classifier/dispatcher) cost already on the row is preserved —
+ * the total is classifier + dispatcher + streamed generation, the true turn cost
+ * the paywall will settle against. Matches on request_id (one turn per streaming
+ * request); best-effort — a failure never breaks the stream.
+ */
+export function updateTurnUsageByRequestId(
+  requestId: string,
+  usage: TurnUsage,
+  db: ReturnType<typeof getDb> = getDb(),
+): void {
+  try {
+    // ADD (not overwrite): COALESCE(col,0) + delta, so the in-run() pre-call
+    // cost already on the row is preserved.
+    db
+      .update(orchestratorTurns)
+      .set({
+        inputTokens: sql`COALESCE(${orchestratorTurns.inputTokens}, 0) + ${usage.inputTokens ?? 0}`,
+        cachedInputTokens: sql`COALESCE(${orchestratorTurns.cachedInputTokens}, 0) + ${usage.cachedInputTokens ?? 0}`,
+        cacheCreationInputTokens: sql`COALESCE(${orchestratorTurns.cacheCreationInputTokens}, 0) + ${usage.cacheCreationInputTokens ?? 0}`,
+        outputTokens: sql`COALESCE(${orchestratorTurns.outputTokens}, 0) + ${usage.outputTokens ?? 0}`,
+        costMicroUsd: sql`COALESCE(${orchestratorTurns.costMicroUsd}, 0) + ${usage.costMicroUsd ?? 0}`,
+      })
+      .where(eq(orchestratorTurns.requestId, requestId))
+      .run()
+  } catch (e) {
+    // Observability must never break the stream.
+    console.warn('[orchestrator] turn usage backfill failed', {
+      requestId,
+      error: e instanceof Error ? e.message : String(e),
     })
   }
 }

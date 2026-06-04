@@ -34,7 +34,7 @@ import type {
 import { summarizeScore } from '@/lib/shared/scoreSummary'
 import { run as runOrchestrator } from '@/lib/orchestrator'
 import { getOrchestratorMode } from '@/lib/orchestrator/flags'
-import { logShadowDivergence } from '@/lib/orchestrator/observability'
+import { logShadowDivergence, updateTurnUsageByRequestId } from '@/lib/orchestrator/observability'
 import type { OrchestratorMode } from '@/lib/orchestrator/flags'
 import type {
   OrchestratorConverseStream,
@@ -44,6 +44,7 @@ import type {
 import { isOrchestratorConverseStream, isOrchestratorScoreStream } from '@/lib/orchestrator/types'
 import { summarizeAction } from '@/lib/orchestrator/summarizeAction'
 import { recordUsage } from '@/lib/orchestrator/budget'
+import { currentMeterTotals, runWithUsageMeter, toMicroUsd } from '@/lib/billing/usageMeter'
 import { checkRequestIp, extractClientIp } from '@/lib/orchestrator/requestRateLimit'
 import { hasClearance } from '@/lib/security/turnstile'
 import { scoreHash } from '@/lib/orchestrator/scoreVersion'
@@ -579,10 +580,10 @@ async function handleChat(
       return errorResponse('refused', 422, orchestratorOutcome.reason, chatId)
     }
     if (isOrchestratorConverseStream(orchestratorOutcome)) {
-      return await respondWithConverseStream(userId, chatId, orchestratorOutcome, mode, generationTier)
+      return await respondWithConverseStream(userId, chatId, orchestratorOutcome, mode, generationTier, requestId)
     }
     if (isOrchestratorScoreStream(orchestratorOutcome)) {
-      return await respondWithScoreStream(userId, chatId, orchestratorOutcome, mode, generationTier)
+      return await respondWithScoreStream(userId, chatId, orchestratorOutcome, mode, generationTier, requestId)
     }
     if (!('fellThrough' in orchestratorOutcome)) {
       return await respondWithOrchestratorResult(userId, chatId, orchestratorOutcome, mode, generationTier)
@@ -978,6 +979,25 @@ async function respondWithOrchestratorResult(
 }
 
 /**
+ * Backfill a streamed turn's true cost from the request-scoped usage meter.
+ * Called on a completed stream, INSIDE the route's runWithUsageMeter scope, so
+ * `currentMeterTotals()` reflects the provider calls the pump just drove. No-op
+ * when the meter saw nothing (e.g. the stub client). This is what stops the
+ * paywall (PR-7b) settling a streamed generation against a null cost.
+ */
+function backfillStreamedTurnCost(requestId: string): void {
+  const m = currentMeterTotals()
+  if (!m || m.callCount === 0) return
+  updateTurnUsageByRequestId(requestId, {
+    inputTokens: m.inputTokens,
+    cachedInputTokens: m.cachedInputTokens,
+    cacheCreationInputTokens: m.cacheCreationInputTokens,
+    outputTokens: m.outputTokens,
+    costMicroUsd: toMicroUsd(m.costUsd),
+  })
+}
+
+/**
  * SSE responder for the converse handler. Pumps text-delta events to
  * the client as `event: text-delta` frames, persists the accumulated
  * assistant text to the conversation store on message-stop, error, or
@@ -1003,6 +1023,7 @@ async function respondWithConverseStream(
   outcome: OrchestratorConverseStream,
   mode: OrchestratorMode,
   generationTier: GenerationTier,
+  requestId: string,
 ): Promise<Response> {
   const toolUseId = synthToolUseId()
   const keyConfigured = !!process.env.ANTHROPIC_API_KEY
@@ -1097,51 +1118,59 @@ async function respondWithConverseStream(
         }
       }, 15_000)
 
-      try {
-        for await (const ev of outcome.events) {
-          if (ev.type === 'text-delta') {
-            accumulated += ev.delta
-            write('text-delta', { delta: ev.delta })
-          } else if (ev.type === 'message-stop') {
-            await finalize(
-              'complete',
-              undefined,
-              ev.usage
-                ? {
-                    inputTokens: ev.usage.inputTokens,
-                    outputTokens: ev.usage.outputTokens,
-                  }
-                : undefined,
-            )
-            write('done', {
-              usage: ev.usage,
-              stopReason: ev.stopReason,
-              finalText: accumulated,
-            })
-          } else if (ev.type === 'error') {
-            await finalize('errored', 'upstream_error')
-            write('error', {
-              code: 'upstream_error',
-              error: ev.error.message,
-            })
+      // The model's streamed call fires HERE, as the route pumps the generator —
+      // outside run()'s usage-meter scope. Wrap the pump in its own scope so the
+      // provider call is metered, then backfill the optimistically-recorded turn
+      // (its cost was null at dispatch). recordProviderCall propagates into the
+      // generator body because the meter store is active at each `.next()`.
+      await runWithUsageMeter(requestId, async () => {
+        try {
+          for await (const ev of outcome.events) {
+            if (ev.type === 'text-delta') {
+              accumulated += ev.delta
+              write('text-delta', { delta: ev.delta })
+            } else if (ev.type === 'message-stop') {
+              await finalize(
+                'complete',
+                undefined,
+                ev.usage
+                  ? {
+                      inputTokens: ev.usage.inputTokens,
+                      outputTokens: ev.usage.outputTokens,
+                    }
+                  : undefined,
+              )
+              backfillStreamedTurnCost(requestId)
+              write('done', {
+                usage: ev.usage,
+                stopReason: ev.stopReason,
+                finalText: accumulated,
+              })
+            } else if (ev.type === 'error') {
+              await finalize('errored', 'upstream_error')
+              write('error', {
+                code: 'upstream_error',
+                error: ev.error.message,
+              })
+            }
+          }
+        } catch (e) {
+          // Defensive: any other throw (network drop on the iterator) —
+          // finalize as errored and report.
+          await finalize('errored', 'upstream_error')
+          write('error', {
+            code: 'upstream_error',
+            error: e instanceof Error ? e.message : 'Stream failed',
+          })
+        } finally {
+          if (keepalive) clearInterval(keepalive)
+          try {
+            controller.close()
+          } catch {
+            // Already closed (e.g. client aborted).
           }
         }
-      } catch (e) {
-        // Defensive: any other throw (network drop on the iterator) —
-        // finalize as errored and report.
-        await finalize('errored', 'upstream_error')
-        write('error', {
-          code: 'upstream_error',
-          error: e instanceof Error ? e.message : 'Stream failed',
-        })
-      } finally {
-        if (keepalive) clearInterval(keepalive)
-        try {
-          controller.close()
-        } catch {
-          // Already closed (e.g. client aborted).
-        }
-      }
+      })
     },
     cancel() {
       // Client closed the connection. Finalize as errored (client_abort)
@@ -1179,6 +1208,7 @@ async function respondWithScoreStream(
   outcome: OrchestratorScoreStream,
   mode: OrchestratorMode,
   generationTier: GenerationTier,
+  requestId: string,
 ): Promise<Response> {
   const keyConfigured = !!process.env.ANTHROPIC_API_KEY
   const debug: ChatDebugPayload = {
@@ -1250,64 +1280,73 @@ async function respondWithScoreStream(
         }
       }, 15_000)
 
-      try {
-        for await (const ev of outcome.events) {
-          if (ev.type === 'section') {
-            let abc = ''
-            try {
-              abc = scoreToAbc(ev.score)
-            } catch {
-              // A non-renderable interim section: skip the abc, still send
-              // progress so the UI advances; the next section supersedes it.
-            }
-            write('section', {
-              sectionIndex: ev.sectionIndex,
-              totalSections: ev.totalSections,
-              label: ev.label,
-              abc,
-              scoreJson: ev.score,
-            })
-          } else if (ev.type === 'done') {
-            try {
-              const persisted = await persist(ev.score, ev.introText, ev.toolUseId)
-              write('done', {
-                abc: persisted.abc,
+      // Each sectional sub-call fires HERE as the route pumps the generator —
+      // outside run()'s usage-meter scope. Wrap the pump so every section is
+      // metered (this is the MOST expensive path — many chained calls), then
+      // backfill the optimistically-recorded turn at `done`.
+      await runWithUsageMeter(requestId, async () => {
+        try {
+          for await (const ev of outcome.events) {
+            if (ev.type === 'section') {
+              let abc = ''
+              try {
+                abc = scoreToAbc(ev.score)
+              } catch {
+                // A non-renderable interim section: skip the abc, still send
+                // progress so the UI advances; the next section supersedes it.
+              }
+              write('section', {
+                sectionIndex: ev.sectionIndex,
+                totalSections: ev.totalSections,
+                label: ev.label,
+                abc,
                 scoreJson: ev.score,
-                toolUseId: persisted.toolUseId,
-                introText: ev.introText,
-                ...(persisted.headVersionId !== undefined
-                  ? { headVersionId: persisted.headVersionId }
-                  : {}),
-                ...(ev.warnings ? { warnings: ev.warnings } : {}),
               })
-            } catch (e) {
-              const msg = e instanceof Error ? e.message : 'finalize failed'
-              write('error', {
-                code: 'validation_failed' as ChatErrorCode,
-                error: `The generated score could not be finalized: ${msg}`,
-              })
+            } else if (ev.type === 'done') {
+              // Cost was incurred across all sections regardless of whether the
+              // final score persists — backfill before the persist attempt.
+              backfillStreamedTurnCost(requestId)
+              try {
+                const persisted = await persist(ev.score, ev.introText, ev.toolUseId)
+                write('done', {
+                  abc: persisted.abc,
+                  scoreJson: ev.score,
+                  toolUseId: persisted.toolUseId,
+                  introText: ev.introText,
+                  ...(persisted.headVersionId !== undefined
+                    ? { headVersionId: persisted.headVersionId }
+                    : {}),
+                  ...(ev.warnings ? { warnings: ev.warnings } : {}),
+                })
+              } catch (e) {
+                const msg = e instanceof Error ? e.message : 'finalize failed'
+                write('error', {
+                  code: 'validation_failed' as ChatErrorCode,
+                  error: `The generated score could not be finalized: ${msg}`,
+                })
+              }
+            } else {
+              write('error', scoreStreamErrorFrame(ev.error))
             }
-          } else {
-            write('error', scoreStreamErrorFrame(ev.error))
+          }
+        } catch (e) {
+          console.error('[chat] score stream failed', {
+            chatId,
+            error: e instanceof Error ? e.message : String(e),
+          })
+          write('error', {
+            code: 'internal_error' as ChatErrorCode,
+            error: 'Something went wrong while generating your score. Please try again.',
+          })
+        } finally {
+          if (keepalive) clearInterval(keepalive)
+          try {
+            controller.close()
+          } catch {
+            // Already closed.
           }
         }
-      } catch (e) {
-        console.error('[chat] score stream failed', {
-          chatId,
-          error: e instanceof Error ? e.message : String(e),
-        })
-        write('error', {
-          code: 'internal_error' as ChatErrorCode,
-          error: 'Something went wrong while generating your score. Please try again.',
-        })
-      } finally {
-        if (keepalive) clearInterval(keepalive)
-        try {
-          controller.close()
-        } catch {
-          // Already closed.
-        }
-      }
+      })
     },
     cancel() {
       if (keepalive) clearInterval(keepalive)
