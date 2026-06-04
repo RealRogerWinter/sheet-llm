@@ -86,27 +86,39 @@ export function quotaErrorBody(result: QuotaDenial): QuotaErrorBody {
     }
   }
 
-  // A — anonymous cap → create a free account. D (accounts off) → message only.
-  if (accounts) {
+  // A — anonymous cap → create a free account. ('risk' can't reach here with a
+  // 429 — it's only emitted with login_required, handled above — but we fold it
+  // in as a safe anon-style fallback.) D — accounts off → message only.
+  if (result.quotaClass === 'anon' || result.quotaClass === 'risk') {
+    if (accounts) {
+      return {
+        code: 'quota_exceeded',
+        httpStatus: 429,
+        message: `You've used your free requests for today. Create a free account to get more: ${SIGNUP_HREF}.${resetLine}`,
+        cta: {
+          kind: 'signup',
+          title: "You've used your free requests for today",
+          body: 'Anonymous demos get a few requests every 24 hours. Create a free account to get more — your current work in this browser carries over.',
+          primaryLabel: 'Create a free account',
+          primaryHref: SIGNUP_HREF,
+          secondaryLabel: 'Log in',
+          secondaryAction: 'openLogin',
+          resetsInHours: hrs,
+        },
+      }
+    }
     return {
       code: 'quota_exceeded',
       httpStatus: 429,
-      message: `You've used your free requests for today. Create a free account to get more: ${SIGNUP_HREF}.${resetLine}`,
-      cta: {
-        kind: 'signup',
-        title: "You've used your free requests for today",
-        body: 'Anonymous demos get a few requests every 24 hours. Create a free account to get more — your current work in this browser carries over.',
-        primaryLabel: 'Create a free account',
-        primaryHref: SIGNUP_HREF,
-        secondaryLabel: 'Log in',
-        secondaryAction: 'openLogin',
-        resetsInHours: hrs,
-      },
+      message: `You've used your free requests for now.${resetLine}`,
     }
   }
-  return {
-    code: 'quota_exceeded',
-    httpStatus: 429,
-    message: `You've used your free requests for now.${resetLine}`,
-  }
+
+  // Exhaustiveness: every quotaClass is handled above. A new variant must add its
+  // own branch here rather than silently inheriting the anonymous copy.
+  return assertNever(result.quotaClass)
+}
+
+function assertNever(x: never): never {
+  throw new Error(`unhandled quota class: ${String(x)}`)
 }

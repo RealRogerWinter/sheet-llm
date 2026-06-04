@@ -4,7 +4,8 @@ import type { Score } from '@/lib/music/types'
 import { installTestDb, mockAuthSession } from '../factories/testEnv'
 
 // mockAuthSession resolves every request to an ANONYMOUS user (authenticated:false),
-// so with the quota flag on these requests take the anon path (IP-keyed, limit 5).
+// so with the quota flag on these requests take the anon path (IP-keyed; this test
+// sets the anon limit to 3 via SL_DAILY_QUOTA_ANON).
 vi.mock('@/lib/auth/session', () => mockAuthSession())
 
 const VALID_SCORE: Score = {
