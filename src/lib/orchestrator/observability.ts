@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { eq } from 'drizzle-orm'
 import { getDb } from '@/lib/db'
 import { orchestratorTurns } from '@/lib/db/schema'
 import type { Score } from '@/lib/music/types'
@@ -217,6 +218,51 @@ export async function recordTurn(fields: RecordTurnFields): Promise<void> {
     logTurn({
       ...logFields,
       error: `orchestrator_turns_insert_failed: ${msg.slice(0, RECOVERY_ERROR_MAX_LEN)}`,
+    })
+  }
+}
+
+export interface TurnUsage {
+  inputTokens?: number
+  cachedInputTokens?: number
+  cacheCreationInputTokens?: number
+  outputTokens?: number
+  /** Raw Anthropic cost for the whole turn, micro-USD. */
+  costMicroUsd?: number
+}
+
+/**
+ * Backfill the token / cost columns on an already-recorded turn. STREAMING
+ * outcomes (converse / sectional) record their turn OPTIMISTICALLY at dispatch
+ * with null cost — the real usage is only known once the route finishes pumping
+ * the stream (outside `run()`'s usage-meter scope). The route wraps the pump in
+ * its own meter scope and calls this on `message-stop` / `done` so the streamed
+ * turn carries its true cost instead of reading null (the metering-undercount
+ * the paywall would otherwise settle against). Matches on request_id (one turn
+ * per streaming request); best-effort — a failure never breaks the stream.
+ */
+export function updateTurnUsageByRequestId(
+  requestId: string,
+  usage: TurnUsage,
+  db: ReturnType<typeof getDb> = getDb(),
+): void {
+  try {
+    db
+      .update(orchestratorTurns)
+      .set({
+        inputTokens: usage.inputTokens ?? null,
+        cachedInputTokens: usage.cachedInputTokens ?? null,
+        cacheCreationInputTokens: usage.cacheCreationInputTokens ?? null,
+        outputTokens: usage.outputTokens ?? null,
+        costMicroUsd: usage.costMicroUsd ?? null,
+      })
+      .where(eq(orchestratorTurns.requestId, requestId))
+      .run()
+  } catch (e) {
+    // Observability must never break the stream.
+    console.warn('[orchestrator] turn usage backfill failed', {
+      requestId,
+      error: e instanceof Error ? e.message : String(e),
     })
   }
 }
