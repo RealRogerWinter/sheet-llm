@@ -584,6 +584,34 @@ export const refundCounters = sqliteTable(
   ],
 )
 
+// stripe_events — raw Stripe webhook INBOX (red-team #5). EVERY signature-verified
+// event is persisted (event_id PK = delivery idempotency) BEFORE processing, so a
+// crash mid-grant leaves a replayable row and a redelivery is a no-op. `status`
+// tracks the processing outcome and the reconciliation reaper re-runs un-processed
+// rows. The credit GRANT itself is separately idempotent (credit_purchases.
+// external_ref = the Stripe checkout-session id), so double-processing an event
+// can't double-credit. `user_id` is plain TEXT (NO FK): a financial record we
+// retain for accounting/tax even after the subject is erased — see PR-14 GDPR +
+// the launch attorney memo for the retention basis.
+export const stripeEvents = sqliteTable(
+  'stripe_events',
+  {
+    eventId: text('event_id').primaryKey(), // Stripe event.id — delivery idempotency
+    type: text('type').notNull(), // event.type
+    status: text('status').notNull().default('received'), // received | processed | ignored | failed
+    payload: text('payload').notNull(), // raw event JSON (audit / replay)
+    userId: text('user_id'), // resolved subject; no FK (retained financial record)
+    creditsGranted: integer('credits_granted'), // credits granted by this event, if any
+    reason: text('reason'), // ignored/failed reason or last error
+    receivedAt: integer('received_at').notNull(),
+    processedAt: integer('processed_at'),
+  },
+  (table) => [
+    index('stripe_events_status').on(table.status), // bounds the reconciliation reaper
+    index('stripe_events_received').on(table.receivedAt),
+  ],
+)
+
 export type CreditWallet = typeof creditWallets.$inferSelect
 export type NewCreditWallet = typeof creditWallets.$inferInsert
 export type CreditPurchase = typeof creditPurchases.$inferSelect
@@ -594,6 +622,8 @@ export type CreditHold = typeof creditHolds.$inferSelect
 export type NewCreditHold = typeof creditHolds.$inferInsert
 export type RefundCounter = typeof refundCounters.$inferSelect
 export type NewRefundCounter = typeof refundCounters.$inferInsert
+export type StripeEvent = typeof stripeEvents.$inferSelect
+export type NewStripeEvent = typeof stripeEvents.$inferInsert
 
 export type User = typeof users.$inferSelect
 export type NewUser = typeof users.$inferInsert
