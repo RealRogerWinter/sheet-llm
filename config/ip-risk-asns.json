@@ -1,0 +1,23 @@
+{
+  "_comment": "Datacenter / hosting / commercial-VPN ASNs treated as 'risky' for ANONYMOUS requests by the hosted abuse-gating layer (src/lib/security/ipRisk.ts). HOSTED sheetllm.com ONLY — inert unless SL_IP_RISK_ENABLED=1 AND SL_IP_RISK_ASN=1, and only consulted when the request transited Cloudflare (a CF Transform Rule injects x-sl-client-asn). Anonymous traffic from these ASNs is the classic way to rotate IPs past a per-IP cap; logged-in users from these ASNs are NOT affected. The app hot-reloads this file via mtime (no redeploy). This is a CONSERVATIVE STARTER LIST of the major clouds — extend ad-hoc via SL_IP_RISK_EXTRA_DENY_ASNS and exempt a wrongly-flagged ASN via SL_IP_RISK_ALLOW_ASNS. Cloudflare WARP (AS13335) is intentionally OMITTED — including it would gate legitimate WARP / Zero-Trust users into the sign-in path.",
+  "version": 1,
+  "updated": "2026-06-04",
+  "denyAsns": [
+    16509,
+    14618,
+    15169,
+    396982,
+    8075,
+    16276,
+    24940,
+    14061,
+    63949,
+    20473,
+    12876,
+    31898,
+    51167,
+    60781,
+    9009,
+    62240
+  ]
+}

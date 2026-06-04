@@ -22,4 +22,21 @@ export async function register() {
   } catch (e) {
     console.error('[boot] janitor failed; continuing', e)
   }
+
+  // Sweep expired daily-quota counters at boot too, so an instance that has the
+  // quota feature ON but sees little chat traffic (or only ever rejects at the
+  // gate) still purges the hashed-IP PII rows. Gated by the flag so a self-hosted
+  // instance with quota OFF does nothing here.
+  try {
+    const { isDailyQuotaEnabled } = await import('@/lib/orchestrator/dailyQuota')
+    if (isDailyQuotaEnabled()) {
+      const { reapExpiredQuotaCounters } = await import('@/lib/db/janitor')
+      const { reaped } = reapExpiredQuotaCounters()
+      if (reaped > 0) {
+        console.warn(`[boot] janitor reaped ${reaped} expired quota counters`)
+      }
+    }
+  } catch (e) {
+    console.error('[boot] quota janitor failed; continuing', e)
+  }
 }

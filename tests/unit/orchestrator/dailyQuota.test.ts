@@ -1,0 +1,210 @@
+// @vitest-environment node
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { makeTestDb } from '../../factories/db'
+import type { QuotaInput } from '@/lib/orchestrator/dailyQuota'
+import type { RiskVerdict } from '@/lib/security/ipRisk'
+
+const CLEAR: RiskVerdict = { risky: false, reason: 'clear' }
+const RISKY: RiskVerdict = { risky: true, reason: 'datacenter_asn', asn: 24940 }
+
+function cfReq(ip: string): Request {
+  return new Request('https://sheetllm.com/api/chat', {
+    method: 'POST',
+    headers: { 'cf-connecting-ip': ip, 'cf-ray': 'test-ray' },
+  })
+}
+const input = (over: Partial<QuotaInput> & { ip?: string }): QuotaInput => ({
+  user: over.user ?? { userId: 'anon', authenticated: false },
+  tier: over.tier ?? 'free',
+  request: over.request ?? cfReq(over.ip ?? '9.9.9.9'),
+  risk: over.risk ?? CLEAR,
+})
+
+beforeEach(async () => {
+  const { setDbForTesting } = await import('@/lib/db')
+  setDbForTesting(makeTestDb())
+  vi.stubEnv('SL_DAILY_QUOTA_ENABLED', '1')
+  vi.stubEnv('SL_DAILY_QUOTA_ANON', '5')
+  vi.stubEnv('SL_DAILY_QUOTA_FREE', '10')
+  vi.stubEnv('SESSION_SECRET', 'test-session-secret-at-least-32-bytes!')
+  const { __resetQuotaStateForTesting } = await import('@/lib/orchestrator/dailyQuota')
+  __resetQuotaStateForTesting()
+})
+afterEach(async () => {
+  const { setDbForTesting } = await import('@/lib/db')
+  setDbForTesting(undefined)
+  vi.unstubAllEnvs()
+})
+
+async function seedUser(id: string, emailVerified: 0 | 1, tier = 'free') {
+  const { getDb } = await import('@/lib/db')
+  const { users } = await import('@/lib/db/schema')
+  getDb().insert(users).values({ id, createdAt: 0, lastSeenAt: 0, emailVerified, tier }).run()
+}
+async function keys(): Promise<string[]> {
+  const { getDb } = await import('@/lib/db')
+  const { requestQuota } = await import('@/lib/db/schema')
+  return getDb()
+    .select()
+    .from(requestQuota)
+    .all()
+    .map((r) => r.quotaKey)
+}
+
+describe('checkDailyQuota', () => {
+  it('is inert when the flag is off (returns ok, writes no rows)', async () => {
+    vi.stubEnv('SL_DAILY_QUOTA_ENABLED', '')
+    const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
+    expect(checkDailyQuota(input({ ip: '1.1.1.1' })).ok).toBe(true)
+    expect(await keys()).toHaveLength(0)
+  })
+
+  it('Pro bypasses entirely with no row written', async () => {
+    await seedUser('p1', 1, 'pro')
+    const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
+    for (let i = 0; i < 30; i++) {
+      expect(checkDailyQuota(input({ user: { userId: 'p1', authenticated: true }, tier: 'pro' })).ok).toBe(true)
+    }
+    expect(await keys()).toHaveLength(0)
+  })
+
+  it('anonymous clear IP: 5 ok, 6th is 429 quota_exceeded with a reset hint', async () => {
+    const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
+    const i = input({ ip: '9.9.9.9' })
+    for (let n = 0; n < 5; n++) expect(checkDailyQuota(i).ok).toBe(true)
+    const r = checkDailyQuota(i)
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.code).toBe('quota_exceeded')
+      expect(r.httpStatus).toBe(429)
+      expect(r.quotaClass).toBe('anon')
+      expect(r.resetsInHours).toBeGreaterThanOrEqual(1)
+    }
+    expect((await keys())[0]).toMatch(/^a:/)
+  })
+
+  it('verified logged-in free: keyed on userId, 10 ok then 429', async () => {
+    await seedUser('u1', 1, 'free')
+    const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
+    const i = input({ user: { userId: 'u1', authenticated: true }, tier: 'free' })
+    for (let n = 0; n < 10; n++) expect(checkDailyQuota(i).ok).toBe(true)
+    expect(checkDailyQuota(i).ok).toBe(false)
+    expect(await keys()).toContain('u:u1')
+  })
+
+  it('unverified logged-in is demoted to the anon tier (5, keyed on IP — defeats account-farming)', async () => {
+    await seedUser('u2', 0, 'free')
+    const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
+    const i = input({ user: { userId: 'u2', authenticated: true }, tier: 'free', ip: '8.8.8.8' })
+    for (let n = 0; n < 5; n++) expect(checkDailyQuota(i).ok).toBe(true)
+    expect(checkDailyQuota(i).ok).toBe(false)
+    const k = await keys()
+    expect(k.some((x) => x.startsWith('a:'))).toBe(true)
+    expect(k).not.toContain('u:u2')
+  })
+
+  it('risky anon + accounts ON → login_required 403, no row', async () => {
+    vi.stubEnv('SL_ACCOUNTS_ENABLED', '1')
+    const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
+    const r = checkDailyQuota(input({ risk: RISKY, ip: '5.5.5.5' }))
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.code).toBe('login_required')
+      expect(r.httpStatus).toBe(403)
+      expect(r.needsSignIn).toBe(true)
+    }
+    expect(await keys()).toHaveLength(0)
+  })
+
+  it('risky anon + accounts OFF → falls back to the anon limit (never login_required)', async () => {
+    const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
+    expect(checkDailyQuota(input({ risk: RISKY, ip: '6.6.6.6' })).ok).toBe(true)
+  })
+
+  it('resets the window once it has fully closed', async () => {
+    vi.stubEnv('SL_DAILY_QUOTA_ANON', '2')
+    const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
+    const i = input({ ip: '7.7.7.7' })
+    expect(checkDailyQuota(i).ok).toBe(true)
+    expect(checkDailyQuota(i).ok).toBe(true)
+    expect(checkDailyQuota(i).ok).toBe(false)
+    const { getDb } = await import('@/lib/db')
+    const { sql } = await import('drizzle-orm')
+    getDb().run(sql`UPDATE request_quota SET window_start = window_start - 100000`)
+    expect(checkDailyQuota(i).ok).toBe(true) // window expired → reset to count 1
+  })
+
+  it('never exceeds the limit even across many rapid calls (guard-in-the-write)', async () => {
+    vi.stubEnv('SL_DAILY_QUOTA_ANON', '5')
+    const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
+    const i = input({ ip: '4.4.4.4' })
+    const oks = Array.from({ length: 25 }, () => checkDailyQuota(i)).filter((r) => r.ok).length
+    expect(oks).toBe(5)
+    const { getDb } = await import('@/lib/db')
+    const { requestQuota } = await import('@/lib/db/schema')
+    expect(getDb().select().from(requestQuota).all()[0].count).toBe(5)
+  })
+
+  it('admission cap fails OPEN: new keys past the cap are admitted WITHOUT a row', async () => {
+    vi.stubEnv('SL_DAILY_QUOTA_MAX_ROWS', '1')
+    const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
+    expect(checkDailyQuota(input({ ip: '1.1.1.1' })).ok).toBe(true)
+    expect(await keys()).toHaveLength(1)
+    // distinct IP → new key, but the table is at the cap → admit, don't insert
+    expect(checkDailyQuota(input({ ip: '2.2.2.2' })).ok).toBe(true)
+    expect(await keys()).toHaveLength(1)
+  })
+
+  it('enforces the optional instance-wide anon ceiling', async () => {
+    vi.stubEnv('SL_DAILY_QUOTA_ANON_GLOBAL', '2')
+    const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
+    expect(checkDailyQuota(input({ ip: '1.1.1.1' })).ok).toBe(true)
+    expect(checkDailyQuota(input({ ip: '2.2.2.2' })).ok).toBe(true)
+    const r = checkDailyQuota(input({ ip: '3.3.3.3' }))
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.quotaClass).toBe('global')
+  })
+
+  it('bypasses (no row) when the IP is untrusted / not a CF request', async () => {
+    const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
+    const noCdn = new Request('https://sheetllm.com/api/chat', { method: 'POST' }) // no cf-* headers
+    expect(checkDailyQuota(input({ request: noCdn })).ok).toBe(true)
+    expect(await keys()).toHaveLength(0)
+  })
+
+  it('FAILS OPEN (returns ok) when the quota store is unavailable', async () => {
+    const { getDb } = await import('@/lib/db')
+    const { sql } = await import('drizzle-orm')
+    getDb().run(sql`DROP TABLE request_quota`) // every quota query now throws
+    const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
+    expect(checkDailyQuota(input({ ip: '9.9.9.9' })).ok).toBe(true)
+  })
+
+  it('commits BOTH the instance-ceiling row and the per-key row on a passing request', async () => {
+    vi.stubEnv('SL_DAILY_QUOTA_ANON_GLOBAL', '5')
+    const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
+    expect(checkDailyQuota(input({ ip: '9.9.9.9' })).ok).toBe(true)
+    const k = await keys()
+    expect(k).toContain('*')
+    expect(k.some((x) => x.startsWith('a:'))).toBe(true)
+  })
+
+  it('reports ~24h (not 25) for a fresh full-window denial', async () => {
+    vi.stubEnv('SL_DAILY_QUOTA_ANON', '1')
+    const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
+    const i = input({ ip: '9.9.9.9' })
+    expect(checkDailyQuota(i).ok).toBe(true)
+    const r = checkDailyQuota(i)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.resetsInHours).toBe(24)
+  })
+})
+
+describe('normalizeQuotaIp', () => {
+  it('truncates v4→/24, v6→/56, and returns null for local', async () => {
+    const { normalizeQuotaIp } = await import('@/lib/orchestrator/dailyQuota')
+    expect(normalizeQuotaIp('1.2.3.4')).toBe('1.2.3.0/24')
+    expect(normalizeQuotaIp('local')).toBeNull()
+    expect(normalizeQuotaIp('2001:db8::1')).toBe(normalizeQuotaIp('2001:db8::1234'))
+  })
+})
