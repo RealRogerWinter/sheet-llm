@@ -44,13 +44,14 @@ import type {
   OrchestratorConverseStream,
   OrchestratorResult,
   OrchestratorScoreStream,
+  TaskKind,
 } from '@/lib/orchestrator/types'
 import { isOrchestratorConverseStream, isOrchestratorScoreStream } from '@/lib/orchestrator/types'
 import { summarizeAction } from '@/lib/orchestrator/summarizeAction'
 import { recordUsage } from '@/lib/orchestrator/budget'
 import { currentMeterTotals, runWithUsageMeter, toMicroUsd } from '@/lib/billing/usageMeter'
 import { isPaidGenerationEnabled } from '@/lib/auth/account'
-import { ensureWallet, placeHold, refund, releaseHold, settleHold } from '@/lib/billing/wallet'
+import { ensureWallet, placeHold, refund, releaseHold, settleHold, type SettleResult } from '@/lib/billing/wallet'
 import { maybeReapExpiredHolds } from '@/lib/billing/reap'
 import {
   costToCredits,
@@ -682,16 +683,13 @@ async function handleChat(
       return errorResponse('refused', 422, orchestratorOutcome.reason, chatId)
     }
     if (isOrchestratorConverseStream(orchestratorOutcome)) {
-      // PR-7b-1 does not charge streamed turns yet — release the hold and let
-      // the stream through. TODO(PR-7b-2): settle at message-stop off the
-      // backfilled cost_micro_usd instead of releasing here.
-      releaseGenHold()
-      return await respondWithConverseStream(userId, chatId, orchestratorOutcome, mode, generationTier, requestId)
+      // PR-7b-2: the responder OWNS the hold — it settles at message-stop off the
+      // backfilled cost_micro_usd and releases on any non-completing exit.
+      return await respondWithConverseStream(userId, chatId, orchestratorOutcome, mode, generationTier, requestId, holdId)
     }
     if (isOrchestratorScoreStream(orchestratorOutcome)) {
-      // PR-7b-1: as above — released now, settled-at-done in PR-7b-2.
-      releaseGenHold()
-      return await respondWithScoreStream(userId, chatId, orchestratorOutcome, mode, generationTier, requestId)
+      // PR-7b-2: settled at `done` off the (backfilled) full sectional cost.
+      return await respondWithScoreStream(userId, chatId, orchestratorOutcome, mode, generationTier, requestId, holdId)
     }
     if (!('fellThrough' in orchestratorOutcome)) {
       // Non-streaming result: respondWithOrchestratorResult OWNS the hold's
@@ -1013,6 +1011,118 @@ function safeReleaseHold(holdId: string, requestId: string): void {
   }
 }
 
+/** The metered RAW cost (µUSD) + token split a settle charges against. */
+interface SettleCost {
+  costMicroUsd: number | null
+  inputTokens?: number
+  cachedInputTokens?: number
+  cacheCreationInputTokens?: number
+  outputTokens?: number
+}
+
+/**
+ * The settle cost for a NON-STREAMING turn: orchestrator_turns.cost_micro_usd,
+ * which run() persisted (dispatcher + handler + retries) before returning.
+ */
+function turnRowCost(requestId: string): SettleCost {
+  const turn = readTurnCostByRequestId(requestId)
+  return {
+    costMicroUsd: turn?.costMicroUsd ?? null,
+    ...(turn?.inputTokens != null ? { inputTokens: turn.inputTokens } : {}),
+    ...(turn?.cachedInputTokens != null ? { cachedInputTokens: turn.cachedInputTokens } : {}),
+    ...(turn?.cacheCreationInputTokens != null
+      ? { cacheCreationInputTokens: turn.cacheCreationInputTokens }
+      : {}),
+    ...(turn?.outputTokens != null ? { outputTokens: turn.outputTokens } : {}),
+  }
+}
+
+/**
+ * The settle cost for a STREAMING turn: the request-scoped usage meter snapshot,
+ * read INSIDE the pump scope at `done`. run() DOES write an orchestrator_turns
+ * row for a stream outcome (index.ts ~948/967) and backfillStreamedTurnCost adds
+ * the streamed cost to it — but that backfill is a BEST-EFFORT DB UPDATE that can
+ * silently fail (and the route never sees the pre-call cost regardless). The
+ * in-memory meter is the robust source: always populated in-scope by
+ * recordProviderCall for every section/delta, immune to a backfill DB failure, so
+ * a streamed turn never NULL-fallbacks to a flat charge on a transient DB hiccup.
+ * It omits the in-run pre-call (classifier/dispatcher) cost — a deliberate,
+ * bounded ~1–5 credit undercount.
+ */
+function meterStreamCost(): SettleCost {
+  const m = currentMeterTotals()
+  if (!m || m.callCount === 0) return { costMicroUsd: null }
+  return {
+    costMicroUsd: toMicroUsd(m.costUsd),
+    inputTokens: m.inputTokens,
+    cachedInputTokens: m.cachedInputTokens,
+    cacheCreationInputTokens: m.cacheCreationInputTokens,
+    outputTokens: m.outputTokens,
+  }
+}
+
+/**
+ * Settle a DELIVERED turn's hold to the cost-plus charge against `cost`. Shared
+ * by the non-streaming (respondWithOrchestratorResult) and streaming (converse /
+ * score) settle sites so the money logic is identical:
+ *   - charge = costToCredits(cost, markupForKind(kind)) — 2.5× gen / 1.2× edit,
+ *   - FAIL-CLOSED when the cost is unreadable on a delivered turn: charge the
+ *     flat value-tier fallback (NULL ≠ free) + alert,
+ *   - never charges above the hold (settleHold caps the debit and flags overHold).
+ * Returns the SettleResult; the caller treats `{ok:false}` (hold_not_active) as a
+ * hard error — never deliver an uncharged generation. (PR-7b.)
+ */
+function settleHeldGeneration(args: {
+  holdId: string
+  requestId: string
+  chatId: string
+  generationTier: GenerationTier
+  kind: TaskKind
+  model: string | null
+  cost: SettleCost
+}): SettleResult {
+  const microUsd = args.cost.costMicroUsd
+  let creditsCharged: number
+  if (microUsd != null && microUsd > 0) {
+    creditsCharged = costToCredits(microUsd, markupForKind(args.kind))
+  } else {
+    creditsCharged = fallbackCreditsForKind(args.kind)
+    console.error('[paywall] metered cost unreadable on a delivered turn — charging flat fallback', {
+      requestId: args.requestId,
+      chatId: args.chatId,
+      kind: args.kind,
+      costMicroUsd: microUsd,
+      fallbackCredits: creditsCharged,
+    })
+  }
+  const settle = settleHold({
+    holdId: args.holdId,
+    creditsCharged,
+    ...(microUsd != null ? { costMicroUsd: microUsd } : {}),
+    kind: `chat:${args.kind}`,
+    ...(args.model ? { model: args.model } : {}),
+    generationTier: args.generationTier,
+    requestId: args.requestId,
+    sessionId: args.chatId,
+    idempotencyKey: `settle:${args.requestId}`,
+    ...(args.cost.inputTokens != null ? { inputTokens: args.cost.inputTokens } : {}),
+    ...(args.cost.cachedInputTokens != null ? { cachedInputTokens: args.cost.cachedInputTokens } : {}),
+    ...(args.cost.cacheCreationInputTokens != null
+      ? { cacheCreationInputTokens: args.cost.cacheCreationInputTokens }
+      : {}),
+    ...(args.cost.outputTokens != null ? { outputTokens: args.cost.outputTokens } : {}),
+  })
+  if (settle.ok && settle.overHold) {
+    console.error('[paywall] OVER-HOLD: charge exceeded the reservation (capped) — hold-sizing alert', {
+      requestId: args.requestId,
+      chatId: args.chatId,
+      holdId: args.holdId,
+      creditsCharged: settle.creditsCharged,
+    })
+  }
+  return settle
+}
+
 /**
  * Wrap an orchestrator-produced Score in the same response/persistence
  * shape as the legacy LLM path: validate it, transpile ABC, persist a
@@ -1093,41 +1203,14 @@ async function respondWithOrchestratorResult(
   // here too — the generation cost was incurred regardless of accept/reject.
   let settledCredits = 0
   if (holdId && requestId) {
-    const turn = readTurnCostByRequestId(requestId)
-    const kind = result.classification.kind
-    const microUsd = turn?.costMicroUsd ?? null
-    let creditsCharged: number
-    if (microUsd != null && microUsd > 0) {
-      creditsCharged = costToCredits(microUsd, markupForKind(kind))
-    } else {
-      // FAIL-CLOSED: a delivered result with no readable cost (a recordTurn DB
-      // miss, or 0-with-output) is NOT free — charge the flat fallback anchor
-      // and page an alert. NULL ≠ free.
-      creditsCharged = fallbackCreditsForKind(kind)
-      console.error('[paywall] metered cost unreadable on a delivered turn — charging flat fallback', {
-        requestId,
-        chatId,
-        kind,
-        costMicroUsd: microUsd,
-        fallbackCredits: creditsCharged,
-      })
-    }
-    const settle = settleHold({
+    const settle = settleHeldGeneration({
       holdId,
-      creditsCharged,
-      ...(microUsd != null ? { costMicroUsd: microUsd } : {}),
-      kind: `chat:${kind}`,
-      ...(result.model ? { model: result.model } : {}),
-      generationTier,
       requestId,
-      sessionId: chatId,
-      idempotencyKey: `settle:${requestId}`,
-      ...(turn?.inputTokens != null ? { inputTokens: turn.inputTokens } : {}),
-      ...(turn?.cachedInputTokens != null ? { cachedInputTokens: turn.cachedInputTokens } : {}),
-      ...(turn?.cacheCreationInputTokens != null
-        ? { cacheCreationInputTokens: turn.cacheCreationInputTokens }
-        : {}),
-      ...(turn?.outputTokens != null ? { outputTokens: turn.outputTokens } : {}),
+      chatId,
+      generationTier,
+      kind: result.classification.kind,
+      model: result.model,
+      cost: turnRowCost(requestId), // run() persisted the full non-streaming cost
     })
     if (!settle.ok) {
       // hold_not_active — the hold was already settled/released (impossible for
@@ -1144,16 +1227,6 @@ async function respondWithOrchestratorResult(
         'We hit a billing error finishing your generation. Please try again.',
         chatId,
       )
-    }
-    if (settle.overHold) {
-      // Charge exceeded the worst-case reservation (capped — never overdrafts);
-      // a hold-sizing bug to investigate, NOT the business model.
-      console.error('[paywall] OVER-HOLD: charge exceeded the reservation (capped) — hold-sizing alert', {
-        requestId,
-        chatId,
-        holdId,
-        creditsCharged: settle.creditsCharged,
-      })
     }
     settledCredits = settle.creditsCharged
   }
@@ -1305,6 +1378,7 @@ async function respondWithConverseStream(
   mode: OrchestratorMode,
   generationTier: GenerationTier,
   requestId: string,
+  holdId?: string,
 ): Promise<Response> {
   const toolUseId = synthToolUseId()
   const keyConfigured = !!process.env.ANTHROPIC_API_KEY
@@ -1347,6 +1421,7 @@ async function respondWithConverseStream(
 
   let accumulated = ''
   let finalized = false
+  let holdSettled = false // PR-7b-2: paid-path hold settled at message-stop?
   let keepalive: ReturnType<typeof setInterval> | undefined
 
   async function finalize(
@@ -1422,6 +1497,30 @@ async function respondWithConverseStream(
                   : undefined,
               )
               backfillStreamedTurnCost(requestId)
+              // PR-7b-2: a COMPLETED converse stream is charged off the now-
+              // backfilled cost. The pump runs to message-stop even if the
+              // client disconnected (no AbortSignal propagation), so a paid
+              // converse is settled exactly once here; release-on-error is the
+              // finally below.
+              if (holdId) {
+                const settle = settleHeldGeneration({
+                  holdId,
+                  requestId,
+                  chatId,
+                  generationTier,
+                  kind: outcome.classification.kind,
+                  model: outcome.model,
+                  cost: meterStreamCost(), // streamed cost from the pump meter
+                })
+                holdSettled = settle.ok
+                if (!settle.ok) {
+                  console.error('[paywall] converse settle hold_not_active (anomalous; text already delivered)', {
+                    requestId,
+                    chatId,
+                    holdId,
+                  })
+                }
+              }
               write('done', {
                 usage: ev.usage,
                 stopReason: ev.stopReason,
@@ -1444,6 +1543,10 @@ async function respondWithConverseStream(
             error: e instanceof Error ? e.message : 'Stream failed',
           })
         } finally {
+          // PR-7b-2: release the hold unless the stream COMPLETED and settled
+          // above (error / mid-pump throw → our failure → free). No-op once
+          // settled; a process-kill before this leaves the hold for the reaper.
+          if (holdId && !holdSettled) safeReleaseHold(holdId, requestId)
           if (keepalive) clearInterval(keepalive)
           try {
             controller.close()
@@ -1457,6 +1560,14 @@ async function respondWithConverseStream(
       // Client closed the connection. Finalize as errored (client_abort)
       // instead of complete — the model never said stop, so the next-turn
       // refinement-vs-retry decision should treat this as a failure.
+      //
+      // PR-7b-2 MONEY INVARIANT: this does NOT cancel the pump — the converse
+      // call runs to message-stop server-side (no AbortSignal is threaded into
+      // the orchestrator), so a paid hold is SETTLED at message-stop even on
+      // disconnect (a real user abort is charged, never refunded). If anyone
+      // later wires this cancel() → an AbortSignal that STOPS the generation, the
+      // pump exits before settling and the `finally` RELEASES the hold → a
+      // delivered-but-free paid generation. Re-derive the settle path first.
       if (keepalive) clearInterval(keepalive)
       void finalize('errored', 'client_abort')
     },
@@ -1490,6 +1601,7 @@ async function respondWithScoreStream(
   mode: OrchestratorMode,
   generationTier: GenerationTier,
   requestId: string,
+  holdId?: string,
 ): Promise<Response> {
   const keyConfigured = !!process.env.ANTHROPIC_API_KEY
   const debug: ChatDebugPayload = {
@@ -1541,6 +1653,8 @@ async function respondWithScoreStream(
     return { abc, toolUseId: id, ...(headVersionId !== undefined ? { headVersionId } : {}) }
   }
 
+  let holdSettled = false // PR-7b-2: paid-path hold settled at `done`?
+  let settledCredits = 0 // captured for refund-on-persist-failure
   let keepalive: ReturnType<typeof setInterval> | undefined
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -1585,8 +1699,33 @@ async function respondWithScoreStream(
               })
             } else if (ev.type === 'done') {
               // Cost was incurred across all sections regardless of whether the
-              // final score persists — backfill before the persist attempt.
+              // final score persists — backfill before the settle + persist.
               backfillStreamedTurnCost(requestId)
+              // PR-7b-2: settle the full sectional cost BEFORE persisting. The
+              // pump runs to `done` even on client disconnect (no AbortSignal
+              // propagation), so a paid sectional generation is charged exactly
+              // once here; release-on-error is the finally below.
+              if (holdId) {
+                const settle = settleHeldGeneration({
+                  holdId,
+                  requestId,
+                  chatId,
+                  generationTier,
+                  kind: outcome.classification.kind,
+                  model: ev.model,
+                  cost: meterStreamCost(), // streamed sectional cost from the pump meter
+                })
+                holdSettled = settle.ok
+                if (settle.ok) {
+                  settledCredits = settle.creditsCharged
+                } else {
+                  console.error('[paywall] score-stream settle hold_not_active (anomalous; sections already delivered)', {
+                    requestId,
+                    chatId,
+                    holdId,
+                  })
+                }
+              }
               try {
                 const persisted = await persist(ev.score, ev.introText, ev.toolUseId)
                 write('done', {
@@ -1600,6 +1739,35 @@ async function respondWithScoreStream(
                   ...(ev.warnings ? { warnings: ev.warnings } : {}),
                 })
               } catch (e) {
+                // Charged but the final score couldn't be persisted/delivered →
+                // refund OUR failure (refund:* key namespaced from settle:*,
+                // idempotent, abuse-bounded; return value checked).
+                if (holdId && settledCredits > 0) {
+                  try {
+                    const r = refund({
+                      userId,
+                      requestId,
+                      holdId,
+                      credits: settledCredits,
+                      reason: 'error',
+                      sessionId: chatId,
+                      idempotencyKey: `refund:${requestId}:persist_failed`,
+                    })
+                    if (!r.ok) {
+                      console.error('[paywall] score-stream refund after persist failure DENIED — manual reconcile', {
+                        requestId,
+                        chatId,
+                        reason: r.reason,
+                      })
+                    }
+                  } catch (re) {
+                    console.error('[paywall] score-stream refund after persist failure FAILED — manual reconcile', {
+                      requestId,
+                      chatId,
+                      error: re instanceof Error ? re.message : String(re),
+                    })
+                  }
+                }
                 const msg = e instanceof Error ? e.message : 'finalize failed'
                 write('error', {
                   code: 'validation_failed' as ChatErrorCode,
@@ -1620,6 +1788,10 @@ async function respondWithScoreStream(
             error: 'Something went wrong while generating your score. Please try again.',
           })
         } finally {
+          // PR-7b-2: release the hold unless the stream reached `done` and
+          // settled above (error / mid-pump throw → our failure → free). No-op
+          // once settled; a process-kill before this leaves it for the reaper.
+          if (holdId && !holdSettled) safeReleaseHold(holdId, requestId)
           if (keepalive) clearInterval(keepalive)
           try {
             controller.close()
@@ -1630,6 +1802,11 @@ async function respondWithScoreStream(
       })
     },
     cancel() {
+      // PR-7b-2 MONEY INVARIANT (see respondWithConverseStream.cancel): the pump
+      // is NOT cancelled here, so a paid sectional settles at `done` even on
+      // disconnect. Do NOT wire this to an AbortSignal that stops generation
+      // without first moving settle off the done-only path — else the `finally`
+      // releases the hold → a delivered-but-free paid generation.
       if (keepalive) clearInterval(keepalive)
     },
   })
