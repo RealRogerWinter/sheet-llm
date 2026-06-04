@@ -1,5 +1,6 @@
 import '@testing-library/jest-dom/vitest'
 import { installGetBBoxPolyfill } from '../evals/lib/jsdomShim'
+import { installPointerEventPolyfills } from './helpers/pointer'
 
 // Silence orchestrator structured logs in test runs. Individual tests
 // can still spy on console.log via vitest.
@@ -23,3 +24,8 @@ process.env.SL_REQUEST_IP_RATE_LIMIT = '1000000'
 // polyfill (the same one used by scripts/capture-visual-baselines.ts)
 // so the two callers can't drift.
 installGetBBoxPolyfill()
+
+// jsdom lacks the pointer-capture methods (and, on some versions,
+// PointerEvent) — install no-op/portable stubs so pointer-based touch
+// interactions can be exercised in unit tests.
+installPointerEventPolyfills()

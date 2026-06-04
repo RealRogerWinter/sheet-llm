@@ -26,21 +26,60 @@ import { resolveStaffFromY } from './staffResolver'
  * drag-to-retune) are owned by useNoteClickHandler (abcjs's
  * clickListener pipeline) and useNoteDrag (pointer events).
  *
+ * Uses pointer events (not mouse events) so tap-to-place works on touch
+ * devices as well as mouse — a finger tap fires `pointerup` but NOT
+ * `mouseup` synchronously the way a mouse click does. A tap-vs-drag guard
+ * (compare pointerdown→pointerup travel against TAP_TOLERANCE_PX) means a
+ * finger that scrolled the page no longer inserts a note (and fixes the
+ * latent mouse equivalent: a small drag on empty staff used to insert).
+ *
  * Mount-once: store reads happen via getState() inside handlers, so
  * the listener set never tears down on edits.
  */
+// A pointer that travels more than this between down and up was a
+// scroll/drag, not a tap — don't treat it as a place/deselect click.
+// Mirrors the MIN_MOVE_PX click threshold in useNoteDrag.
+const TAP_TOLERANCE_PX = 12
+
 export function useStaffInteractions(scoreRef: RefObject<HTMLDivElement | null>) {
   useEffect(() => {
     const container = scoreRef.current
     if (!container) return
 
-    function onMouseUp(e: MouseEvent) {
+    // Track the primary pointer's down position so pointerup can tell a tap
+    // from a drag/scroll. Notehead pointerdowns are recorded too (harmless —
+    // the pointerup handler early-returns on note/rest/bar targets anyway).
+    let downX = 0
+    let downY = 0
+    let downId = -1
+    let hasDown = false
+
+    function onPointerDown(e: PointerEvent) {
+      if (!e.isPrimary) return
+      downX = e.clientX
+      downY = e.clientY
+      downId = e.pointerId
+      hasDown = true
+    }
+
+    function onPointerUp(e: PointerEvent) {
       if (!container) return
+      // Only the primary pointer places a note — a second finger (e.g. during
+      // a pinch) must never insert.
+      if (!e.isPrimary) return
+      // Tap-vs-drag: a pointer that moved past the tolerance was a scroll/drag,
+      // not a tap. (Missing down record → treat as tap, preserving mouse-click
+      // parity where a bare click has no measurable travel.)
+      if (hasDown && e.pointerId === downId) {
+        const traveled = Math.hypot(e.clientX - downX, e.clientY - downY)
+        hasDown = false
+        if (traveled > TAP_TOLERANCE_PX) return
+      }
       // Cmd/Ctrl+click is owned by useMeasureRangeSelect (M19-PR-6)
       // for measure-range selection. Without this gate the modified
       // click would still fall through into the insert-note / deselect
-      // path on mouseup (mousedown.stopPropagation doesn't stop the
-      // subsequent mouseup), and the user would get an unintended
+      // path on pointerup (pointerdown.stopPropagation doesn't stop the
+      // subsequent pointerup), and the user would get an unintended
       // note inserted into the empty staff area they Cmd+clicked.
       if (e.ctrlKey || e.metaKey) return
       const target = e.target as Element | null
@@ -156,7 +195,7 @@ export function useStaffInteractions(scoreRef: RefObject<HTMLDivElement | null>)
       })
     }
 
-    function onDocumentMouseDown(e: MouseEvent) {
+    function onDocumentPointerDown(e: PointerEvent) {
       if (!container) return
       const target = e.target as Node | null
       if (!target) return
@@ -167,11 +206,13 @@ export function useStaffInteractions(scoreRef: RefObject<HTMLDivElement | null>)
       if (store.selection) store.select(undefined)
     }
 
-    container.addEventListener('mouseup', onMouseUp)
-    document.addEventListener('mousedown', onDocumentMouseDown)
+    container.addEventListener('pointerdown', onPointerDown)
+    container.addEventListener('pointerup', onPointerUp)
+    document.addEventListener('pointerdown', onDocumentPointerDown)
     return () => {
-      container.removeEventListener('mouseup', onMouseUp)
-      document.removeEventListener('mousedown', onDocumentMouseDown)
+      container.removeEventListener('pointerdown', onPointerDown)
+      container.removeEventListener('pointerup', onPointerUp)
+      document.removeEventListener('pointerdown', onDocumentPointerDown)
     }
   }, [scoreRef])
 }
