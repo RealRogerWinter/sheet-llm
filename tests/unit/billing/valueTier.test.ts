@@ -63,15 +63,20 @@ describe('VALUE_TIERS anchors', () => {
 })
 
 describe('worstCaseHoldCredits (provable upper bound, creditsCharged ≤ hold)', () => {
-  it('computes the Pro non-streaming worst case (8000 max_tokens) → 293 credits', () => {
-    // 3 attempts × Sonnet(80k in + 8k out) + overhead(20k in + 2k out), ×2.5.
-    expect(worstCaseHoldCredits(8_000)).toBe(293)
+  it('covers the priciest outcome — a 12-section sectional (8000 max_tokens) → 491 credits', () => {
+    // max(non-streaming 3×Sonnet(80k+8k), sectional 12×Sonnet(12k+8k)) + overhead, ×2.5.
+    expect(worstCaseHoldCredits(8_000)).toBe(491)
+  })
+
+  it('stays at/below the $5 min pack (500 cr) so a min-pack buyer can start a generation', () => {
+    expect(worstCaseHoldCredits(8_000)).toBeLessThanOrEqual(500)
   })
 
   it('is never below the standard anchor and dominates a typical charge', () => {
     expect(worstCaseHoldCredits(2_600)).toBeGreaterThanOrEqual(VALUE_TIERS.standard)
-    // A typical warm generation (23 cr) must be well under the hold so settle
-    // never trips overHold on the happy path.
+    // A typical warm generation (23 cr) and a realistic sectional (~$1 → 250 cr)
+    // must be under the hold so settle doesn't routinely trip overHold.
     expect(worstCaseHoldCredits(8_000)).toBeGreaterThan(costToCredits(160_000, MARKUP_GENERATE))
+    expect(worstCaseHoldCredits(8_000)).toBeGreaterThan(costToCredits(1_000_000, MARKUP_GENERATE))
   })
 })

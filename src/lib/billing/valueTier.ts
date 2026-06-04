@@ -85,26 +85,52 @@ export function costToCredits(microUsd: number, markup: number): number {
 const WORST_MODEL = 'claude-sonnet-4-6'
 /** completeWithRetry default maxRetries = 2 ⇒ 1 initial + 2 retries. */
 const MAX_HANDLER_ATTEMPTS = 3
-// Generous per-call input bound: render_score schema (~13k) + a large grand-staff
-// score (~15k) + recent history, all billed UNCACHED. Covers realistic large
-// editedScores without false overHold alerts. The absolute MAX_BODY_BYTES (1MB)
-// pathological input is intentionally backstopped by settleHold's overHold cap
-// (we never overdraft; the alert fires) rather than inflating every hold —
-// deliberately attacking it costs the (paid) attacker far more than it costs us.
+// Non-streaming per-call input bound: render_score schema (~13k) + a large
+// grand-staff score (~15k) + recent history, all billed UNCACHED. Covers
+// realistic large editedScores without false overHold alerts.
 const WORST_INPUT_TOKENS_PER_CALL = 80_000
 const OVERHEAD_INPUT_TOKENS = 20_000
 const OVERHEAD_OUTPUT_TOKENS = 2_000
 
+// Sectional (streaming) worst case — the PRICIEST outcome a request can resolve
+// to (generate_complex → runGenerateSectionalStream chains many bounded
+// sub-calls within maxDuration; PR-7b-2 settles it). The pre-dispatch hold is
+// placed BEFORE the outcome is known, so it must cover this. Sized so a
+// legitimate cold sectional settles UNDER the hold (overHold stays a rare
+// anomaly alert, not the business model) AND the hold stays at/below the $5 min
+// pack (500 cr) so a min-pack buyer can start a generation. Per-section input is
+// the steady-state delta — the schema/score prefix is cache-read across sections
+// in prod — but billed uncached here for headroom.
+const MAX_SECTIONS = 12 // measured worst sectional ≈ 10–12 chained calls
+const SECTION_INPUT_TOKENS = 12_000
+
 /**
- * Provable worst-case hold (credits) for a Pro non-streaming turn whose handler
- * emits at most `maxOutputTokens`. Never below {@link VALUE_TIERS}.standard so a
- * trivial turn still reserves a sane minimum.
+ * Provable worst-case hold (credits) for a Pro turn — the MAX over the possible
+ * outcomes (a non-streaming handler at `maxOutputTokens` × up-to-3 attempts, vs a
+ * full sectional generation), since the hold is placed before the outcome is
+ * known. So `creditsCharged ≤ hold` for any path and settleHold's overHold flag
+ * is a rare paging-alert backstop, never the model. Never below
+ * {@link VALUE_TIERS}.standard.
+ *
+ * NOTE: an UNBOUNDED sectional (adaptive split beyond MAX_SECTIONS, or many
+ * uncached calls) is still backstopped by overHold (capped, never overdrafts) —
+ * a true fix is per-section debiting + abort-before-overspend (red-team #3),
+ * deferred to a follow-up. The cap ($5) exceeds any maxDuration-bounded raw cost,
+ * so even that tail does not lose money.
  */
 export function worstCaseHoldCredits(maxOutputTokens: number): number {
-  const handlerUsd =
+  const nonStreamingUsd =
     MAX_HANDLER_ATTEMPTS *
     billableCostUsd(WORST_MODEL, {
       uncachedInputTokens: WORST_INPUT_TOKENS_PER_CALL,
+      outputTokens: maxOutputTokens,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0,
+    })
+  const sectionalUsd =
+    MAX_SECTIONS *
+    billableCostUsd(WORST_MODEL, {
+      uncachedInputTokens: SECTION_INPUT_TOKENS,
       outputTokens: maxOutputTokens,
       cacheReadInputTokens: 0,
       cacheCreationInputTokens: 0,
@@ -115,6 +141,6 @@ export function worstCaseHoldCredits(maxOutputTokens: number): number {
     cacheReadInputTokens: 0,
     cacheCreationInputTokens: 0,
   })
-  const microUsd = Math.ceil((handlerUsd + overheadUsd) * 1_000_000)
+  const microUsd = Math.ceil((Math.max(nonStreamingUsd, sectionalUsd) + overheadUsd) * 1_000_000)
   return Math.max(VALUE_TIERS.standard, costToCredits(microUsd, MARKUP_GENERATE))
 }
