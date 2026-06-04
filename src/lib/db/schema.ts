@@ -4,6 +4,7 @@ import {
   check,
   index,
   integer,
+  primaryKey,
   real,
   sqliteTable,
   text,
@@ -509,7 +510,12 @@ export const usageLedger = sqliteTable(
       onDelete: 'set null',
     }),
     idempotencyKey: text('idempotency_key').notNull().unique(), // retried request must not double-debit
-    kind: text('kind').notNull(), // 'chat_generate' | 'chat_edit' | ... (app-validated)
+    kind: text('kind').notNull(), // 'chat_generate' | 'chat_edit' | 'refund' (app-validated)
+    // Typed reason for a NON-standard row. On a refund row (kind='refund',
+    // credits_charged NEGATIVE) it is the failure class we refunded for —
+    // 'error' | 'refused' | 'cost_split' — so ops can audit WHY credits were
+    // returned without parsing kind. NULL on a normal charge.
+    reason: text('reason'),
     model: text('model'),
     generationTier: text('generation_tier'), // 'free' | 'pro' at time of call
     inputTokens: integer('input_tokens'),
@@ -555,6 +561,29 @@ export const creditHolds = sqliteTable(
   ],
 )
 
+// refund_counters — per-user-per-DAY abuse ceiling for SERVICE refunds (we
+// failed → credits back, recorded as a NEGATIVE usage_ledger row). A failure
+// the user can trigger on demand is a credit-printing press without a cap, so
+// refund() increments this with a guard-in-the-write (UPDATE ... WHERE
+// count+1 <= MAX AND credits+:n <= MAX) and refuses past either ceiling. `day`
+// is the epoch DAY (floor(epochSec / 86400)); old rows are disposable.
+export const refundCounters = sqliteTable(
+  'refund_counters',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    day: integer('day').notNull(), // epoch day = floor(unixSec / 86400)
+    refundCount: integer('refund_count').notNull().default(0),
+    refundCredits: integer('refund_credits').notNull().default(0), // sum refunded that day
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.day] }),
+    check('refund_counters_nonneg', sql`refund_count >= 0 AND refund_credits >= 0`),
+  ],
+)
+
 export type CreditWallet = typeof creditWallets.$inferSelect
 export type NewCreditWallet = typeof creditWallets.$inferInsert
 export type CreditPurchase = typeof creditPurchases.$inferSelect
@@ -563,6 +592,8 @@ export type UsageLedgerRow = typeof usageLedger.$inferSelect
 export type NewUsageLedgerRow = typeof usageLedger.$inferInsert
 export type CreditHold = typeof creditHolds.$inferSelect
 export type NewCreditHold = typeof creditHolds.$inferInsert
+export type RefundCounter = typeof refundCounters.$inferSelect
+export type NewRefundCounter = typeof refundCounters.$inferInsert
 
 export type User = typeof users.$inferSelect
 export type NewUser = typeof users.$inferInsert
