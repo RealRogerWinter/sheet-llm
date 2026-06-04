@@ -1,0 +1,72 @@
+.page {
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: 3rem 1.25rem;
+  color: var(--ink, #0a0a0a);
+}
+.title {
+  margin: 0 0 var(--gap-3, 12px);
+  font-size: 1.6rem;
+  font-weight: 680;
+}
+.lede {
+  margin: 0 0 var(--gap-5, 24px);
+  color: var(--graphite, #6b6b6b);
+  line-height: 1.6;
+}
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-3, 12px);
+}
+.label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+.input {
+  padding: 0.6rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--rule, #d4d4d2);
+  background: var(--paper, #fff);
+  color: var(--ink, #0a0a0a);
+  font: inherit;
+}
+.input:focus {
+  outline: none;
+  border-color: var(--playing, #1e40af);
+}
+.btn {
+  align-self: flex-start;
+  padding: 0.6rem 1.1rem;
+  border-radius: 8px;
+  border: 1px solid var(--playing, #1e40af);
+  background: var(--playing, #1e40af);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn:hover {
+  background: color-mix(in oklab, var(--playing, #1e40af) 88%, #000);
+}
+.btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.status {
+  margin: var(--gap-4, 16px) 0 0;
+  color: var(--ink, #0a0a0a);
+}
+.error {
+  margin: 0;
+  color: var(--signal, #b91c1c);
+  font-size: 0.9rem;
+}
+.back {
+  display: inline-block;
+  margin-top: var(--gap-5, 24px);
+  color: var(--graphite, #6b6b6b);
+  font-size: 0.9rem;
+}

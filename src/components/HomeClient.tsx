@@ -7,6 +7,7 @@ import DebugPanel from './DebugPanel'
 import ChatHistoryPanel from './ChatHistoryPanel'
 import SessionSidebar from './SessionSidebar'
 import AuthModal from './auth/AuthModal'
+import QuotaCtaModal from './chat/QuotaCtaModal'
 import { GhostPreviewPanel } from './orchestrator/GhostPreviewPanel'
 import styles from './AppShell.module.css'
 import { mq } from '@/lib/ui/breakpoints'
@@ -57,6 +58,7 @@ export default function HomeClient() {
       <GhostPreviewPanel />
       <DebugPanel />
       <AuthModal />
+      <QuotaCtaModal />
     </div>
   )
 }

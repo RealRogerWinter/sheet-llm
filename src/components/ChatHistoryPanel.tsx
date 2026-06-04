@@ -16,6 +16,7 @@ import { usePromptHistory } from '@/lib/chat/usePromptHistory'
 import { mq } from '@/lib/ui/breakpoints'
 import { useMatchMedia } from '@/lib/ui/useMatchMedia'
 import type { RevertRequest, RevertResponse, TranscriptTurn } from '@/lib/shared/types'
+import QuotaCard from './chat/QuotaCard'
 import styles from './ChatHistoryPanel.module.css'
 
 type PanelMode = 'docked' | 'drawer' | 'sheet'
@@ -356,6 +357,16 @@ function TurnView({
     )
   }
 
+  if (turn.kind === 'cta') {
+    return (
+      <div className={styles.turn} data-role="assistant">
+        <div className={styles.roleLabel}>sheet-llm</div>
+        <QuotaCard cta={turn.cta} />
+      </div>
+    )
+  }
+
+  // assistant: render_score
   return (
     <div className={styles.turn} data-role="assistant">
       <div className={styles.roleLabel}>sheet-llm · Score</div>
