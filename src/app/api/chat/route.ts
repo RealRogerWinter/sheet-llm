@@ -43,6 +43,7 @@ import type {
 import { isOrchestratorConverseStream, isOrchestratorScoreStream } from '@/lib/orchestrator/types'
 import { summarizeAction } from '@/lib/orchestrator/summarizeAction'
 import { recordUsage } from '@/lib/orchestrator/budget'
+import { checkRequestIp, extractClientIp } from '@/lib/orchestrator/requestRateLimit'
 import { scoreHash } from '@/lib/orchestrator/scoreVersion'
 import { computeDeadlineAt } from '@/lib/orchestrator/deadline'
 import { resolveGenerationTier, BOUNDED_EMIT_CEILING } from '@/lib/orchestrator/generationTier'
@@ -314,6 +315,14 @@ async function validateEditedScoreOrError(
 export async function POST(request: Request) {
   const origin = checkSameOrigin(request)
   if (!origin.ok) return origin.res
+
+  // Per-IP rate limit on the LLM-cost surface. The per-chatId token budget
+  // (budget.ts) is resettable by rotating chatId and v1 has no per-user
+  // metering, so this per-IP brake — keyed off CF-Connecting-IP behind
+  // Cloudflare — is the backstop against unbounded Anthropic spend.
+  if (!checkRequestIp(extractClientIp(request)).ok) {
+    return errorResponse('rate_limited', 429, 'Too many requests — please slow down and try again shortly.')
+  }
 
   const declared = Number(request.headers.get('content-length') ?? '0')
   if (declared > MAX_BODY_BYTES) {

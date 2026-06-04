@@ -20,6 +20,7 @@ import {
   type ImportWarning,
 } from '@/lib/music/import'
 import type { ImportFormat } from '@/lib/shared/types'
+import { checkRequestIp, extractClientIp } from '@/lib/orchestrator/requestRateLimit'
 import type {
   ImportErrorResponse,
   ImportResponse,
@@ -249,6 +250,11 @@ async function seedConversation(
 export async function POST(request: Request) {
   const origin = checkSameOrigin(request)
   if (!origin.ok) return origin.res
+  // Per-IP rate limit (import parses uploads; shares the expensive-route budget
+  // with /api/chat). The client IP comes from CF-Connecting-IP behind Cloudflare.
+  if (!checkRequestIp(extractClientIp(request)).ok) {
+    return errorResponse('rate_limited', 429, 'Too many requests — please slow down and try again shortly.')
+  }
   const t0 = Date.now()
   // Resolve identity up-front so the seed conversation has an owner.
   const session = await getRequestUser()
