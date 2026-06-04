@@ -19,15 +19,18 @@
 }
 
 /* Docked: permanent right sidebar, below the app header. No backdrop, no
- * animation. Overlays the right edge of the viewport; the score area stays
- * centered in the full window rather than reserving room for the panel. */
+ * animation. PUSH/REFLOW model — it occupies the app-shell `panel` grid track
+ * (an in-flow sticky column) so the score column reflows into the remaining
+ * width instead of being overlaid. (The drawer/sheet modes below stay fixed
+ * overlays.) */
 .panel[data-mode='docked'] {
+  position: sticky;
+  grid-area: panel;
+  align-self: start;
   top: var(--app-header-height);
-  right: 0;
   width: var(--panel-w);
   height: calc(100dvh - var(--app-header-height));
   border-left: 1px solid var(--rule);
-  box-shadow: -8px 0 24px rgba(10, 10, 10, 0.06);
 }
 
 /* Drawer: right-edge overlay between 768–1280px. */

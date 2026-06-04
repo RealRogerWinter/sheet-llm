@@ -6,6 +6,7 @@ import DebugPanel from './DebugPanel'
 import ChatHistoryPanel from './ChatHistoryPanel'
 import SessionSidebar from './SessionSidebar'
 import AuthModal from './auth/AuthModal'
+import { GhostPreviewPanel } from './orchestrator/GhostPreviewPanel'
 import styles from './AppShell.module.css'
 import { useChatIdSession, useFollowPlaybackSync, useReduceMotionSync } from '@/lib/chat/state'
 import { useTranscriptSync } from '@/lib/chat/useTranscriptSync'
@@ -33,6 +34,9 @@ export default function HomeClient() {
       <AppHeader />
       <Hero />
       <ChatHistoryPanel />
+      {/* Docked AI-diff panel — a direct shell child so it can occupy the
+          `panel` grid track (push) at xl, like the chat panel. */}
+      <GhostPreviewPanel />
       <DebugPanel />
       <AuthModal />
     </div>
