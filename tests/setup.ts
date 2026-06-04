@@ -11,6 +11,14 @@ process.env.ORCHESTRATOR_LOG_SILENT = '1'
 // via vi.stubEnv('ORCHESTRATOR_ENABLED', 'true') in their beforeEach.
 process.env.ORCHESTRATOR_ENABLED = 'false'
 
+// The expensive-route per-IP limiter (requestRateLimit) keys off the client IP,
+// which is 'local' for every test request (no XFF / CF-Connecting-IP header) — so
+// the whole suite shares ONE bucket. Use a very high limit so integration tests
+// that POST many times to /api/chat or /api/import don't trip it; the limiter's
+// own behavior is covered by tests/unit/orchestrator/requestRateLimit.test.ts
+// (which overrides this via vi.stubEnv).
+process.env.SL_REQUEST_IP_RATE_LIMIT = '1000000'
+
 // jsdom doesn't implement SVG layout — install the shared getBBox
 // polyfill (the same one used by scripts/capture-visual-baselines.ts)
 // so the two callers can't drift.

@@ -84,42 +84,11 @@ export function recordEmailFailure(email: string): void {
   windowed(getStore().emailFail, email, EMAIL_WINDOW_MS, EMAIL_FAIL_LIMIT, true)
 }
 
-function trustedProxyHops(): number {
-  const n = Number(process.env.TRUSTED_PROXY_HOPS)
-  return Number.isInteger(n) && n > 0 ? n : 0
-}
-
-/**
- * Best-effort client IP. With `TRUSTED_PROXY_HOPS=N` set, the real client is the
- * Nth `x-forwarded-for` entry from the RIGHT (everything to its left is
- * client-spoofable). Unset → leftmost (legacy; spoofable — set it in prod). IPv6
- * collapses to the /64 so an attacker can't rotate /128s to bypass per-IP limits.
- */
-export function extractClientIp(request: Request): string {
-  const hops = trustedProxyHops()
-  const xff = request.headers.get('x-forwarded-for')
-  if (xff) {
-    const parts = xff
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
-    if (parts.length > 0) {
-      if (hops <= 0) return normalizeIp(parts[0]) // unset → leftmost (spoofable)
-      if (parts.length >= hops) return normalizeIp(parts[parts.length - hops])
-      // Misconfigured (hops > actual XFF depth): do NOT trust the spoofable
-      // leftmost — fall through to a single shared bucket (fail-closed).
-    }
-  }
-  return normalizeIp(request.headers.get('x-real-ip') || 'local')
-}
-
-function normalizeIp(ip: string): string {
-  if (ip.includes(':') && !ip.includes('.')) {
-    const groups = ip.split(':')
-    if (groups.length > 4) return groups.slice(0, 4).join(':') + '::/64'
-  }
-  return ip
-}
+// Client-IP extraction lives in one shared module — `./clientIp` — which adds
+// CF-Connecting-IP (the trusted source behind Cloudflare) on top of the
+// hop-aware X-Forwarded-For logic. Re-exported here so existing imports
+// (`@/lib/auth/authRateLimit`) keep working unchanged.
+export { extractClientIp } from './clientIp'
 
 /** Test-only: clear all buckets. */
 export function __resetForTesting(): void {

@@ -15,6 +15,21 @@ const usage = new Map<string, SessionUsage>()
 const attemptCounters = new Map<string, number>()
 let cap: BudgetCap | undefined
 
+const MAX_BUDGET_ENTRIES = 50_000
+
+// Bound the in-memory maps so a caller rotating chatId can't grow them
+// unboundedly (memory DoS). Map preserves insertion order, so dropping from the
+// front evicts the oldest (most likely-abandoned) chats first.
+function evictIfFull<V>(map: Map<string, V>): void {
+  if (map.size < MAX_BUDGET_ENTRIES) return
+  const drop = Math.ceil(MAX_BUDGET_ENTRIES * 0.1)
+  let i = 0
+  for (const key of map.keys()) {
+    map.delete(key)
+    if (++i >= drop) break
+  }
+}
+
 function getCap(): BudgetCap {
   if (cap) return cap
   const envIn = Number(process.env.ORCHESTRATOR_BUDGET_INPUT_TOKENS)
@@ -35,6 +50,7 @@ export function recordUsage(
   outputTokens: number | undefined,
 ): void {
   const current = getSessionUsage(chatId)
+  evictIfFull(usage)
   usage.set(chatId, {
     inputTokens: current.inputTokens + (inputTokens ?? 0),
     outputTokens: current.outputTokens + (outputTokens ?? 0),
@@ -80,6 +96,7 @@ export async function withUsageRecording<T>(
   fn: (attempt: UsageAttempt) => Promise<T>,
 ): Promise<T> {
   const attemptIndex = attemptCounters.get(chatId) ?? 0
+  evictIfFull(attemptCounters)
   attemptCounters.set(chatId, attemptIndex + 1)
   let pendingInput = 0
   let pendingOutput = 0

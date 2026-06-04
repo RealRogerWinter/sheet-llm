@@ -86,35 +86,13 @@ export function checkSub(sub: string): { ok: boolean; retryAfterSec?: number } {
   return { ok: false, retryAfterSec: Math.ceil(WINDOW_MS / 1000) }
 }
 
-/**
- * Extract a client IP from request headers. Production-deployed apps
- * almost always sit behind a proxy that sets `x-forwarded-for`; the
- * leftmost value is the original client. Local dev usually has neither,
- * so we fall back to a literal `'local'` bucket (which means localhost
- * dev gets the same 10/5min budget — still works for any reasonable
- * testing pattern).
- *
- * For IPv6 we hash on the `/64` prefix because each /64 is a single
- * "user" — without this, an attacker on an IPv6 cellular network can
- * pull a fresh /128 per request and bypass per-IP limits trivially.
- */
-export function extractClientIp(request: Request): string {
-  const xff = request.headers.get('x-forwarded-for')
-  const candidate = xff ? xff.split(',')[0].trim() : ''
-  const raw = candidate || request.headers.get('x-real-ip') || 'local'
-  return normalizeIp(raw)
-}
-
-function normalizeIp(ip: string): string {
-  // IPv6 /64 prefix collapse — keep only the first 4 groups.
-  if (ip.includes(':') && !ip.includes('.')) {
-    const groups = ip.split(':')
-    if (groups.length > 4) {
-      return groups.slice(0, 4).join(':') + '::/64'
-    }
-  }
-  return ip
-}
+// Client-IP extraction is shared with the auth + chat/import limiters — see
+// `./clientIp`. Re-exported so `@/lib/auth/restoreRateLimit` imports keep
+// working. NOTE: this REPLACES the previous always-leftmost-XFF behavior, which
+// was spoofable behind a proxy/CDN (an attacker rotating X-Forwarded-For got a
+// fresh per-IP bucket every request). The shared helper honors CF-Connecting-IP
+// / TRUSTED_PROXY_HOPS just like the auth limiter.
+export { extractClientIp } from './clientIp'
 
 /** Test-only: clear all buckets. */
 export function __resetForTesting(): void {
