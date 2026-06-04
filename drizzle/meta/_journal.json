@@ -64,6 +64,13 @@
       "when": 1782500000000,
       "tag": "0008_orchestrator_turns_cost",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1783000000000,
+      "tag": "0009_credit_tables",
+      "breakpoints": true
     }
   ]
 }
