@@ -57,6 +57,13 @@
       "when": 1782000000000,
       "tag": "0007_daily_quota",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1782500000000,
+      "tag": "0008_orchestrator_turns_cost",
+      "breakpoints": true
     }
   ]
 }

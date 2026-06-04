@@ -13,6 +13,7 @@ import type {
 import { OutputTruncatedError, ProviderSchemaError } from './types'
 import { toSystemBlocks } from './systemBlocks'
 import { makeOutputBudgetGuard } from './streamGuard'
+import { recordProviderCall } from '@/lib/billing/usageMeter'
 
 /** Per-call output ceiling when the caller doesn't set one. High enough
  *  that a forgotten `maxTokens` won't silently truncate a score. */
@@ -196,7 +197,11 @@ export class AnthropicProvider implements LLMProvider {
     // instead of the misleading "expected array, received undefined"
     // schema failure that read as a cryptic 500.
     if (response.stop_reason === 'max_tokens') {
-      const used = (response.usage as { output_tokens?: number } | undefined)?.output_tokens
+      // The model ran and emitted up to the ceiling — meter its cost even
+      // though we throw (Anthropic billed those tokens).
+      const truncUsage = mapAnthropicUsage(response.usage)
+      recordProviderCall(model, truncUsage)
+      const used = truncUsage?.outputTokens
       throw new OutputTruncatedError(
         `${tool.name}: output hit the max_tokens ceiling (${options.maxTokens ?? 'default'}) before the tool call completed`,
         {
@@ -231,13 +236,15 @@ export class AnthropicProvider implements LLMProvider {
       (b): b is Anthropic.TextBlock => b.type === 'text',
     )
 
+    const usage = mapAnthropicUsage(response.usage)
+    recordProviderCall(model, usage)
     return {
       input: parsed.data,
       toolUseId: toolUse.id,
       model,
       stopReason: response.stop_reason ?? undefined,
       introText: textBlock?.text,
-      usage: mapAnthropicUsage(response.usage),
+      usage,
     }
   }
 
@@ -313,11 +320,13 @@ export class AnthropicProvider implements LLMProvider {
         return
       }
       const finalMsg = await stream.finalMessage()
+      const streamUsage = mapAnthropicUsage(finalMsg.usage)
+      recordProviderCall(model, streamUsage)
       yield {
         type: 'message-stop',
         finalText: accumulated,
         stopReason: finalMsg.stop_reason ?? undefined,
-        usage: mapAnthropicUsage(finalMsg.usage),
+        usage: streamUsage,
       }
     } catch (e) {
       // Our own guard abort (or a caller-supplied abortSignal) can surface here
