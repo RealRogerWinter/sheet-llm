@@ -45,6 +45,15 @@ Next.js 16 · React 19 · TypeScript · Zod · Drizzle ORM / SQLite (better-sqli
 abcjs · zustand · the Anthropic SDK (with multi-provider failover to Groq /
 Ollama / OpenAI-compatible endpoints).
 
+## Hosting
+
+sheet-llm runs **anywhere** — locally, self-hosted, or as the public demo at
+**[sheetllm.com](https://sheetllm.com)**. The hosted demo adds a daily
+request-quota / abuse-gating layer to protect LLM tokens, but it is **disabled by
+default** and **self-hosted / local installs are completely unaffected** (leave
+`SL_DAILY_QUOTA_ENABLED` unset — there is no quota, no IP checks, no extra work).
+See [Daily Quota & Abuse Gating](docs/subsystems/daily-quota.md).
+
 ## Documentation
 
 The full, frontmatter-stamped documentation set lives in
