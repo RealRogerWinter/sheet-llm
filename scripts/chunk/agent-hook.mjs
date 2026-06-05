@@ -124,6 +124,96 @@ function runForGate(bashCmd, eventCwd) {
   return runInRepo(bashCmd, { startDir: eventCwd || REPO_ROOT, worktreeRelative: true })
 }
 
+// --- stop-gate diff-skip ----------------------------------------------------
+// `chunk validate` boots a CircleCI sidecar and runs the FULL gate suite
+// (`pnpm typecheck` + `pnpm test`) over the whole repo on EVERY turn — it is not
+// diff-aware. When a turn only touched files that cannot change a typecheck/test
+// outcome (docs, operational scripts), that sidecar run is pure cost with no new
+// signal. We skip it in that case. Conservative by construction: anything we
+// can't classify as inert — and any failure to compute the diff — runs the gate.
+
+// Files that, when changed, CANNOT affect `tsc --noEmit` or `vitest`. A path is
+// inert only if it matches one of these AND is not a TESTABLE_EXT file (below).
+const DEFAULT_INERT_GLOBS = ['**/*.md', '**/*.mdx', '**/*.txt', 'docs/**', 'scripts/**']
+
+// tsc compiles **/*.{ts,tsx,mts,cts} (see tsconfig `include`), and tests import
+// .ts helpers even from scripts/ (e.g. tests import scripts/*.ts). So any file
+// with one of these extensions ALWAYS forces the gate, even under an inert dir.
+const TESTABLE_EXT = /\.(ts|tsx|mts|cts)$/
+
+/** Inert globs = built-in defaults plus any extra globs from SL_CHUNK_STOP_GATE_INERT. */
+function inertGlobs() {
+  const extra = (process.env.SL_CHUNK_STOP_GATE_INERT ?? '')
+    .split(/[\s,]+/)
+    .filter(Boolean)
+  return [...DEFAULT_INERT_GLOBS, ...extra]
+}
+
+/**
+ * Minimal glob -> RegExp for the patterns we use: `**` matches any chars
+ * (including `/`) and optionally swallows a following `/`; `*` matches any chars
+ * except `/`; everything else is literal. Paths from git use forward slashes on
+ * every platform, so matching is uniform.
+ */
+function globToRegExp(glob) {
+  let re = '^'
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i]
+    if (c === '*') {
+      if (glob[i + 1] === '*') {
+        re += '.*'
+        i++
+        if (glob[i + 1] === '/') i++ // `**/` also matches zero leading segments
+      } else {
+        re += '[^/]*'
+      }
+    } else if ('\\^$.|?+()[]{}'.includes(c)) {
+      re += '\\' + c
+    } else {
+      re += c
+    }
+  }
+  return new RegExp(re + '$')
+}
+
+/** A changed path is inert (can't affect typecheck/test) if it matches an inert glob and isn't a tsc input. */
+function isInert(file) {
+  if (TESTABLE_EXT.test(file)) return false
+  return inertGlobs().some((g) => globToRegExp(g).test(file))
+}
+
+// One shell line producing the union of every path that differs from the CI base
+// (origin/main): committed branch changes, the working tree (staged+unstaged),
+// and untracked files. `__NO_BASE__` is emitted when origin/main can't be
+// resolved, so the caller runs the gate rather than guessing from a partial set.
+const CHANGED_FILES_CMD =
+  'base="$(git merge-base HEAD origin/main 2>/dev/null)"; ' +
+  'if [ -z "$base" ]; then echo __NO_BASE__; exit 0; fi; ' +
+  '{ git diff --name-only "$base" HEAD; git diff --name-only HEAD; ' +
+  'git ls-files --others --exclude-standard; } | sort -u'
+
+/**
+ * Decide whether the stop-gate can skip the sidecar run for this turn.
+ * Returns { skip, reason }. Skips only when the full changed-file set was
+ * computed AND every changed file is inert (or nothing changed). Any
+ * uncertainty — diff failure, unknown base — returns skip:false (run the gate).
+ */
+function decideStopGateSkip(eventCwd) {
+  const r = runForGate(CHANGED_FILES_CMD, eventCwd)
+  if (classify(r) !== 'pass') return { skip: false, reason: 'could not compute the diff' }
+  const out = (r.stdout ?? '').trim()
+  if (out.includes('__NO_BASE__')) return { skip: false, reason: 'origin/main base unresolved' }
+  const files = out ? out.split('\n').map((s) => s.trim()).filter(Boolean) : []
+  if (files.length === 0) return { skip: true, reason: 'no changes vs origin/main' }
+  const testable = files.filter((f) => !isInert(f))
+  if (testable.length === 0) {
+    const shown = files.slice(0, 5).join(', ')
+    const more = files.length > 5 ? `, +${files.length - 5} more` : ''
+    return { skip: true, reason: `only inert files changed (${files.length}: ${shown}${more})` }
+  }
+  return { skip: false }
+}
+
 /**
  * Classify a spawnSync result:
  *   'pass'        — the gate ran and exited 0
@@ -188,6 +278,13 @@ try {
 
     if (!hasCommand('chunk')) {
       allow('chunk not installed — skipping sidecar validation (run scripts/chunk/bootstrap.sh to enable inner-loop sidecars).')
+    }
+    // chunk validate isn't diff-aware — it runs the whole suite on a sidecar
+    // every turn. Skip that cost when nothing the turn changed could affect a
+    // typecheck/test outcome. Set SL_CHUNK_STOP_GATE_NO_DIFF_SKIP=1 to always run.
+    if (process.env.SL_CHUNK_STOP_GATE_NO_DIFF_SKIP !== '1') {
+      const decision = decideStopGateSkip(event.cwd)
+      if (decision.skip) allow(`skipping sidecar validation — ${decision.reason}.`)
     }
     // Validate the work tree the turn happened in (the worktree, if any) — see
     // runForGate — rather than the launcher's own main checkout.
