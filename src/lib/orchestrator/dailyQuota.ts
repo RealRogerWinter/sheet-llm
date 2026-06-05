@@ -317,6 +317,12 @@ export type QuotaPeek =
  * would, but never inserts or increments. Returns {enabled:false} when the layer
  * is off (counter hidden) and FAILS to the same conservative {enabled:false} on
  * any error — a usage read must never break the page (and never block chat).
+ *
+ * Reflects ONLY the caller's own per-key bucket — deliberately NOT the
+ * instance-wide anon ceiling (`SL_DAILY_QUOTA_ANON_GLOBAL`), which is a hidden
+ * backstop we don't disclose. So when that ceiling is in force the counter may
+ * read "N left" while a request is still globally throttled ("busy"); that's an
+ * accepted UX edge in exchange for not leaking the instance cap.
  */
 export function peekDailyQuota(
   user: QuotaInput['user'],

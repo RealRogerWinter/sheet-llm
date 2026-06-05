@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getExistingRequestUser } from '@/lib/auth/session'
-import { isAccountsEnabled } from '@/lib/auth/account'
 import { resolveGenerationTier } from '@/lib/orchestrator/generationTier'
-import { isDailyQuotaEnabled, peekDailyQuota } from '@/lib/orchestrator/dailyQuota'
+import { peekDailyQuota } from '@/lib/orchestrator/dailyQuota'
 import { isBillingSurfaceEnabled } from '@/lib/billing/surface'
 import { getWallet } from '@/lib/billing/wallet'
 
@@ -30,24 +29,18 @@ export async function GET(request: Request) {
   const user = (await getExistingRequestUser()) ?? { userId: '', authenticated: false }
   const tier = await resolveGenerationTier(user.userId || undefined)
   const peek = peekDailyQuota({ userId: user.userId, authenticated: user.authenticated }, tier, request)
-  const billingEnabled = isBillingSurfaceEnabled()
-  const credits = billingEnabled && user.authenticated ? getWallet(user.userId).available : null
+  const credits =
+    isBillingSurfaceEnabled() && user.authenticated ? getWallet(user.userId).available : null
 
   const daily =
     peek.enabled && 'remaining' in peek
       ? { remaining: peek.remaining, limit: peek.limit, used: peek.used, resetsInHours: peek.resetsInHours }
       : null
 
+  // Only what the UI renders — the caller's OWN allowance. Instance-level
+  // feature flags are intentionally NOT echoed back to an anonymous caller.
   return NextResponse.json(
-    {
-      accountsEnabled: isAccountsEnabled(),
-      quotaEnabled: isDailyQuotaEnabled(),
-      billingEnabled,
-      authenticated: user.authenticated,
-      tier,
-      daily,
-      credits,
-    },
+    { authenticated: user.authenticated, tier, daily, credits },
     { headers: { 'cache-control': 'no-store' } },
   )
 }

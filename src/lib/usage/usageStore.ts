@@ -12,9 +12,6 @@ export interface UsageDaily {
 
 /** Mirror of the GET /api/usage response. */
 export interface UsageSnapshot {
-  accountsEnabled: boolean
-  quotaEnabled: boolean
-  billingEnabled: boolean
   authenticated: boolean
   tier: string
   daily: UsageDaily | null
