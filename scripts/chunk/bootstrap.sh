@@ -43,13 +43,25 @@ case "$os" in
     ;;
 esac
 
-url="https://github.com/CircleCI-Public/chunk-cli/releases/download/${CHUNK_VERSION}/${asset}"
+base="https://github.com/CircleCI-Public/chunk-cli/releases/download/${CHUNK_VERSION}"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-echo "Downloading ${url}"
-curl -fsSL "$url" -o "$tmp/chunk.tgz"
-tar -xzf "$tmp/chunk.tgz" -C "$tmp"
+echo "Downloading ${base}/${asset}"
+curl -fsSL "${base}/${asset}" -o "$tmp/${asset}"
+curl -fsSL "${base}/checksums.txt" -o "$tmp/checksums.txt"
+
+# Verify the SHA-256 before installing — this binary is wired to run on every
+# agent turn, so a tampered release / MITM must not silently execute. Under
+# `set -euo pipefail`, a mismatch or a missing checksum line aborts the script.
+echo "Verifying SHA-256 checksum"
+if command -v sha256sum >/dev/null 2>&1; then
+  ( cd "$tmp" && grep " ${asset}\$" checksums.txt | sha256sum -c - )
+else
+  ( cd "$tmp" && grep " ${asset}\$" checksums.txt | shasum -a 256 -c - )
+fi
+
+tar -xzf "$tmp/${asset}" -C "$tmp"
 mkdir -p "$HOME/.local/bin"
 install -m 0755 "$(find "$tmp" -maxdepth 2 -type f -name chunk | head -n1)" "$HOME/.local/bin/chunk"
 echo "Installed chunk -> $HOME/.local/bin/chunk ($("$HOME/.local/bin/chunk" --version))"

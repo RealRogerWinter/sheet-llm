@@ -146,6 +146,11 @@ chunk sidecar snapshot list --org-id "$CIRCLECI_ORG_ID"   # note the new snapsho
 
 ## Opting out / disabling
 
+> Cost note: the stop-gate boots a CircleCI sidecar on **every** turn (real
+> CircleCI usage; up to a few minutes per turn before the snapshot warms it).
+> If that cadence is too expensive for a given checkout, disable it per-repo with
+> `chunk hook disable`.
+
 - Per-repo, temporarily: `chunk hook disable` (re-enable with `chunk hook enable`).
 - Per-machine: don't install chunk — the hooks degrade to a no-op automatically.
 - Personal overrides go in `.claude/settings.local.json` (git-ignored); never
