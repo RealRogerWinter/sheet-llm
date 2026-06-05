@@ -376,5 +376,39 @@ export async function getExistingRequestUser(
   }
 }
 
+/**
+ * Read the ANONYMOUS `sl_uid` identity from the cookie, IGNORING any `sl_sess`.
+ * Returns the anon userId plus whether that row still exists and is claimed.
+ * Never mints.
+ *
+ * Used by the post-login "keep my work" adoption flow: `/api/auth/login` mints a
+ * fresh `sl_sess` for the existing account but does NOT clear `sl_uid`, so the
+ * pre-login anonymous identity survives in the cookie jar and can be recovered
+ * SERVER-SIDE here (never from client input) to migrate its sessions onto the
+ * just-authenticated account. The caller MUST reject a claimed row (a stale
+ * `sl_uid` for a claimed account must not have its sessions moved).
+ */
+export async function readAnonCookieIdentity(
+  database?: Db,
+): Promise<{ userId: string; exists: boolean; claimed: boolean } | null> {
+  const db: Db = database ?? getDb()
+  const store = await cookies()
+  const existing = store.get(COOKIE_NAME)
+  if (!existing?.value) return null
+  try {
+    const { payload } = await jwtVerify(existing.value, getSecret(), {
+      algorithms: [ALG],
+      clockTolerance: CLOCK_TOLERANCE_S,
+    })
+    const userId = typeof payload.sub === 'string' ? payload.sub : ''
+    if (!userId) return null
+    const status = await getClaimStatus(db, userId)
+    return { userId, exists: status.exists, claimed: status.claimed }
+  } catch (err) {
+    if (err instanceof joseErrors.JOSEError) return null
+    throw err
+  }
+}
+
 /** Test-only: read the cookie name so mocks can target it precisely. */
 export const __TEST_COOKIE_NAME = COOKIE_NAME

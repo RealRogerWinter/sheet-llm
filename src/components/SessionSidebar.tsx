@@ -48,6 +48,9 @@ export default function SessionSidebar() {
   // should surface the account's saved sessions and logging out should clear
   // them — both without a manual page reload.
   const authStatus = useAuthStore((s) => s.status)
+  // Bumped by refreshSessions() (e.g. the post-login "Keep my work" adoption) to
+  // force a re-fetch when the list changed without a chatId/auth/visibility cue.
+  const sessionsRefreshKey = useChatStore((s) => s.sessionsRefreshKey)
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [loading, setLoading] = useState<boolean>(false)
   const [error, setError] = useState<string | undefined>(undefined)
@@ -71,7 +74,7 @@ export default function SessionSidebar() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetchSessions toggles loading/error state; this is a real fetch-on-mount/chatId-/auth-change sync, not derivable from render
     void fetchSessions()
-  }, [chatId, authStatus, fetchSessions])
+  }, [chatId, authStatus, sessionsRefreshKey, fetchSessions])
 
   useEffect(() => {
     function onVisible() {

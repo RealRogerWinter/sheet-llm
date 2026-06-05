@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useCallback, useRef, useState, type FormEvent } from 'react'
 import { useAuthStore } from '@/lib/auth/authStore'
-import { login, signup } from '@/lib/auth/authClient'
+import { adoptAnonWork, login, signup } from '@/lib/auth/authClient'
 import { clearBackup } from '@/lib/auth/clientBackup'
 import { useChatStore } from '@/lib/chat/state'
 import { useFocusTrap } from './useFocusTrap'
@@ -111,6 +111,22 @@ export default function AuthModal() {
     window.location.reload()
   }
 
+  async function keepLocalWork() {
+    // Make "Keep my work" actually keep it: migrate the pre-login anonymous
+    // sessions onto this account so they appear in the left sidebar. Login (unlike
+    // signup) authenticates a DIFFERENT userId than the anon one, so without this
+    // the anon scores stay stranded and never register in the Sessions list.
+    // Best-effort — the current score is already loaded locally either way.
+    try {
+      await adoptAnonWork()
+    } catch {
+      /* ignore — local work stays on screen */
+    }
+    // Nudge the sidebar to re-fetch so the just-adopted sessions show up now.
+    useChatStore.getState().refreshSessions()
+    closeModal()
+  }
+
   return (
     <div className={styles.backdrop}>
       <div
@@ -129,7 +145,7 @@ export default function AuthModal() {
               You have unsaved work in this browser from before you signed in. Keep it here, or
               discard it and start fresh in your account.
             </p>
-            <button type="button" className={`${styles.btn} ${styles.primary} ${styles.full}`} onClick={closeModal} autoFocus>
+            <button type="button" className={`${styles.btn} ${styles.primary} ${styles.full}`} onClick={keepLocalWork} autoFocus>
               Keep my work
             </button>
             <button type="button" className={`${styles.btn} ${styles.full}`} onClick={discardLocalWork}>

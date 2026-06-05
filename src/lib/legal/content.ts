@@ -32,7 +32,7 @@ If you use the Service on behalf of an organization, you represent that you are 
 
 You must be at least 16 years old to use the Service, or at least 13 with the verifiable consent of a parent or legal guardian where your local law permits use at that age. If you are below the age of majority where you live, you may use the Service only with the involvement and consent of a parent or legal guardian who agrees to these Terms on your behalf.
 
-Separately from this contractual minimum, data-protection law may require parental or guardian consent before we process a minor's personal data — for example, under GDPR Article 8, where we rely on consent for an EU child below the applicable age (16 in Germany, where our servers are located). Our handling of children's data, including any parental-consent requirements, is described in our Privacy Policy.
+Separately from this contractual minimum, data-protection law may require parental or guardian consent before we process a minor's personal data — for example, under GDPR Article 8, where we rely on consent for an EU child below the applicable age (which ranges from 13 to 16 depending on the EU member state). Our handling of children's data, including any parental-consent requirements, is described in our Privacy Policy.
 
 The Service is not directed to children below the applicable minimum age, and we do not knowingly collect their personal data.
 
@@ -182,7 +182,7 @@ This does not require you to indemnify us for our own negligence or misconduct, 
 How we collect, use, and share personal data is described in our Privacy Policy. In summary:
 
 - Your prompts and score content are transmitted to Anthropic, PBC to generate AI Outputs, under appropriate transfer safeguards (such as EU Standard Contractual Clauses) where applicable, as described in our Privacy Policy. Anthropic does not train on this content.
-- Other service providers also process personal data on our behalf, including payment processing (Stripe), transactional email delivery (Brevo), hosting (Hetzner, in the EU), CDN, security, and bot mitigation (Cloudflare), encrypted backups (Cloudflare R2), and optional Google sign-in if you choose it. Some of these involve transfers outside your country, including to the US, under appropriate safeguards such as EU Standard Contractual Clauses.
+- Other service providers also process personal data on our behalf, including payment processing (Stripe), transactional email delivery (Brevo), hosting (Hetzner, in the US), CDN, security, and bot mitigation (Cloudflare), encrypted backups (Cloudflare R2), and optional Google sign-in if you choose it. Some of these involve transfers outside your country, including to the US, under appropriate safeguards such as EU Standard Contractual Clauses.
 - We do not sell personal data, and we do not share it for cross-context behavioral advertising (as those terms are defined under the CCPA/CPRA).
 
 The full list of subprocessors, the international-transfer mechanisms, retention periods, the lawful bases for our processing, and your rights are set out in our Privacy Policy. Please read it to understand our data practices.
@@ -235,7 +235,7 @@ The Service is operated by a small independent operator, **{{LEGAL_ENTITY}}**, a
 
 We have **not** appointed a Data Protection Officer; a formal DPO is not required for a service of this kind. For any privacy question, please use the contact above.
 
-Our primary servers are hosted in **Germany (EU)**, so the EU General Data Protection Regulation (GDPR) applies. Some of our service providers process data in the United States; see "International Transfers" below.
+Our primary servers are hosted in the **United States**. Because we offer the Service to people in the EU/EEA and the UK and process their personal data, the EU General Data Protection Regulation (GDPR) and the UK GDPR can still apply to that processing. Several of our service providers also process data in the United States; see "International Transfers" below.
 
 ## You Can Use sheet-llm Anonymously
 
@@ -355,13 +355,13 @@ We use the following service providers (subprocessors) to run the Service. We **
 | **Cloudflare** | CDN, WAF, and bot mitigation (Turnstile) | IP address and request metadata | United States / global |
 | **Cloudflare R2** | Encrypted database backups (via Litestream) | Encrypted backups of stored data | Cloudflare-managed (automatic region; may be outside the EU) |
 | **Google** | OAuth sign-in — **only if you choose it** | Your Google account identity for authentication | United States |
-| **Hetzner** | Hosting | All stored Service data | Germany (EU) |
+| **Hetzner** | Hosting | All stored Service data | United States |
 
 **Stripe as an independent controller:** For payment processing and payment-fraud prevention, Stripe acts as its own controller and handles your card/payment data under [Stripe's privacy policy](https://stripe.com/privacy). sheet-llm only receives and stores Stripe identifiers and our derived billing records.
 
 ## International Transfers
 
-Our primary hosting is in the **EU** (Hetzner, Germany). Encrypted backups are stored on **Cloudflare R2** in a Cloudflare-managed location (the bucket region is set to automatic), which may be outside the EU. Several providers process data in the **United States** — namely **Anthropic, Stripe, Cloudflare, and Google** (and Cloudflare R2 if its region is outside the EU).
+Our primary hosting is in the **United States** (Hetzner). Encrypted backups are stored on **Cloudflare R2** in a Cloudflare-managed location (the bucket region is set to automatic), which may be outside the EU. Several providers process data in the **United States** — namely **Anthropic, Stripe, Cloudflare, Google, and our host Hetzner** (and Cloudflare R2 if its region is outside the EU).
 
 For these transfers we rely on appropriate safeguards under Chapter V of the GDPR — primarily the **Standard Contractual Clauses (SCCs)** in each provider's data-processing agreement, supplemented by the EU–U.S. Data Privacy Framework where the provider is certified:
 

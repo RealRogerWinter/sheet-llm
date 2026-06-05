@@ -1,0 +1,20 @@
+.pill {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--graphite);
+  background: var(--paper);
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* Out of free requests — draw attention. */
+.empty {
+  color: var(--signal, #b3261e);
+  border-color: currentColor;
+}

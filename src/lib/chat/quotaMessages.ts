@@ -94,11 +94,11 @@ export function quotaErrorBody(result: QuotaDenial): QuotaErrorBody {
       return {
         code: 'quota_exceeded',
         httpStatus: 429,
-        message: `You've used your free requests for today. Create a free account to get more: ${SIGNUP_HREF}.${resetLine}`,
+        message: `You've used your free requests for today. Sign up to get another 5 free requests, or switch to Pro for extra usage: ${SIGNUP_HREF}.${resetLine}`,
         cta: {
           kind: 'signup',
           title: "You've used your free requests for today",
-          body: 'Anonymous demos get a few requests every 24 hours. Create a free account to get more — your current work in this browser carries over.',
+          body: 'Sign up to get another 5 free requests. Or switch to Pro for extra usage.',
           primaryLabel: 'Create a free account',
           primaryHref: SIGNUP_HREF,
           secondaryLabel: 'Log in',

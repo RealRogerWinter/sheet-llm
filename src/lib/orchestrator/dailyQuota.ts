@@ -293,6 +293,74 @@ export function evaluateRequestQuota(user: QuotaInput['user'], tier: GenerationT
   return checkDailyQuota({ user, tier, request, risk: assessClientRisk(request) })
 }
 
+// ---------------------------------------------------------------------------
+// Read-only peek (NO increment) — powers the usage counter UI + the in-chat note.
+// ---------------------------------------------------------------------------
+export type QuotaPeek =
+  | { enabled: false }
+  | { enabled: true; tier: GenerationTier; bypass: true } // pro / untrusted-ip
+  | { enabled: true; tier: GenerationTier; needsSignIn: true } // risky anon
+  | {
+      enabled: true
+      tier: GenerationTier
+      isAnon: boolean
+      limit: number
+      used: number
+      remaining: number
+      resetsInHours: number
+    }
+
+/**
+ * Read the CURRENT daily-quota standing for a request WITHOUT consuming a slot —
+ * the read-only sibling of {@link checkDailyQuota}. Powers GET /api/usage (the
+ * header "uses left" counter + the in-chat note). Reads the same row the gate
+ * would, but never inserts or increments. Returns {enabled:false} when the layer
+ * is off (counter hidden) and FAILS to the same conservative {enabled:false} on
+ * any error — a usage read must never break the page (and never block chat).
+ */
+export function peekDailyQuota(
+  user: QuotaInput['user'],
+  tier: GenerationTier,
+  request: Request,
+): QuotaPeek {
+  if (!isDailyQuotaEnabled()) return { enabled: false }
+  try {
+    const db = getDb()
+    const cls = classifyQuota({ user, tier, request, risk: assessClientRisk(request) }, db)
+    if (cls.kind === 'bypass') return { enabled: true, tier, bypass: true }
+    if (cls.kind === 'needsSignIn') return { enabled: true, tier, needsSignIn: true }
+    const now = Math.floor(Date.now() / 1000)
+    const win = windowSec()
+    const row = db.select().from(requestQuota).where(eq(requestQuota.quotaKey, cls.key)).get()
+    // No row, or the fixed window has rolled over → a full allowance is available.
+    if (!row || now >= row.windowStart + win) {
+      return {
+        enabled: true,
+        tier,
+        isAnon: cls.isAnon,
+        limit: cls.limit,
+        used: 0,
+        remaining: cls.limit,
+        resetsInHours: Math.max(1, Math.round(win / 3600)),
+      }
+    }
+    const used = Math.min(row.count, cls.limit)
+    const { resetsInHours } = resetInfo(row.windowStart, now)
+    return {
+      enabled: true,
+      tier,
+      isAnon: cls.isAnon,
+      limit: cls.limit,
+      used,
+      remaining: Math.max(0, cls.limit - used),
+      resetsInHours,
+    }
+  } catch (e) {
+    logIpRisk('quota_peek_failed', { message: e instanceof Error ? e.message : String(e) }, true)
+    return { enabled: false }
+  }
+}
+
 /** Test-only: reset the approximate-row-count cache. */
 export function __resetQuotaStateForTesting(): void {
   cachedRowCount = 0

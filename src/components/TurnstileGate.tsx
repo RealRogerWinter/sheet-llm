@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import styles from './TurnstileGate.module.css'
 
 /**
  * Renders a Cloudflare Turnstile widget and exchanges its token for a
@@ -11,6 +12,16 @@ import { useEffect, useRef, useState } from 'react'
  * Renders nothing when `siteKey` is empty (Turnstile not configured), so the
  * app is unchanged on non-Turnstile deploys. The site key is public (it ships
  * to the browser by design); the secret key stays server-side.
+ *
+ * Presentation: the widget lives in a fixed full-screen overlay that always
+ * CENTERS it. While `appearance:'interaction-only'` keeps the widget invisible
+ * during a managed auto-pass, nothing shows. When Cloudflare actually needs an
+ * interactive challenge it fires `before-interactive-callback` → we dim the rest
+ * of the page behind a backdrop and frame the (centered) challenge, then clear
+ * the backdrop on success / `after-interactive-callback` / error. The widget box
+ * itself is always interactable, so even if those callbacks don't fire the
+ * challenge still appears centered and solvable (just without the dim) — a safe
+ * degradation, never a trapped or unclickable page.
  *
  * This widget is **visible and self-diagnosing**: the script-load and render
  * failure modes are surfaced (console + a small on-screen note) instead of
@@ -41,6 +52,10 @@ export default function TurnstileGate() {
   const [siteKey, setSiteKey] = useState<string>('')
   const [status, setStatus] = useState<GateStatus>('loading')
   const [detail, setDetail] = useState<string>('')
+  // True only while Cloudflare is showing an INTERACTIVE challenge the user must
+  // complete — drives the page-dimming backdrop. Stays false during a silent
+  // managed auto-pass (the common case), so the page is never dimmed needlessly.
+  const [challengeActive, setChallengeActive] = useState(false)
 
   // The root layout is statically prerendered, so the site key can't come from
   // a server-rendered prop (it would freeze the empty build-time env). Fetch the
@@ -64,14 +79,20 @@ export default function TurnstileGate() {
     if (!siteKey) return
     let cancelled = false
 
+    const setActive = (active: boolean) => {
+      if (!cancelled) setChallengeActive(active)
+    }
+
     const fail = (msg: string) => {
       if (cancelled) return
       console.error('[turnstile] ' + msg)
       setStatus('error')
       setDetail(msg)
+      setChallengeActive(false)
     }
 
     async function clear(token: string) {
+      setActive(false)
       try {
         const res = await fetch('/api/turnstile', {
           method: 'POST',
@@ -103,13 +124,20 @@ export default function TurnstileGate() {
           // challenge; a managed auto-pass leaves nothing lingering on screen.
           appearance: 'interaction-only',
           callback: (token: string) => clear(token),
+          // Fired right before / after the widget shows an interactive
+          // challenge — the precise signal for when to dim the page.
+          'before-interactive-callback': () => setActive(true),
+          'after-interactive-callback': () => setActive(false),
           'error-callback': (code?: string) => {
             // Surfaces e.g. 110200 (domain not allowed) / 110100 (invalid sitekey)
             fail(`challenge error${code ? ' ' + code : ''}`)
             return true
           },
-          'timeout-callback': () =>
-            window.turnstile?.reset(widgetIdRef.current ?? undefined),
+          'expired-callback': () => setActive(false),
+          'timeout-callback': () => {
+            setActive(false)
+            window.turnstile?.reset(widgetIdRef.current ?? undefined)
+          },
         })
         if (!cancelled) setStatus((s) => (s === 'cleared' ? s : 'ready'))
       } catch (e) {
@@ -157,30 +185,31 @@ export default function TurnstileGate() {
 
   if (!siteKey) return null
 
-  // Visible, bottom-right. Cloudflare draws nothing in the container when a
-  // managed challenge auto-passes; if it needs interaction the user can see and
-  // complete it; if it fails to load we show why.
+  // Show the framed box (and capture clicks) when a challenge is interactive OR
+  // when we need to surface a load/verify error; dim the page only for an active
+  // challenge. The widget container is always mounted + interactable so the
+  // challenge is solvable even if the interactive callbacks never fire.
+  const showBox = challengeActive || status === 'error'
   return (
-    <div style={{ position: 'fixed', bottom: 12, right: 12, zIndex: 2147483646 }}>
-      <div ref={containerRef} />
-      {status === 'error' && (
-        <div
-          role="status"
-          style={{
-            marginTop: 6,
-            maxWidth: 300,
-            padding: '6px 8px',
-            fontSize: 12,
-            lineHeight: 1.3,
-            color: '#7a1f1f',
-            background: '#fde8e8',
-            border: '1px solid #f5b5b5',
-            borderRadius: 6,
-          }}
-        >
-          Bot check failed to load{detail ? `: ${detail}` : ''}.
-        </div>
-      )}
+    <div
+      className={styles.overlay}
+      data-active={challengeActive ? 'true' : undefined}
+      data-show={showBox ? 'true' : undefined}
+    >
+      <div className={styles.backdrop} aria-hidden="true" />
+      <div
+        className={styles.box}
+        role={challengeActive ? 'dialog' : undefined}
+        aria-modal={challengeActive ? true : undefined}
+        aria-label={challengeActive ? 'Verification required' : undefined}
+      >
+        <div ref={containerRef} />
+        {status === 'error' && (
+          <div role="status" className={styles.error}>
+            Bot check failed to load{detail ? `: ${detail}` : ''}.
+          </div>
+        )}
+      </div>
     </div>
   )
 }
