@@ -4,7 +4,7 @@ subsystem: ops
 audience: [contributor, ai-agent]
 status: current
 last_verified: 2026-06-04
-verified_against: 5509a03
+verified_against: 8146bec
 source_paths:
   - .circleci/config.yml
   - deploy/deploy.sh
@@ -26,13 +26,15 @@ pull-based deploy to the VPS. This guide documents the pipeline
 ## Pipeline shape
 
 ```
-install ─┬─ lint        (report-only)
+install ─┬─ lint           (report-only)
          ├─ typecheck
-         ├─ test         (parallelism 4, timing-split)
-         └─ checks       (abcjs spike · eval:mock · eval:visual[report-only] · schema-drift)
-                          │  (all of typecheck+test+checks must pass, main only)
+         ├─ test            (parallelism 4, timing-split)
+         ├─ checks          (abcjs spike · eval:mock · eval:visual[report-only] · schema-drift)
+         └─ security_scan   (Trivy: deps + Dockerfile + secrets; fail on fixable CRITICAL)
+                          │  (typecheck+test+checks+security_scan must pass, main only)
                           ▼
                     build_and_push ──▶ hold (manual approval) ──▶ deploy
+              (build_and_push also Trivy-scans the built image; fails on CRITICAL)
 ```
 
 ### `install`
@@ -56,13 +58,22 @@ Corepack-pins `pnpm`, restores the pnpm store + `.next/cache`, installs with
   (**report-only**: abcjs/jsdom renders are environment-specific in CI), and a
   **schema-drift guard** that runs `db:generate` and fails if it produces a
   diff — i.e. the committed Drizzle migrations must match the schema.
+- **`security_scan`** — **Trivy**, blocking. Scans the dependency tree
+  (`pnpm-lock.yaml`), the `Dockerfile`, and the working tree for secrets, and
+  **fails the build on a fixable CRITICAL** (`--severity CRITICAL
+  --ignore-unfixed`); a full HIGH+CRITICAL ledger is stored as an artifact.
+  Unfixed/won't-fix CVEs and the intentional root-then-`gosu` Dockerfile pattern
+  are accepted in [`.trivyignore`](../../.trivyignore). The base image is kept
+  patched via `apt-get upgrade` in the runtime stage, so known-fixed OS CVEs
+  (e.g. `libgnutls30`) don't reach the gate.
 
 ### `build_and_push` (main only)
-Builds the multi-stage `Dockerfile` and pushes to
-`ghcr.io/realrogerwinter/sheet-llm` with `setup_remote_docker` and
-`--password-stdin`, using a **dedicated `write:packages`-only** token in the
-restricted `ghcr-push` context (never a broad admin PAT). It records the
-resulting **image digest** to the workspace for the deploy job. The image is
+Builds the multi-stage `Dockerfile`, **Trivy-scans the built image** for
+OS/library CVEs (failing — and *not* pushing — on a fixable CRITICAL), then
+pushes to `ghcr.io/realrogerwinter/sheet-llm` with `--password-stdin`, using a
+**dedicated `write:packages`-only** token in the restricted `ghcr-push` context
+(never a broad admin PAT). It records the resulting **image digest** to the
+workspace for the deploy job. The image is
 public, so the VPS pulls anonymously — no registry credential lives on the
 server.
 

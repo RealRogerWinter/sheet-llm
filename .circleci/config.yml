@@ -1,8 +1,10 @@
 version: 2.1
 
 # CI/CD for sheet-llm:
-#   install -> [lint, typecheck, test(parallel), checks] -> build & push image to
-#   GHCR (public) -> MANUAL APPROVAL -> pull-based deploy to the VPS over SSH.
+#   install -> [lint, typecheck, test(parallel), checks, security_scan] -> build,
+#   scan & push image to GHCR (public) -> MANUAL APPROVAL -> pull-based deploy to
+#   the VPS over SSH. Trivy fails the build on a fixable CRITICAL CVE (deps +
+#   Dockerfile + secrets per-branch; OS/library CVEs in the built image on main).
 #
 # Pre-existing-on-main, so REPORT-ONLY (not blocking) until fixed upstream:
 #   - `pnpm lint` has one ESLint error (src/components/editor/useShiftLetterPopover.ts)
@@ -109,6 +111,37 @@ jobs:
             pnpm db:generate
             git diff --exit-code drizzle || { echo "Schema drift — commit the generated migration."; exit 1; }
 
+  # Trivy CVE gate. Runs on every branch in parallel with the other checks and
+  # scans the dependency tree (pnpm-lock.yaml), the Dockerfile, and the working
+  # tree for secrets. The blocking step fails on a *fixable* CRITICAL only
+  # (--ignore-unfixed); accepted/won't-fix findings live in .trivyignore.
+  security_scan:
+    executor: node
+    steps:
+      # Fresh checkout (NOT the install workspace): scan the source + lockfile +
+      # Dockerfile, never node_modules — the lockfile is authoritative for deps and
+      # crawling node_modules only adds secret-scan noise and runtime.
+      - checkout
+      - run:
+          name: Install Trivy (pinned)
+          command: |
+            curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/v0.71.0/contrib/install.sh \
+              | sudo sh -s -- -b /usr/local/bin v0.71.0
+            trivy --version
+      - run:
+          name: "Trivy ledger (deps + Dockerfile + secrets, HIGH+CRITICAL — informational artifact)"
+          command: |
+            mkdir -p trivy-report
+            # Full HIGH+CRITICAL report for the artifact; this step never fails the build.
+            trivy fs --scanners vuln,misconfig,secret --severity HIGH,CRITICAL \
+              --no-progress --format table . | tee trivy-report/fs-scan.txt
+      - run:
+          name: "Trivy gate — FAIL on CRITICAL (fixable only: --ignore-unfixed + .trivyignore)"
+          command: |
+            trivy fs --scanners vuln,misconfig,secret --severity CRITICAL \
+              --ignore-unfixed --exit-code 1 --no-progress .
+      - store_artifacts: { path: trivy-report }
+
   build_and_push:
     machine:
       image: ubuntu-2404:current
@@ -116,12 +149,18 @@ jobs:
     steps:
       - checkout
       - run:
-          name: Build + push image to GHCR (public)
+          name: Build + scan + push image to GHCR (public)
           command: |
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
             IMG=ghcr.io/realrogerwinter/sheet-llm
             export DOCKER_BUILDKIT=1
             docker build -t "$IMG:$CIRCLE_SHA1" -t "$IMG:latest" .
+            # Scan the freshly built image for OS/library CVEs; FAIL (and do NOT
+            # push) on a fixable CRITICAL. Unfixed/accepted CVEs are excluded.
+            curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/v0.71.0/contrib/install.sh \
+              | sudo sh -s -- -b /usr/local/bin v0.71.0
+            trivy image --severity CRITICAL --ignore-unfixed --exit-code 1 \
+              --no-progress "$IMG:$CIRCLE_SHA1"
             docker push "$IMG:$CIRCLE_SHA1"
             docker push "$IMG:latest"
             mkdir -p /tmp/deploy
@@ -154,9 +193,10 @@ workflows:
       - typecheck: { requires: [install] }
       - test: { requires: [install] }
       - checks: { requires: [install] }
+      - security_scan
       - build_and_push:
           context: ghcr-push
-          requires: [typecheck, test, checks]
+          requires: [typecheck, test, checks, security_scan]
           filters: { branches: { only: main } }
       - hold:
           type: approval
