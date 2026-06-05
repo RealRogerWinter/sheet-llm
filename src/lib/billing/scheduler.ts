@@ -24,9 +24,12 @@ import { pruneStripeEvents, reconcileStripeEvents } from './webhookProcess'
  *  - reapStaleCheckoutBuckets — evict cold keys from the checkout rate-limit map.
  *
  * Each job is independently try/caught: one failure never blocks the others or
- * crashes the process. The flags are RE-READ every tick, so a runtime flip is
- * honored on the next sweep. A self-host instance with neither subsystem enabled
- * starts NO timer and pays nothing.
+ * crashes the process. Each tick RE-READS the flags, so a subsystem turned OFF at
+ * runtime stops being swept on the next tick. The scheduler itself only starts at
+ * boot, and only if at least one subsystem is enabled then — so newly ENABLING
+ * billing takes effect on the next process start (on the container deploy model an
+ * env change IS a restart, which re-runs the boot start). A self-host instance
+ * with neither subsystem enabled starts NO timer and pays nothing.
  */
 
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000 // 5 min
@@ -46,7 +49,8 @@ export interface BillingJanitorReport {
 /**
  * Run every ENABLED billing janitor ONCE. Free of any timer — invoked by the
  * boot sweep, by each interval tick, and directly by the unit tests. Re-reads the
- * flags so it adapts to a runtime flip, and isolates each job so it never throws.
+ * flags each call, so a subsystem disabled at runtime is skipped on the next
+ * sweep, and isolates each job so it never throws.
  */
 export function runBillingJanitorsOnce(): BillingJanitorReport {
   const report: BillingJanitorReport = {

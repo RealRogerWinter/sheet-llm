@@ -148,36 +148,35 @@ describe('reconcileStripeEvents (auto-heal)', () => {
   })
 })
 
-describe('processStripeEvent — coupon / promo discount tolerance (PR-13)', () => {
+describe('processStripeEvent — coupon / promo handling (PR-13)', () => {
   let db: Db
   beforeEach(() => {
     db = makeTestDb()
     makeUser(db, 'u1')
   })
 
-  it('grants the FULL pack when a coupon reduced the subtotal (subtotal + discount = pack price)', () => {
-    // pack_20 = $20 (2000¢); a 25%-off coupon → subtotal 1500, discount 500.
-    const r = processStripeEvent(makeEvent({ amountSubtotal: 1500, amountDiscount: 500 }), db)
+  it('grants the FULL pack on a couponed order — amount_subtotal is the PRE-discount list price', () => {
+    // Stripe: amount_subtotal = list total BEFORE discounts (== the pack price); a
+    // $5 coupon on pack_20 sends subtotal 2000, discount 500, total 1500. Credits
+    // are the full pack — the discount is the operator's cost, never fewer credits.
+    const r = processStripeEvent(makeEvent({ amountSubtotal: 2000, amountDiscount: 500, amountTotal: 1500 }), db)
     expect(r).toEqual({ status: 'processed', userId: 'u1', creditsGranted: 2200 })
-    expect(getWallet('u1', db).balance).toBe(2200) // full pack — the discount is our marketing cost
+    expect(getWallet('u1', db).balance).toBe(2200)
   })
 
-  it('still REFUSES a tampered subtotal with NO discount (subtotal + 0 != price)', () => {
-    const r = processStripeEvent(makeEvent({ amountSubtotal: 500, amountDiscount: 0 }), db)
+  it('REFUSES a tampered subtotal below the pack price', () => {
+    const r = processStripeEvent(makeEvent({ amountSubtotal: 500 }), db)
     expect(r.status).toBe('failed')
     if (r.status === 'failed') expect(r.reason).toMatch(/amount_mismatch/)
     expect(getWallet('u1', db).balance).toBe(0)
   })
 
-  it('REFUSES when subtotal + discount OVERSHOOTS the pack price (forged discount)', () => {
-    const r = processStripeEvent(makeEvent({ amountSubtotal: 2000, amountDiscount: 500 }), db)
+  it('REFUSES a zero-amount session even if the subtotal matches (100%-off defense-in-depth)', () => {
+    // payment_status is normally 'no_payment_required' for a $0 session; assert
+    // amount_total > 0 too so a 'paid' $0 event can never grant a free pack.
+    const r = processStripeEvent(makeEvent({ amountSubtotal: 2000, amountDiscount: 2000, amountTotal: 0 }), db)
     expect(r.status).toBe('failed')
-    expect(getWallet('u1', db).balance).toBe(0)
-  })
-
-  it('REFUSES a negative discount', () => {
-    const r = processStripeEvent(makeEvent({ amountSubtotal: 2500, amountDiscount: -500 }), db)
-    expect(r.status).toBe('failed')
+    if (r.status === 'failed') expect(r.reason).toMatch(/zero_amount/)
     expect(getWallet('u1', db).balance).toBe(0)
   })
 })

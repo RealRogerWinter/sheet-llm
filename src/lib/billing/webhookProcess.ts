@@ -48,24 +48,24 @@ export function processStripeEvent(event: Stripe.Event, db: Db = getDb()): Proce
   const pack = packId ? getPack(packId) : undefined
   if (!pack) return { status: 'failed', reason: `unknown_pack:${packId ?? 'none'}`, userId }
 
-  // Verify what was actually PAID matches the pack. Stripe Tax is exclusive, so
-  // our price is the PRE-TAX subtotal; tax sits in amount_total. A coupon / promo
-  // code (only if the operator enables one in the dashboard — checkout does NOT
-  // set allow_promotion_codes today) REDUCES amount_subtotal and records the cut
-  // in total_details.amount_discount, so reconstruct the pre-discount subtotal and
-  // check THAT against the pack price. Credits are always the FULL pack — a
-  // discount is the operator's marketing cost, not fewer credits. NEVER trust
-  // metadata.credits — re-derive from the pack.
+  // Verify what was actually PAID matches the pack. `amount_subtotal` is the list
+  // total BEFORE discounts or taxes (Stripe SDK, Checkout.Session: "Total of all
+  // items before discounts or taxes are applied"), so it equals the pack price
+  // REGARDLESS of any operator coupon — a coupon only reduces `amount_total`. A
+  // strict `amount_subtotal === pack price` therefore already handles promo codes
+  // correctly (credits are always the full pack; the discount is the operator's
+  // marketing cost). We additionally require a POSITIVE amount actually due:
+  // defense-in-depth against a 100%-off coupon (which Stripe normally marks
+  // `no_payment_required`, already rejected by the payment_status gate above, not
+  // `paid`). Stripe Tax is exclusive, so tax also sits only in amount_total. NEVER
+  // trust metadata.credits — re-derive from the pack.
   const currency = (session.currency ?? '').toLowerCase()
   if (currency !== 'usd') return { status: 'failed', reason: `bad_currency:${currency}`, userId }
-  const subtotal = session.amount_subtotal
-  const discount = session.total_details?.amount_discount ?? 0
-  if (subtotal == null || discount < 0 || subtotal + discount !== pack.priceUsdCents) {
-    return {
-      status: 'failed',
-      reason: `amount_mismatch:${subtotal}+${discount}!=${pack.priceUsdCents}`,
-      userId,
-    }
+  if (session.amount_subtotal == null || session.amount_subtotal !== pack.priceUsdCents) {
+    return { status: 'failed', reason: `amount_mismatch:${session.amount_subtotal}!=${pack.priceUsdCents}`, userId }
+  }
+  if ((session.amount_total ?? 0) <= 0) {
+    return { status: 'failed', reason: `zero_amount:${session.amount_total}`, userId }
   }
 
   // Idempotent grant. external_ref = the checkout-session id: stable across event
