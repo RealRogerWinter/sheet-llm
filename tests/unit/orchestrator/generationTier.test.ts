@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   resolveGenerationTier,
   isTierOverrideAllowed,
+  isAdvancedComposerEnabled,
 } from '@/lib/orchestrator/generationTier'
 
 // PR-0 (paywall integrity): `debug.generationTier` is a CLIENT-SUPPLIED field
@@ -94,5 +95,30 @@ describe('resolveGenerationTier — client override gating', () => {
     vi.stubEnv('SL_FORCE_FREE_TIER', '')
     vi.stubEnv('SL_GENERATION_TIER', '')
     await expect(resolveGenerationTier(undefined, 'pro')).resolves.toBe('free')
+  })
+})
+
+describe('isAdvancedComposerEnabled (PR-8 — Opus routing operator flag)', () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  it('is OFF by default (dark) so the toggle is ignored until launch', () => {
+    vi.stubEnv('SL_ADVANCED_COMPOSER', '')
+    expect(isAdvancedComposerEnabled()).toBe(false)
+  })
+
+  it('honors the 1 / true opt-in', () => {
+    vi.stubEnv('SL_ADVANCED_COMPOSER', '1')
+    expect(isAdvancedComposerEnabled()).toBe(true)
+    vi.stubEnv('SL_ADVANCED_COMPOSER', 'true')
+    expect(isAdvancedComposerEnabled()).toBe(true)
+    vi.stubEnv('SL_ADVANCED_COMPOSER', 'TRUE')
+    expect(isAdvancedComposerEnabled()).toBe(true)
+  })
+
+  it('stays OFF for any other value', () => {
+    for (const v of ['0', 'false', 'yes', 'on', 'enabled']) {
+      vi.stubEnv('SL_ADVANCED_COMPOSER', v)
+      expect(isAdvancedComposerEnabled()).toBe(false)
+    }
   })
 })

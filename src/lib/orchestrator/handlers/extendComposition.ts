@@ -10,6 +10,7 @@ import { detectCadenceAtFinalBarline } from '@/lib/music/cadenceDetect'
 import { createSpanId } from '@/lib/music/spans'
 import type { Classification, OrchestratorResult } from '../types'
 import { selectProvider } from '@/lib/providers/select'
+import { resolveModelClass } from '@/lib/providers/modelClass'
 import { callWithFailover } from '@/lib/providers/callWithFailover'
 import { ProviderSchemaError, type ProviderToolResult } from '@/lib/providers/types'
 
@@ -58,6 +59,11 @@ export interface RunExtendCompositionInput {
   /** Per-call output ceiling. Defaults to MAX_TOKENS. The sectional
    *  generator (M25) raises this so a grand-staff section has headroom. */
   maxTokens?: number
+  /** PR-8: route this extend to Opus (`large` tier). Set only for a resolved
+   *  Advanced paid Pro turn on the STANDALONE extend path — the sectional
+   *  generator's internal extends deliberately leave this unset (Sonnet-tuned).
+   *  See modelClass.ts. */
+  advancedComposer?: boolean
 }
 
 const EmitAppendedBarsSchema = z.object({
@@ -374,7 +380,13 @@ export async function runExtendComposition(
     )
   }
 
-  const selected = selectProvider('medium', input.chatId)
+  // PR-8: Standard extends on the medium tier (Sonnet); an Advanced paid Pro
+  // turn routes a standalone extend to Opus (`large`). The sectional generator's
+  // internal extends never set `advancedComposer`, so they stay Sonnet.
+  const selected = selectProvider(
+    resolveModelClass({ advancedComposer: input.advancedComposer, callType: 'extend' }),
+    input.chatId,
+  )
 
   // Validation-retry loop (M3.5-PR-5b): when the LLM emits measures
   // whose durations don't sum to the meter, validateScore throws —

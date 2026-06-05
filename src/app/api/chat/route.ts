@@ -72,6 +72,7 @@ import {
   resolveGenerationTier,
   policyFor,
   isTierOverrideAllowed,
+  isAdvancedComposerEnabled,
   BOUNDED_EMIT_CEILING,
 } from '@/lib/orchestrator/generationTier'
 import type { GenerationTier } from '@/lib/orchestrator/generationTier'
@@ -125,6 +126,10 @@ const ChatRequestSchema = z.object({
       endMeasureIdx: z.number().int().min(0).max(100000),
     })
     .optional(),
+  // PR-8: the Advanced Composer (Opus) toggle. Honored ONLY for an authenticated
+  // paid Pro generation and behind SL_ADVANCED_COMPOSER — it only ever raises the
+  // user's OWN cost (cost-plus on Opus), never a free unlock; see handleChat.
+  advancedComposer: z.boolean().optional(),
   debug: DebugOverridesSchema.optional(),
 })
 
@@ -613,11 +618,23 @@ async function handleChat(
   // request self-heals via reapExpiredHolds.
   const paidGeneration =
     isPaidGenerationEnabled() && authenticated && generationTier === 'pro' && !freePiece
+  // PR-8 Advanced Composer (Opus). The client toggle is honored ONLY for a paid
+  // Pro generation — so it is forced OFF for the free tier AND the free piece (we
+  // never eat a free Opus run) — and behind SL_ADVANCED_COMPOSER. It only raises
+  // the user's OWN cost (cost-plus on the higher Opus metered cost), so there is
+  // no free-unlock abuse vector; the hold below is sized for Opus so an Advanced
+  // settle never overdraws. Resolved here and threaded as the boolean into the
+  // orchestrator, never the raw client field.
+  const advancedComposer =
+    parsed.advancedComposer === true && isAdvancedComposerEnabled() && paidGeneration
   if (paidGeneration) {
     try {
       ensureWallet(userId)
       const maxOutputTokens = policyFor('pro').maxOutputTokens
-      const minToStart = worstCaseHoldCredits(maxOutputTokens)
+      // PR-8: an Advanced turn routes to Opus (~1.67× Sonnet) and bypasses the
+      // sectional stream, so size the start-gate floor + hold for the Opus
+      // non-streaming bound. A Standard turn keeps the Sonnet bound.
+      const minToStart = worstCaseHoldCredits(maxOutputTokens, advancedComposer)
       const available = getWallet(userId).available
       if (available < minToStart) {
         // Can't even cover the non-streaming worst case — fail closed before run.
@@ -628,7 +645,7 @@ async function handleChat(
           chatId,
         )
       }
-      holdCredits = generationHoldCredits(available, maxOutputTokens)
+      holdCredits = generationHoldCredits(available, maxOutputTokens, advancedComposer)
       const hold = placeHold({
         userId,
         requestId,
@@ -693,6 +710,7 @@ async function handleChat(
         ...(parsed.targetRegion ? { targetRegion: parsed.targetRegion } : {}),
         deadlineAt,
         generationTier,
+        advancedComposer,
       })
     }
   } catch (e) {

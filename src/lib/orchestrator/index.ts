@@ -263,7 +263,10 @@ async function dispatch(
       // pipeline when enabled, so large pieces never truncate. With an
       // editedScore present (rare on this path — dispatch handles edits)
       // fall back to the single-shot handler, which folds the prior score in.
-      if (isSectionalGenEnabled() && !input.editedScore) {
+      // PR-8: an Advanced turn ALSO bypasses the sectional stream — it takes a
+      // single Opus pass via runGenerateComplex (the sectional seed/extend loop
+      // stays Sonnet-tuned), bounded to one render_score emit.
+      if (isSectionalGenEnabled() && !input.editedScore && !input.advancedComposer) {
         return runGenerateSectionalStream({
           classification,
           chatId: input.chatId ?? 'anonymous',
@@ -277,6 +280,7 @@ async function dispatch(
         chatId: input.chatId ?? 'anonymous',
         userText: input.userText,
         modelOverride: input.modelOverride,
+        advancedComposer: input.advancedComposer,
       })
 
     case 'compose':
@@ -286,6 +290,7 @@ async function dispatch(
         userText: input.userText,
         editedScore: input.editedScore,
         modelOverride: input.modelOverride,
+        advancedComposer: input.advancedComposer,
       })
 
     case 'converse': {
@@ -456,6 +461,8 @@ async function runDispatchedHandler(
         ...(input.chatId !== undefined ? { chatId: input.chatId } : {}),
         ...(input.modelOverride !== undefined ? { modelOverride: input.modelOverride } : {}),
         ...(input.apiKeyOverride !== undefined ? { apiKeyOverride: input.apiKeyOverride } : {}),
+        // PR-8: a standalone extend honors Advanced/Opus (the sectional loop does not).
+        ...(input.advancedComposer ? { advancedComposer: true } : {}),
       })
       if (targetBars < args.targetBars) {
         result.warnings = [
@@ -554,6 +561,8 @@ async function runDispatchedHandler(
         userText: input.userText,
         editedScore: input.editedScore,
         ...(input.modelOverride !== undefined ? { modelOverride: input.modelOverride } : {}),
+        // PR-8: a whole-score regenerate honors Advanced/Opus.
+        ...(input.advancedComposer ? { advancedComposer: true } : {}),
       })
       void args
       return finalizeDispatchResult(

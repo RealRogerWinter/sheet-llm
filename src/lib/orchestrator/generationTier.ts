@@ -104,6 +104,23 @@ export function isEntitlementsDbEnabled(): boolean {
 }
 
 /**
+ * Is "Advanced Composer Mode" (Opus routing) enabled for this instance?
+ * (PR-8) When `SL_ADVANCED_COMPOSER` is set, an authenticated Pro user's
+ * per-request Advanced toggle is honored — the heavy single-pass
+ * compositional calls (generateComplex / compose / regenerate_all / standalone
+ * extend) route to the Opus (`large`) tier and are debited cost-plus on the
+ * (higher) Opus metered cost. DARK by default: the toggle is a client field
+ * that only ever RAISES the user's own spend (no free-unlock), but it is
+ * forced OFF for the free tier + the free piece and gated behind this flag so
+ * the feature stays dark until launch. Read fresh; no redeploy. Off → the
+ * toggle is ignored and every turn stays on Sonnet.
+ */
+export function isAdvancedComposerEnabled(): boolean {
+  const v = process.env.SL_ADVANCED_COMPOSER
+  return v === '1' || v?.toLowerCase() === 'true'
+}
+
+/**
  * Is the per-request debug tier override (`debug.generationTier`) allowed to
  * take effect? It is a CLIENT-SUPPLIED field (parsed from the chat POST body),
  * so honoring it in production would be a paywall bypass: any caller could send

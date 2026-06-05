@@ -268,4 +268,63 @@ describe('/api/chat credit paywall (PR-7b-1)', () => {
       expect(getWallet(TEST_USER_ID).balance).toBe(1000) // untouched
     })
   })
+
+  // PR-8 — the route sizes the hold/floor for Opus on an Advanced turn. The Opus
+  // floor (non-streaming only) sits just BELOW the Sonnet floor (which must cover
+  // the pricier 12-section sectional an Advanced turn bypasses), so a balance a
+  // Standard turn rejects, an Advanced turn is admitted at — a direct proof the
+  // route threads advancedComposer into the sizing.
+  describe('PR-8 Advanced Composer (Opus) hold sizing', () => {
+    const maxOut = policyFor('pro').maxOutputTokens
+    const advFloor = worstCaseHoldCredits(maxOut, true) // Opus non-streaming bound
+    const stdFloor = worstCaseHoldCredits(maxOut, false) // Sonnet (incl. sectional)
+
+    beforeEach(() => {
+      vi.stubEnv('SL_PAID_GENERATION', '1')
+      vi.stubEnv('SL_GENERATION_TIER', 'pro')
+      vi.stubEnv('SL_ADVANCED_COMPOSER', '1')
+    })
+
+    const postAdvanced = (message: string) =>
+      POST(
+        new Request('http://localhost:3000/api/chat', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'cf-connecting-ip': '203.0.113.9' },
+          body: JSON.stringify({ message, advancedComposer: true, debug: { orchestrator: 'on' } }),
+        }),
+      )
+
+    it('the Opus floor sits below the Sonnet floor (Advanced bypasses the pricier sectional path)', () => {
+      expect(advFloor).toBeLessThan(stdFloor)
+    })
+
+    it('a STANDARD turn is rejected at the Opus floor — it needs the higher Sonnet floor', async () => {
+      creditWallet({ userId: TEST_USER_ID, creditsDelta: advFloor, source: 'test' })
+      const res = await postChat('compose a melody') // no advancedComposer
+      expect(res.status).toBe(402)
+      expect((await res.json()).code).toBe('insufficient_credits')
+      expect(cfg.runCalls).toBe(0)
+    })
+
+    it('an ADVANCED turn is admitted at the Opus floor and charged the same 2.5× cost-plus', async () => {
+      creditWallet({ userId: TEST_USER_ID, creditsDelta: advFloor, source: 'test' })
+      const res = await postAdvanced('compose a melody')
+      expect(res.status).toBe(200)
+      expect(cfg.runCalls).toBe(1)
+      // 90_000 µUSD × 2.5 / 10_000 = 23 — the SAME markup as Standard (no premium).
+      const { getDb } = await import('@/lib/db')
+      const ledger = getDb().select().from(usageLedger).all()
+      expect(ledger[0].creditsCharged).toBe(23)
+      expect(getWallet(TEST_USER_ID).balance).toBe(advFloor - 23)
+    })
+
+    it('with SL_ADVANCED_COMPOSER OFF the toggle is IGNORED → the Standard floor applies', async () => {
+      vi.stubEnv('SL_ADVANCED_COMPOSER', '') // operator flag off → toggle inert
+      creditWallet({ userId: TEST_USER_ID, creditsDelta: advFloor, source: 'test' })
+      const res = await postAdvanced('compose a melody')
+      // advancedComposer ignored ⇒ the Standard floor (> advFloor) applies ⇒ 402.
+      expect(res.status).toBe(402)
+      expect(cfg.runCalls).toBe(0)
+    })
+  })
 })
