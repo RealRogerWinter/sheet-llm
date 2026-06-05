@@ -28,17 +28,6 @@ self-hosted/local installs — never enable it by default. Architecture, config,
 threat model, and the Cloudflare runbook are in
 [`docs/subsystems/daily-quota.md`](docs/subsystems/daily-quota.md).
 
-## Inner-loop validation (chunk sidecars)
-
-Agent hooks run chunk's **inner-loop validation** in this repo: a **commit-gate**
-(`pnpm typecheck` before `git commit`) and a **stop-gate** (`chunk validate` on a
-CircleCI sidecar that mirrors CI) at the end of each turn. They're wired in
-`.claude/settings.json` through one cross-platform launcher
-(`scripts/chunk/agent-hook.mjs`) that dispatches into **WSL on Windows**, runs
-natively on macOS/Linux, and **no-ops when chunk isn't installed** (so it never
-blocks an un-onboarded machine). Opt in with `bash scripts/chunk/bootstrap.sh`;
-full guide: [`docs/guides/chunk-sidecars.md`](docs/guides/chunk-sidecars.md).
-
 ## Documentation (read this to orient fast)
 
 The canonical documentation set lives in [`docs/`](docs/README.md). When
