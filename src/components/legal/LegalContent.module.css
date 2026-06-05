@@ -1,0 +1,141 @@
+/* Public, reading-optimized layout for /terms and /privacy. Single column
+ * (no sidebar nav, unlike /help). Markdown typography mirrors
+ * HelpContent.module.css so the legal pages match the rest of the site. */
+
+.page {
+  min-height: 100%;
+  color: var(--ink);
+  background: var(--paper);
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-4);
+  padding: var(--gap-3) var(--gap-5);
+  background: var(--paper);
+  border-bottom: 1px solid var(--rule);
+}
+
+.brand {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.crumb {
+  font-size: 13px;
+  color: var(--graphite);
+}
+
+.back {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--graphite);
+}
+
+.back:hover {
+  color: var(--ink);
+}
+
+.content {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: var(--gap-6) var(--gap-5) var(--gap-8);
+}
+
+/* Markdown typography, tuned for a reading page. Tokens come from globals.css. */
+.markdown {
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown h1 {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0 0 8px;
+}
+
+.markdown h2 {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 32px 0 12px;
+}
+
+.markdown h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 22px 0 8px;
+}
+
+.markdown p {
+  margin: 0 0 12px;
+}
+
+.markdown ul,
+.markdown ol {
+  margin: 8px 0 12px;
+  padding-left: 22px;
+}
+
+.markdown li {
+  margin: 4px 0;
+}
+
+.markdown strong {
+  font-weight: 600;
+}
+
+.markdown em {
+  color: var(--graphite);
+}
+
+.markdown code {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 13px;
+  padding: 1px 5px;
+  background: var(--paper-warm);
+  border-radius: 4px;
+}
+
+.markdown a {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0 16px;
+  font-size: 13px;
+}
+
+.markdown th,
+.markdown td {
+  padding: 6px 10px;
+  border: 1px solid var(--rule);
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown th {
+  background: var(--paper-warm);
+  font-weight: 600;
+}
+
+.markdown blockquote {
+  margin: 8px 0;
+  padding-left: 12px;
+  border-left: 2px solid var(--rule);
+  color: var(--graphite);
+}

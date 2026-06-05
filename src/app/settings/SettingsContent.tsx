@@ -177,6 +177,24 @@ export default function SettingsContent() {
           </p>
         )}
       </section>
+
+      <p className={styles.lede}>
+        <Link href="/terms" className={styles.link}>Terms of Service</Link>
+        {' · '}
+        <Link href="/privacy" className={styles.link}>Privacy Policy</Link>
+      </p>
+      <p className={styles.lede}>
+        Open source and built in public on{' '}
+        <a
+          href="https://github.com/RealRogerWinter/sheet-llm"
+          className={styles.link}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          GitHub
+        </a>
+        .
+      </p>
     </main>
   )
 }
