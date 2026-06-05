@@ -1,4 +1,5 @@
-import { and, eq, isNotNull, isNull } from 'drizzle-orm'
+import { randomUUID } from 'node:crypto'
+import { and, eq, isNull } from 'drizzle-orm'
 import { getDb } from '@/lib/db'
 import { users } from '@/lib/db/schema'
 
@@ -40,36 +41,46 @@ export function isFreePieceEligible(userId: string, db: Db = getDb()): boolean {
  * closes the TOCTOU window the consume-on-delivery design left open. Folds the
  * eligibility check INTO the claim: the guard-in-the-write (`email_verified = 1
  * AND free_full_piece_used_at IS NULL`) means a concurrent from-scratch burst has
- * exactly ONE winner (returns true); the losers see it taken and fall to the paid
- * path. Symmetric with the credit hold's `placeHold`. Returns true iff THIS call
- * claimed the grant — the caller then OWNS it and MUST {@link releaseFreePiece} on
- * any non-delivery exit (mirrors releaseHold).
+ * exactly ONE winner. Symmetric with the credit hold's `placeHold`.
+ *
+ * Returns the per-claim OWNER TOKEN (a fresh UUID, also written to the row) iff
+ * THIS call claimed the grant, else `null` (ineligible / already taken). The
+ * caller then OWNS the claim and MUST pass the token to {@link releaseFreePiece}
+ * on any non-delivery exit (mirrors releaseHold). PR-13 added the token so a
+ * late/duplicate release can only clear the claim it owns — never a different
+ * request's fresh re-claim.
  */
-export function reserveFreePiece(userId: string, db: Db = getDb()): boolean {
+export function reserveFreePiece(userId: string, db: Db = getDb()): string | null {
+  const token = randomUUID()
   const res = db
     .update(users)
-    .set({ freeFullPieceUsedAt: nowSec() })
+    .set({ freeFullPieceUsedAt: nowSec(), freeFullPieceClaimToken: token })
     .where(
       and(eq(users.id, userId), eq(users.emailVerified, 1), isNull(users.freeFullPieceUsedAt)),
     )
     .run()
-  return res.changes === 1
+  return res.changes === 1 ? token : null
 }
 
 /**
  * RELEASE a reservation that did NOT result in a delivered piece — un-claim it
- * (`free_full_piece_used_at` back to NULL) so a retry is eligible again. Symmetric
- * with releaseHold; the credit-hold reaper has no equivalent here, so a process
- * crash between reserve and release strands the grant as consumed (a low-impact,
- * one-time-per-verified-account regression vs. the cost-leak this closes). The
- * `IS NOT NULL` guard makes a redundant call a clean no-op. The atomic reserve
- * serializes ownership, so only THIS request's claim is ever cleared here.
+ * (`free_full_piece_used_at` + token back to NULL) so a retry is eligible again.
+ * Symmetric with releaseHold; the credit-hold reaper has no equivalent here, so a
+ * process crash between reserve and release strands the grant as consumed (a
+ * low-impact, one-time-per-verified-account regression vs. the cost-leak this
+ * closes).
+ *
+ * SCOPED to the owning `token` (PR-13): the WHERE matches only the row still
+ * holding THIS claim's token, so a late or duplicate release — or any future 2nd
+ * release path / reaper — is a clean no-op against a row that has since been
+ * re-claimed by a concurrent request (which now holds a different token). Returns
+ * true iff this call cleared its own claim.
  */
-export function releaseFreePiece(userId: string, db: Db = getDb()): boolean {
+export function releaseFreePiece(userId: string, token: string, db: Db = getDb()): boolean {
   const res = db
     .update(users)
-    .set({ freeFullPieceUsedAt: null })
-    .where(and(eq(users.id, userId), isNotNull(users.freeFullPieceUsedAt)))
+    .set({ freeFullPieceUsedAt: null, freeFullPieceClaimToken: null })
+    .where(and(eq(users.id, userId), eq(users.freeFullPieceClaimToken, token)))
     .run()
   return res.changes === 1
 }

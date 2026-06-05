@@ -266,7 +266,19 @@ async function dispatch(
       // PR-8: an Advanced turn ALSO bypasses the sectional stream — it takes a
       // single Opus pass via runGenerateComplex (the sectional seed/extend loop
       // stays Sonnet-tuned), bounded to one render_score emit.
-      if (isSectionalGenEnabled() && !input.editedScore && !input.advancedComposer) {
+      // PR-13: the sectional pump is the one genuinely UNBOUNDED fresh-gen path
+      // (multi-call, up to MAX_TOTAL_BARS=512). Gate it on the tier's
+      // `allowSectional` so SL_BOUNDED_GEN=0 — the bounded-handler off-switch —
+      // can't open it for a FREE user: a free fresh gen then falls to the
+      // single-shot, token-capped runGenerateComplex (the off-switch's intended
+      // legacy fallback) instead of the unbounded loop. Pro is allowSectional=true,
+      // so the default path is unchanged.
+      if (
+        isSectionalGenEnabled() &&
+        policyFor(input.generationTier ?? 'free').allowSectional &&
+        !input.editedScore &&
+        !input.advancedComposer
+      ) {
         return runGenerateSectionalStream({
           classification,
           chatId: input.chatId ?? 'anonymous',

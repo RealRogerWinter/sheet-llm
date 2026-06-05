@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { __resetForTesting, checkCheckoutRate } from '@/lib/billing/checkoutRateLimit'
+import { __resetForTesting, checkCheckoutRate, reapStaleCheckoutBuckets } from '@/lib/billing/checkoutRateLimit'
 
 const ENV_KEYS = [
   'SL_CHECKOUT_USER_RATE_LIMIT',
@@ -80,5 +80,34 @@ describe('checkCheckoutRate', () => {
     expect(checkCheckoutRate('u1', '4.4.4.4').ok).toBe(false)
     vi.setSystemTime(new Date('2026-06-04T01:00:01Z')) // > 1 hour later
     expect(checkCheckoutRate('u1', '4.4.4.4').ok).toBe(true)
+  })
+})
+
+describe('reapStaleCheckoutBuckets (PR-13 periodic stale-key eviction)', () => {
+  it('evicts a key whose every hit has aged out of the window', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-04T00:00:00Z'))
+    checkCheckoutRate('u1', '1.1.1.1') // creates u:u1 + ip:1.1.1.1
+    expect(reapStaleCheckoutBuckets()).toBe(0) // both still in-window
+    vi.setSystemTime(new Date('2026-06-04T01:00:01Z')) // > 1 hour → every hit expired
+    expect(reapStaleCheckoutBuckets()).toBe(2) // both cold keys evicted
+    expect(reapStaleCheckoutBuckets()).toBe(0) // store now empty
+  })
+
+  it('keeps a key with at least one in-window hit (trims the expired ones)', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-04T00:00:00Z'))
+    checkCheckoutRate('u1', '1.1.1.1') // hit at T0
+    vi.setSystemTime(new Date('2026-06-04T00:30:00Z'))
+    checkCheckoutRate('u1', '1.1.1.1') // hit at T+30m (under the default limit)
+    vi.setSystemTime(new Date('2026-06-04T01:00:01Z')) // T0 expired, T+30m alive
+    expect(reapStaleCheckoutBuckets()).toBe(0) // nothing fully cold
+    // The bucket was trimmed to just the live hit, so budget is nearly fresh.
+    expect(checkCheckoutRate('u1', '1.1.1.1').ok).toBe(true)
+  })
+
+  it('is a no-op when the store was never created (Stripe off / self-host)', () => {
+    __resetForTesting() // store = undefined
+    expect(reapStaleCheckoutBuckets()).toBe(0)
   })
 })

@@ -205,8 +205,9 @@ describe('orchestrator wiring: generate_complex -> sectional (M25-PR-3)', () => 
     vi.stubEnv('ORCHESTRATOR_ENABLED', 'true')
     vi.stubEnv('ORCHESTRATOR_LOG_SILENT', '1')
     vi.stubEnv('SL_SECTIONAL_GEN', '1')
-    // M26: the sectional path is now pro-tier; opt out of the free bounded
-    // choke point so a fresh generate_complex reaches the sectional pipeline.
+    // Sectional is a PRO-tier path — PR-13 clamps the free tier to single-shot
+    // even with the bounded handler off (allowSectional is enforced) — so the run
+    // below sets generationTier:'pro' to reach the sectional pipeline.
     vi.stubEnv('SL_BOUNDED_GEN', '0')
     const { _resetBudget } = await import('@/lib/orchestrator/budget')
     _resetBudget()
@@ -224,6 +225,7 @@ describe('orchestrator wiring: generate_complex -> sectional (M25-PR-3)', () => 
       chatId: 'chat-sectional',
       userText: 'a 12-bar piece in two sections',
       history: [],
+      generationTier: 'pro',
     })
 
     // The orchestrator returns a streaming outcome; the generator runs

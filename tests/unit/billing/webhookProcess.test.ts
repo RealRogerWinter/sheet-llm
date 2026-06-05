@@ -5,7 +5,12 @@ import { eq } from 'drizzle-orm'
 import { makeTestDb } from '../../factories/db'
 import { stripeEvents, users } from '@/lib/db/schema'
 import { getWallet } from '@/lib/billing/wallet'
-import { handleStripeEvent, processStripeEvent, reconcileStripeEvents } from '@/lib/billing/webhookProcess'
+import {
+  handleStripeEvent,
+  processStripeEvent,
+  pruneStripeEvents,
+  reconcileStripeEvents,
+} from '@/lib/billing/webhookProcess'
 
 type Db = ReturnType<typeof makeTestDb>
 
@@ -22,6 +27,7 @@ function makeEvent(o: {
   metaCredits?: string
   amountSubtotal?: number | null
   amountTotal?: number
+  amountDiscount?: number
   currency?: string
   paymentStatus?: string
   type?: string
@@ -40,6 +46,7 @@ function makeEvent(o: {
         currency: o.currency ?? 'usd',
         amount_subtotal: o.amountSubtotal === undefined ? 2000 : o.amountSubtotal,
         amount_total: o.amountTotal ?? 2160,
+        total_details: { amount_discount: o.amountDiscount ?? 0 },
       },
     },
   } as unknown as Stripe.Event
@@ -138,5 +145,93 @@ describe('reconcileStripeEvents (auto-heal)', () => {
     expect(res.healed).toBe(1)
     expect(getWallet('u1', db).balance).toBe(2200)
     expect(db.select().from(stripeEvents).where(eq(stripeEvents.eventId, 'evt_1')).get()?.status).toBe('processed')
+  })
+})
+
+describe('processStripeEvent — coupon / promo handling (PR-13)', () => {
+  let db: Db
+  beforeEach(() => {
+    db = makeTestDb()
+    makeUser(db, 'u1')
+  })
+
+  it('grants the FULL pack on a couponed order — amount_subtotal is the PRE-discount list price', () => {
+    // Stripe: amount_subtotal = list total BEFORE discounts (== the pack price); a
+    // $5 coupon on pack_20 sends subtotal 2000, discount 500, total 1500. Credits
+    // are the full pack — the discount is the operator's cost, never fewer credits.
+    const r = processStripeEvent(makeEvent({ amountSubtotal: 2000, amountDiscount: 500, amountTotal: 1500 }), db)
+    expect(r).toEqual({ status: 'processed', userId: 'u1', creditsGranted: 2200 })
+    expect(getWallet('u1', db).balance).toBe(2200)
+  })
+
+  it('REFUSES a tampered subtotal below the pack price', () => {
+    const r = processStripeEvent(makeEvent({ amountSubtotal: 500 }), db)
+    expect(r.status).toBe('failed')
+    if (r.status === 'failed') expect(r.reason).toMatch(/amount_mismatch/)
+    expect(getWallet('u1', db).balance).toBe(0)
+  })
+
+  it('REFUSES a zero-amount session even if the subtotal matches (100%-off defense-in-depth)', () => {
+    // payment_status is normally 'no_payment_required' for a $0 session; assert
+    // amount_total > 0 too so a 'paid' $0 event can never grant a free pack.
+    const r = processStripeEvent(makeEvent({ amountSubtotal: 2000, amountDiscount: 2000, amountTotal: 0 }), db)
+    expect(r.status).toBe('failed')
+    if (r.status === 'failed') expect(r.reason).toMatch(/zero_amount/)
+    expect(getWallet('u1', db).balance).toBe(0)
+  })
+})
+
+describe('pruneStripeEvents (PR-13 inbox retention)', () => {
+  let db: Db
+  beforeEach(() => {
+    db = makeTestDb()
+  })
+
+  const insertEvent = (id: string, status: string, processedAt: number | null): void => {
+    db.insert(stripeEvents)
+      .values({
+        eventId: id,
+        type: 'checkout.session.completed',
+        status,
+        payload: '{}',
+        receivedAt: 0,
+        ...(processedAt !== null ? { processedAt } : {}),
+      })
+      .run()
+  }
+  const exists = (id: string): boolean =>
+    db.select().from(stripeEvents).where(eq(stripeEvents.eventId, id)).get() !== undefined
+
+  it('prunes terminal-good rows older than the window, keeps recent ones', () => {
+    const now = 100 * 86_400 // day 100 (seconds)
+    insertEvent('old-processed', 'processed', now - 91 * 86_400) // > 90 days
+    insertEvent('old-ignored', 'ignored', now - 120 * 86_400)
+    insertEvent('recent-processed', 'processed', now - 10 * 86_400)
+    expect(pruneStripeEvents(db, { now })).toBe(2)
+    expect(exists('recent-processed')).toBe(true)
+    expect(exists('old-processed')).toBe(false)
+    expect(exists('old-ignored')).toBe(false)
+  })
+
+  it('NEVER prunes received / failed rows — reconcile still needs them — even when old', () => {
+    const now = 100 * 86_400
+    insertEvent('stuck-received', 'received', now - 200 * 86_400)
+    insertEvent('stuck-failed', 'failed', now - 200 * 86_400)
+    expect(pruneStripeEvents(db, { now })).toBe(0)
+    expect(exists('stuck-received')).toBe(true)
+    expect(exists('stuck-failed')).toBe(true)
+  })
+
+  it('excludes a terminal row with a NULL processed_at (defensive)', () => {
+    const now = 100 * 86_400
+    insertEvent('no-ts', 'processed', null)
+    expect(pruneStripeEvents(db, { now })).toBe(0)
+    expect(exists('no-ts')).toBe(true)
+  })
+
+  it('honors an operator retention override', () => {
+    const now = 100 * 86_400
+    insertEvent('p', 'processed', now - 5 * 86_400) // 5 days old
+    expect(pruneStripeEvents(db, { now, retentionDays: 3 })).toBe(1) // 5 > 3 → pruned
   })
 })

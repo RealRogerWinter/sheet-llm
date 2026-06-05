@@ -1,5 +1,5 @@
 import type Stripe from 'stripe'
-import { and, eq, inArray, notInArray } from 'drizzle-orm'
+import { and, eq, inArray, lt, notInArray } from 'drizzle-orm'
 import { getDb } from '@/lib/db'
 import { stripeEvents } from '@/lib/db/schema'
 import { getPack } from './packs'
@@ -48,13 +48,24 @@ export function processStripeEvent(event: Stripe.Event, db: Db = getDb()): Proce
   const pack = packId ? getPack(packId) : undefined
   if (!pack) return { status: 'failed', reason: `unknown_pack:${packId ?? 'none'}`, userId }
 
-  // Verify what was actually PAID matches the pack. Stripe Tax is exclusive, so
-  // our price is the PRE-TAX subtotal; tax sits in amount_total. NEVER trust
-  // metadata.credits — re-derive from the pack.
+  // Verify what was actually PAID matches the pack. `amount_subtotal` is the list
+  // total BEFORE discounts or taxes (Stripe SDK, Checkout.Session: "Total of all
+  // items before discounts or taxes are applied"), so it equals the pack price
+  // REGARDLESS of any operator coupon — a coupon only reduces `amount_total`. A
+  // strict `amount_subtotal === pack price` therefore already handles promo codes
+  // correctly (credits are always the full pack; the discount is the operator's
+  // marketing cost). We additionally require a POSITIVE amount actually due:
+  // defense-in-depth against a 100%-off coupon (which Stripe normally marks
+  // `no_payment_required`, already rejected by the payment_status gate above, not
+  // `paid`). Stripe Tax is exclusive, so tax also sits only in amount_total. NEVER
+  // trust metadata.credits — re-derive from the pack.
   const currency = (session.currency ?? '').toLowerCase()
   if (currency !== 'usd') return { status: 'failed', reason: `bad_currency:${currency}`, userId }
   if (session.amount_subtotal == null || session.amount_subtotal !== pack.priceUsdCents) {
     return { status: 'failed', reason: `amount_mismatch:${session.amount_subtotal}!=${pack.priceUsdCents}`, userId }
+  }
+  if ((session.amount_total ?? 0) <= 0) {
+    return { status: 'failed', reason: `zero_amount:${session.amount_total}`, userId }
   }
 
   // Idempotent grant. external_ref = the checkout-session id: stable across event
@@ -143,8 +154,9 @@ function markEvent(db: Db, eventId: string, outcome: ProcessOutcome, now: number
  * RECONCILIATION auto-heal (red-team #5): re-process inbox events that never
  * reached a terminal-good state ('received' = crashed mid-process; 'failed' =
  * transient grant error). Idempotent — the grant's external_ref dedups, so a
- * row that already granted simply re-confirms as 'processed'. Run periodically
- * (opportunistic reaper / cron). Returns counts for observability.
+ * row that already granted simply re-confirms as 'processed'. Run periodically by
+ * the in-process billing scheduler (see src/lib/billing/scheduler.ts, started from
+ * instrumentation.ts) + once at boot. Returns counts for observability.
  */
 export function reconcileStripeEvents(
   db: Db = getDb(),
@@ -175,4 +187,39 @@ export function reconcileStripeEvents(
     else stillFailing++
   }
   return { scanned: stuck.length, healed, stillFailing }
+}
+
+const DEFAULT_RETENTION_DAYS = 90
+
+function envRetentionDays(): number {
+  const n = Number(process.env.SL_STRIPE_EVENT_RETENTION_DAYS)
+  return Number.isInteger(n) && n > 0 ? n : DEFAULT_RETENTION_DAYS
+}
+
+/**
+ * Inbox RETENTION prune (PR-13). The stripe_events inbox keeps the RAW Stripe
+ * payload (customer email, billing metadata) for idempotency + reconciliation +
+ * audit. Once an event reaches a terminal-GOOD state ('processed' / 'ignored')
+ * AND has aged past the retention window it serves neither purpose — and holding
+ * raw customer PII forever is a GDPR liability — so drop it. NEVER prune
+ * 'received' / 'failed' (the reconciliation reaper still needs those), and never
+ * touch the canonical financial record (credit_purchases, retained separately).
+ * Operator-tunable window via SL_STRIPE_EVENT_RETENTION_DAYS (default 90 days).
+ * Rows with a NULL processed_at are non-terminal and excluded by the comparison.
+ * Returns the number of rows pruned.
+ */
+export function pruneStripeEvents(
+  db: Db = getDb(),
+  opts: { retentionDays?: number; now?: number } = {},
+): number {
+  const now = opts.now ?? nowSec()
+  const retentionDays = opts.retentionDays ?? envRetentionDays()
+  const cutoff = now - retentionDays * 86_400
+  const res = db
+    .delete(stripeEvents)
+    .where(
+      and(inArray(stripeEvents.status, ['processed', 'ignored']), lt(stripeEvents.processedAt, cutoff)),
+    )
+    .run()
+  return res.changes
 }

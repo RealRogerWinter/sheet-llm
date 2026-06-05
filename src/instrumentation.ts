@@ -39,4 +39,17 @@ export async function register() {
   } catch (e) {
     console.error('[boot] quota janitor failed; continuing', e)
   }
+
+  // Start the in-process BILLING scheduler (PR-13): a boot sweep + an unref'd
+  // interval that reaps expired credit holds and reconciles Stripe webhook grants
+  // stuck at 'received'/'failed' (the only automatic heal path for a paid-but-not-
+  // granted purchase, since a transiently-failed webhook still returns 200 so
+  // Stripe won't retry). Gated INSIDE on the billing flags — a free / self-hosted
+  // instance starts no timer. Wrapped so an import/janitor failure never blocks boot.
+  try {
+    const { startBillingScheduler } = await import('@/lib/billing/scheduler')
+    startBillingScheduler()
+  } catch (e) {
+    console.error('[boot] billing scheduler failed to start; continuing', e)
+  }
 }

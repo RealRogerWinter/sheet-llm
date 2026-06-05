@@ -45,8 +45,8 @@ function envLimit(name: string, fallback: number): number {
 
 /** Prune a key's hits to the window in place; return the survivors (or []).
  *  Evicts a bucket that prunes empty so a re-touched expired key doesn't linger
- *  toward MAX_ENTRIES. (Keys never touched again still linger until a periodic
- *  sweep — tracked for PR-13; this keeps the common churn bounded.) */
+ *  toward MAX_ENTRIES. (A key never touched again is swept by the periodic
+ *  `reapStaleCheckoutBuckets` below; this keeps the common churn bounded.) */
 function prunedHits(store: Map<string, Bucket>, key: string, cutoff: number): number[] {
   const b = store.get(key)
   if (!b) return []
@@ -94,6 +94,34 @@ export function checkCheckoutRate(userId: string, ip: string): { ok: boolean; re
   pushHit(store, userKey, now)
   pushHit(store, ipKey, now)
   return { ok: true }
+}
+
+/**
+ * Periodic stale-key reaper (PR-13). `prunedHits` only evicts a key when it is
+ * RE-TOUCHED on a later `checkCheckoutRate`; a key never hit again lingers in the
+ * map toward MAX_ENTRIES. The billing scheduler calls this on an interval to drop
+ * every bucket whose hits have all aged out of the window (and trim partially-
+ * expired ones), so the store stays bounded under churn without needing a
+ * re-touch. Returns the number of cold keys evicted. A no-op when the store was
+ * never created (self-host / Stripe off).
+ */
+export function reapStaleCheckoutBuckets(now: number = Date.now()): number {
+  const store = globalThis.__sheetllm_checkout_rate
+  if (!store) return 0
+  const cutoff = now - WINDOW_MS
+  let evicted = 0
+  // Deleting the current key during a Map for..of is well-defined; visited
+  // entries are unaffected.
+  for (const [key, bucket] of store) {
+    const live = bucket.hits.filter((t) => t >= cutoff)
+    if (live.length === 0) {
+      store.delete(key)
+      evicted++
+    } else if (live.length !== bucket.hits.length) {
+      bucket.hits = live
+    }
+  }
+  return evicted
 }
 
 /** Test-only: clear the buckets. */
