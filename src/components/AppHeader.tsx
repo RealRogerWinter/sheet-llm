@@ -9,6 +9,7 @@ import NewScoreButton from './NewScoreButton'
 import SessionsButton from './SessionsButton'
 import ThemeToggle from './ThemeToggle'
 import AuthNavButton from './auth/AuthNavButton'
+import HeaderMenu from './HeaderMenu'
 import styles from './AppHeader.module.css'
 
 export default function AppHeader() {
@@ -41,6 +42,7 @@ export default function AppHeader() {
         <HelpButton />
         <ThemeToggle />
         <AuthNavButton />
+        <HeaderMenu />
       </div>
     </header>
   )

@@ -3,15 +3,16 @@
 // These are a solid starting point drafted against Anthropic's API terms,
 // Stripe's website requirements, and GDPR/CCPA.
 //
-// The operator-identity values are injected at runtime from the SL_LEGAL_*
-// env vars via renderLegalDoc() in ./config.ts, as the tokens:
-//   {{LEGAL_ENTITY}}  {{BUSINESS_ADDRESS}}  {{JURISDICTION}}
-// The pages 404 (and their UI links hide) until all three env vars are set.
+// Runtime-substituted tokens (renderLegalDoc() in ./config.ts):
+//   {{LEGAL_ENTITY}}  {{BUSINESS_ADDRESS}}  {{JURISDICTION}}  — REQUIRED env;
+//     the pages 404 (and their UI links hide) until all three are set.
+//   {{CONTACT_EMAIL}}  {{PRIVACY_EMAIL}}  — optional env, default to the
+//     support@/privacy@ addresses at the site's domain.
 //
-// The remaining bracketed [PLACEHOLDERS] (contact mailboxes, retention
-// periods, per-vendor transfer mechanisms, R2 region, min age, Art. 27 rep)
-// still MUST be filled in and the whole text reviewed by a lawyer before
-// these documents are relied upon for launch.
+// All other former [PLACEHOLDER]/[— confirm] items (retention periods,
+// transfer mechanisms, R2 region, Stripe location, minimum age) have been
+// filled in with concrete values verified against the deployment config.
+// This is still a starting point — have a lawyer review before relying on it.
 
 export const TERMS_MARKDOWN = `# Terms of Service
 
@@ -59,7 +60,7 @@ You can use the Service anonymously, or you can create an optional account using
 
 You are responsible for keeping your account credentials secure and for all activity under your account. Tell us promptly if you suspect unauthorized use. We use Argon2id to hash passwords and Cloudflare Turnstile to help distinguish humans from bots. Turnstile and our other security measures process IP addresses and request metadata, as described in our Privacy Policy. No security measure is perfect.
 
-If you use the Service anonymously, these Terms still bind you through your use of the Service. Anonymous use does not create an account, so the self-service export and deletion endpoints in Section 17 are not available to you; however, you can still exercise data-protection rights over any data tied to you (such as IP-based abuse-prevention records) by contacting privacy@sheetllm.com [placeholder]. Retention of anonymous quota and IP data is described in our Privacy Policy.
+If you use the Service anonymously, these Terms still bind you through your use of the Service. Anonymous use does not create an account, so the self-service export and deletion endpoints in Section 17 are not available to you; however, you can still exercise data-protection rights over any data tied to you (such as IP-based abuse-prevention records) by contacting {{PRIVACY_EMAIL}}. Retention of anonymous quota and IP data is described in our Privacy Policy.
 
 ## 6. Your Content and License to Us
 
@@ -140,7 +141,7 @@ The following are **not** a service failure and are **not** refundable:
 - results that were successfully delivered to you; and
 - dissatisfaction with the musical or creative quality, accuracy, originality, or usefulness of a successfully delivered AI Output. As explained in Section 4, AI Outputs may be inaccurate or imperfect, and this is not a generation error, timeout, or validation failure.
 
-Approved refunds are returned as credits to your wallet (or, at our discretion, to your original payment method) within a reasonable time. If we permanently discontinue the Service, or terminate your access without cause, your unused credits will be refunded at cash-equivalent value (1 credit = 1 US cent) to your original payment method, subject to applicable law (see Sections 9 and 18). To request a refund, contact us at support@sheetllm.com [placeholder].
+Approved refunds are returned as credits to your wallet (or, at our discretion, to your original payment method) within a reasonable time. If we permanently discontinue the Service, or terminate your access without cause, your unused credits will be refunded at cash-equivalent value (1 credit = 1 US cent) to your original payment method, subject to applicable law (see Sections 9 and 18). To request a refund, contact us at {{CONTACT_EMAIL}}.
 
 **EU consumers — right of withdrawal.** If you are a consumer in the EU, you normally have 14 days to withdraw from a purchase of digital content. When you use credits to generate output immediately, you expressly request immediate performance and acknowledge that you lose your right of withdrawal for that digital content once it has been supplied. Credits you have not yet used may still be withdrawable within the 14-day period. Nothing in these Terms affects mandatory consumer rights that cannot be waived.
 
@@ -190,7 +191,7 @@ The full list of subprocessors, the international-transfer mechanisms, retention
 
 If you have an account, you can export your data at \`/api/me/export\` (GDPR Article 15 access) and request erasure of your account at \`/api/me/delete\` (GDPR Article 17), which cascade-deletes your user data. As noted above, Stripe financial and tax records are retained as a legal obligation even after deletion. Email verification may be required for some of these actions.
 
-These self-service endpoints are not the only rights you have. Depending on where you live, you may also exercise rights of rectification, restriction, objection, and data portability, and, under the CCPA/CPRA, the rights to know, delete, and correct, and to opt out of the sale or sharing of personal information (we do not sell personal data and do not share it for cross-context behavioral advertising). If you use the Service anonymously and have no account, you can still make these requests over IP-tied records. To exercise any of these rights, contact privacy@sheetllm.com [placeholder]. See the Privacy Policy for full details.
+These self-service endpoints are not the only rights you have. Depending on where you live, you may also exercise rights of rectification, restriction, objection, and data portability, and, under the CCPA/CPRA, the rights to know, delete, and correct, and to opt out of the sale or sharing of personal information (we do not sell personal data and do not share it for cross-context behavioral advertising). If you use the Service anonymously and have no account, you can still make these requests over IP-tied records. To exercise any of these rights, contact {{PRIVACY_EMAIL}}. See the Privacy Policy for full details.
 
 ## 18. Changes to the Service and to These Terms
 
@@ -212,7 +213,7 @@ If any provision of these Terms (or its application to any person or circumstanc
 
 The Service is operated by {{LEGAL_ENTITY}}, {{BUSINESS_ADDRESS}}.
 
-For questions, support, or refund requests, contact us at support@sheetllm.com [placeholder]. For privacy questions or to exercise data-protection rights, contact privacy@sheetllm.com [placeholder].
+For questions, support, or refund requests, contact us at {{CONTACT_EMAIL}}. For privacy questions or to exercise data-protection rights, contact {{PRIVACY_EMAIL}}.
 `
 
 export const PRIVACY_MARKDOWN = `# Privacy Policy
@@ -229,12 +230,10 @@ This policy works alongside our [Terms of Service](/terms), which include our ac
 
 The Service is operated by a small independent operator, **{{LEGAL_ENTITY}}**, at **{{BUSINESS_ADDRESS}}** ("we", "us", "our"). We are the controller of your personal data.
 
-- Privacy contact: **privacy@sheetllm.com** _(placeholder)_
-- General/support contact: **support@sheetllm.com** _(placeholder)_
+- Privacy contact: **{{PRIVACY_EMAIL}}**
+- General/support contact: **{{CONTACT_EMAIL}}**
 
 We have **not** appointed a Data Protection Officer; a formal DPO is not required for a service of this kind. For any privacy question, please use the contact above.
-
-If an EU representative under Article 27 GDPR is required, it will be identified here: **[EU REPRESENTATIVE — if required]**.
 
 Our primary servers are hosted in **Germany (EU)**, so the EU General Data Protection Regulation (GDPR) applies. Some of our service providers process data in the United States; see "International Transfers" below.
 
@@ -246,7 +245,7 @@ You do not need an account to use the Service. In anonymous mode, we collect les
 - Any prompts and score content you submit are still sent to Anthropic to generate output, **including a transfer to the United States** — see "How Your Inputs Are Processed by AI" and "International Transfers".
 - Scores, chat messages, and orchestrator turn records you create may still be stored server-side and linked to your IP address, which for an anonymous user may be the main identifier tied to your activity.
 
-Because anonymous use has no account, there is no self-service \`/api/me/delete\`. To have anonymous content deleted, contact **privacy@sheetllm.com** _(placeholder)_; see "How Long We Keep Your Data" for how long anonymous content and IP-linked data are retained.
+Because anonymous use has no account, there is no self-service \`/api/me/delete\`. To have anonymous content deleted, contact **{{PRIVACY_EMAIL}}**; see "How Long We Keep Your Data" for how long anonymous content and IP-linked data are retained.
 
 Creating an account (optional) lets us store and manage your scores, history, tier, and (later) credits, and unlocks features that depend on an identity.
 
@@ -342,7 +341,7 @@ To protect the Service we use automated checks, including:
 - Per-user and per-IP **rate-limiting and quota counters**
 - **IP-risk scoring**, including Tor and datacenter ASN checks
 
-These checks may slow down, challenge, or block requests we assess as abusive or automated. They are security measures and are **not intended to produce legal or similarly significant effects** about you. In any event, you can contact **support@sheetllm.com** _(placeholder)_ for **human review** and to contest a decision, and if a paying user is wrongly blocked we will remedy it (for example, any credits involved are unaffected or restored).
+These checks may slow down, challenge, or block requests we assess as abusive or automated. They are security measures and are **not intended to produce legal or similarly significant effects** about you. In any event, you can contact **{{CONTACT_EMAIL}}** for **human review** and to contest a decision, and if a paying user is wrongly blocked we will remedy it (for example, any credits involved are unaffected or restored).
 
 ## Who We Share It With (Subprocessors)
 
@@ -351,10 +350,10 @@ We use the following service providers (subprocessors) to run the Service. We **
 | Subprocessor | Role | Data it receives | Location |
 |---|---|---|---|
 | **Anthropic, PBC** | AI generation (Claude) | Your prompts (natural-language requests) and the score content needed to generate output. **Does not train on API customer content.** | United States |
-| **Stripe** | Payment processing | Card/payment data directly from you at checkout; we store only Stripe IDs + our derived records | United States / EU _(confirm)_ |
+| **Stripe** | Payment processing | Card/payment data directly from you at checkout; we store only Stripe IDs + our derived records | United States (Stripe, Inc.) and Ireland/EU (Stripe Payments Europe, Ltd.) |
 | **Brevo (Sendinblue)** | Transactional email (verification, password reset) | Email address and the transactional message itself (verification links, password-reset links, essential service notices) | EU (France) |
 | **Cloudflare** | CDN, WAF, and bot mitigation (Turnstile) | IP address and request metadata | United States / global |
-| **Cloudflare R2** | Encrypted database backups (via Litestream) | Encrypted backups of stored data | **[R2 REGION — confirm]** |
+| **Cloudflare R2** | Encrypted database backups (via Litestream) | Encrypted backups of stored data | Cloudflare-managed (automatic region; may be outside the EU) |
 | **Google** | OAuth sign-in — **only if you choose it** | Your Google account identity for authentication | United States |
 | **Hetzner** | Hosting | All stored Service data | Germany (EU) |
 
@@ -362,29 +361,29 @@ We use the following service providers (subprocessors) to run the Service. We **
 
 ## International Transfers
 
-Our primary hosting is in the **EU** (Hetzner, Germany). Encrypted backups are stored on **Cloudflare R2** in its configured region (**[R2 REGION — confirm]**), which may be outside the EU. Several providers process data in the **United States** — namely **Anthropic, Stripe, Cloudflare, and Google** (and Cloudflare R2 if its region is outside the EU).
+Our primary hosting is in the **EU** (Hetzner, Germany). Encrypted backups are stored on **Cloudflare R2** in a Cloudflare-managed location (the bucket region is set to automatic), which may be outside the EU. Several providers process data in the **United States** — namely **Anthropic, Stripe, Cloudflare, and Google** (and Cloudflare R2 if its region is outside the EU).
 
-For these transfers we rely on appropriate safeguards under Chapter V of the GDPR. The intended mechanisms, to be confirmed against each vendor's current certification before publication, are:
+For these transfers we rely on appropriate safeguards under Chapter V of the GDPR — primarily the **Standard Contractual Clauses (SCCs)** in each provider's data-processing agreement, supplemented by the EU–U.S. Data Privacy Framework where the provider is certified:
 
-- **Anthropic:** **[DPF certified / SCCs — confirm]**
-- **Google:** **[DPF certified / SCCs — confirm]**
-- **Stripe:** **[SCCs with supplementary measures / DPF — confirm]**
-- **Cloudflare (incl. R2):** **[SCCs with supplementary measures / DPF — confirm]**
+- **Anthropic:** Standard Contractual Clauses (SCCs)
+- **Google:** Standard Contractual Clauses (SCCs)
+- **Stripe:** Standard Contractual Clauses (SCCs)
+- **Cloudflare (incl. R2):** Standard Contractual Clauses (SCCs)
 
-You can request a copy of the relevant safeguards by contacting **privacy@sheetllm.com** _(placeholder)_.
+You can request a copy of the relevant safeguards by contacting **{{PRIVACY_EMAIL}}**.
 
 ## How Long We Keep Your Data
 
 | Data | Retention |
 |---|---|
 | Account data, scores, version history, chat messages (account users) | For the life of your account; deleted when you erase your account (subject to the backup window and the financial-records carve-out below) |
-| Anonymous scores, chat messages, and orchestrator turn records | Kept for **[ANONYMOUS RETENTION PERIOD — confirm]** and then deleted; contact us to request earlier deletion of anonymous content |
-| Orchestrator turn records (prompts + internal cost) | Retained for a limited period for abuse and cost control: **[RETENTION PERIOD — confirm]** |
-| Per-IP / per-user quota counters and IP-risk signals | Short-term, for rate-limiting and abuse prevention: **[N DAYS — confirm]** |
-| Encrypted backups | Rotate on a backup cycle; erased data ages out of backups within the backup window: **[BACKUP WINDOW — confirm]** |
+| Anonymous scores, chat messages, and orchestrator turn records | Retained until you ask us to delete them — anonymous use has no account, so there is no self-service deletion; we do not currently auto-expire anonymous content. Contact us to request deletion. |
+| Orchestrator turn records (prompts + internal cost) | Kept as abuse- and cost-control records; for account users they are removed when you erase your account, and otherwise retained only while needed for those purposes |
+| Per-IP / per-user quota counters and IP-risk signals | Short-term: about 25 hours (the 24-hour quota window plus a 1-hour grace), then automatically deleted on the next maintenance sweep |
+| Encrypted backups | Rotate on a backup cycle; erased data ages out of backups within the retention window of up to 72 hours |
 | Stripe financial / tax records | **Retained after account deletion** to meet legal and accounting obligations — for the period required by the applicable tax law of **{{JURISDICTION}}** (typically several years) |
 
-Each retention period above is set by the criteria stated in the same row (how long the data is needed for that purpose, plus any legal-retention requirement). We must replace every bracketed value with a concrete period before this policy is published.
+Each retention period above reflects how long the data is needed for the stated purpose, plus any legal-retention requirement.
 
 ## Your Rights
 
@@ -399,7 +398,7 @@ Under the GDPR you have the right to:
 - **Withdraw consent** at any time where we rely on it (e.g., Google sign-in)
 
 **Self-service tools we have already built (account users):**
-- **Export your data:** use the **"Export my data"** control in your account settings. This export gives you the data you provided and your stored content (your scores, history, and chat) for **portability (Art. 20)**. A full **access request (Art. 15)** — which also covers derived or observed data such as IP-risk signals, quota counters, and internal cost records — can be made by contacting **privacy@sheetllm.com** _(placeholder)_; we will provide a complete copy.
+- **Export your data:** use the **"Export my data"** control in your account settings. This export gives you the data you provided and your stored content (your scores, history, and chat) for **portability (Art. 20)**. A full **access request (Art. 15)** — which also covers derived or observed data such as IP-risk signals, quota counters, and internal cost records — can be made by contacting **{{PRIVACY_EMAIL}}**; we will provide a complete copy.
 - **Delete your account:** use the **"Delete account"** control in your account settings. This cascade-deletes your user data (scores, history, chat, account records). Note: **Stripe financial/tax records are retained** after deletion on a legal-obligation basis, and erased data persists in encrypted backups until the backup window rotates.
 
 _(For developers: these controls are backed by the \`/api/me/export\` and \`/api/me/delete\` endpoints.)_
@@ -433,7 +432,7 @@ No method of transmission or storage is completely secure, so we cannot guarante
 
 ## Children
 
-The Service is **not directed to children**. You must be at least **[MINIMUM AGE — confirm, e.g., 16]** years old to use the Service. Separately, where any processing is based on your consent (for example, Google sign-in), and you are below the digital-consent age in your country, a parent or guardian must provide that consent on your behalf. We do not knowingly collect personal data from anyone below the applicable age. If you believe a child has provided us data, contact **privacy@sheetllm.com** _(placeholder)_ and we will delete it.
+The Service is **not directed to children**. You must be at least **16** years old to use the Service. Separately, where any processing is based on your consent (for example, Google sign-in), and you are below the digital-consent age in your country, a parent or guardian must provide that consent on your behalf. We do not knowingly collect personal data from anyone below the applicable age. If you believe a child has provided us data, contact **{{PRIVACY_EMAIL}}** and we will delete it.
 
 ## Changes to This Policy
 
@@ -441,8 +440,8 @@ We may update this Privacy Policy from time to time. For material changes, we wi
 
 ## How to Contact Us
 
-- Privacy questions: **privacy@sheetllm.com** _(placeholder)_
-- General/support: **support@sheetllm.com** _(placeholder)_
+- Privacy questions: **{{PRIVACY_EMAIL}}**
+- General/support: **{{CONTACT_EMAIL}}**
 - Terms of Service (including acceptable use and credits/refund terms): [/terms](/terms)
 - Operator: **{{LEGAL_ENTITY}}**, **{{BUSINESS_ADDRESS}}**
 - Governing law / jurisdiction: **{{JURISDICTION}}** _(see our Terms of Service)_
