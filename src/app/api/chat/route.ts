@@ -564,8 +564,12 @@ async function handleChat(
   // partial keeps it). `&&` short-circuits, so reserveFreePiece runs only for an
   // eligible-shaped request (flag on + verified + from-scratch) — never on an
   // edit/converse, never when the flag is off.
-  const freePiece =
-    isPaidGenerationEnabled() && authenticated && !orchestratorScore && reserveFreePiece(userId)
+  // PR-13: reserveFreePiece now returns the per-claim OWNER TOKEN (or null). Keep
+  // `freePiece` as the boolean the rest of handleChat reads, and thread the token
+  // to the release sites so an un-claim is scoped to THIS request's reservation.
+  const freePieceToken =
+    isPaidGenerationEnabled() && authenticated && !orchestratorScore ? reserveFreePiece(userId) : null
+  const freePiece = freePieceToken !== null
   if (freePiece) generationTier = 'pro'
 
   // Pre-dispatch reservation state + the single release for BOTH pre-dispatch
@@ -587,7 +591,7 @@ async function handleChat(
     if (preDispatchReleased) return
     preDispatchReleased = true
     if (holdId) safeReleaseHold(holdId, requestId)
-    if (freePiece) safeReleaseFreePiece(userId, requestId)
+    if (freePieceToken) safeReleaseFreePiece(userId, freePieceToken, requestId)
   }
 
   // Daily request-quota gate (hosted abuse-gating layer; OFF by default — inert
@@ -777,7 +781,7 @@ async function handleChat(
       // ABORTS the sectional before the metered cost exceeds `holdCredits` (or a
       // wall-clock budget). holdCredits is the placed hold amount (0 off the paid
       // path → no cost-abort; a free piece is wall-clock-bounded only).
-      return await respondWithScoreStream(userId, chatId, orchestratorOutcome, mode, generationTier, requestId, holdId, freePiece, holdCredits)
+      return await respondWithScoreStream(userId, chatId, orchestratorOutcome, mode, generationTier, requestId, holdId, freePiece, freePieceToken, holdCredits)
     }
     if (!('fellThrough' in orchestratorOutcome)) {
       // Non-streaming result: respondWithOrchestratorResult OWNS the hold — it
@@ -1118,9 +1122,9 @@ function safeReleaseHold(holdId: string, requestId: string): void {
  * NEVER after a delivered piece (that keeps the grant consumed). Symmetric with
  * safeReleaseHold.
  */
-function safeReleaseFreePiece(userId: string, requestId: string): void {
+function safeReleaseFreePiece(userId: string, token: string, requestId: string): void {
   try {
-    releaseFreePiece(userId)
+    releaseFreePiece(userId, token)
   } catch (e) {
     console.error('[paywall] free-piece reservation release failed', {
       requestId,
@@ -1786,6 +1790,9 @@ async function respondWithScoreStream(
   requestId: string,
   holdId?: string,
   freePiece?: boolean,
+  // PR-13: the free-piece claim's owner token (from reserveFreePiece), threaded so
+  // the in-stream zero-section release un-claims ONLY this request's reservation.
+  freePieceToken?: string | null,
   // PR-7b-2c: the placed hold's credit amount = the sectional cost budget. The
   // pump aborts before the metered cost reaches it. 0 / undefined off the paid
   // path (no cost-abort; a free piece is wall-clock-bounded only).
@@ -2066,8 +2073,8 @@ async function respondWithScoreStream(
           // consumed (releasing would let an induced seed-stage failure re-burn that
           // cost). A delivered piece (delivered=true) keeps it too. Only one of
           // {holdId, freePiece} is ever set.
-          if (freePiece && !delivered && meterStreamCost().costMicroUsd == null) {
-            safeReleaseFreePiece(userId, requestId)
+          if (freePieceToken && !delivered && meterStreamCost().costMicroUsd == null) {
+            safeReleaseFreePiece(userId, freePieceToken, requestId)
           }
           if (keepalive) clearInterval(keepalive)
           try {

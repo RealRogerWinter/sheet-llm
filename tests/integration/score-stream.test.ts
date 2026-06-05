@@ -90,8 +90,9 @@ describe('/api/chat sectional score streaming (M25-PR-4)', () => {
     vi.stubEnv('ORCHESTRATOR_ENABLED', 'true')
     vi.stubEnv('ORCHESTRATOR_LOG_SILENT', '1')
     vi.stubEnv('SL_SECTIONAL_GEN', '1')
-    // M26: sectional streaming is now pro-tier; opt out of the free bounded
-    // choke point so a fresh generate reaches the sectional pipeline.
+    // Sectional streaming is a PRO-tier path — PR-13 clamps the free tier to
+    // single-shot even with the bounded handler off — so run as the pro tier.
+    vi.stubEnv('SL_GENERATION_TIER', 'pro')
     vi.stubEnv('SL_BOUNDED_GEN', '0')
   })
 

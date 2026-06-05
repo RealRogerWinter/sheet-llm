@@ -60,6 +60,13 @@ export const users = sqliteTable(
     // (NULL = never used). A charge-SKIP grant, OFF the money path — never a
     // credit grant (which would open refund farming; red-team #7).
     freeFullPieceUsedAt: integer('free_full_piece_used_at'),
+    // PR-13: per-claim OWNER token for the free-piece reservation, minted by
+    // reserveFreePiece alongside used_at and matched by releaseFreePiece. Scopes
+    // the un-claim to THIS request's reservation, so a late/duplicate release
+    // (or a future 2nd release path) can never clear a different request's fresh
+    // claim. NULL when the grant is unclaimed; lingers after a kept (delivered)
+    // claim as an audit of which reservation consumed it.
+    freeFullPieceClaimToken: text('free_full_piece_claim_token'),
   },
   (table) => [
     index('users_last_seen').on(table.lastSeenAt),

@@ -206,3 +206,19 @@ describe('0014_user_free_full_piece migration', () => {
     expect(col!.notnull).toBe(0) // nullable — NULL means the grant is unused
   })
 })
+
+// 0015 added users.free_full_piece_claim_token — the per-claim OWNER TOKEN
+// (PR-13) reserveFreePiece mints and releaseFreePiece matches, so an un-claim is
+// scoped to the reservation it owns (can't clobber a concurrent re-claim).
+describe('0015_user_free_full_piece_claim migration', () => {
+  const raw = (db: ReturnType<typeof makeTestDb>): Database.Database => db.$client
+
+  it('adds users.free_full_piece_claim_token (nullable)', () => {
+    const client = raw(makeTestDb())
+    const col = (
+      client.pragma('table_info(users)') as Array<{ name: string; notnull: number }>
+    ).find((c) => c.name === 'free_full_piece_claim_token')
+    expect(col, 'users.free_full_piece_claim_token missing').toBeDefined()
+    expect(col!.notnull).toBe(0) // nullable — NULL when the grant is unclaimed
+  })
+})
