@@ -35,10 +35,13 @@ const IS_WINDOWS = process.platform === 'win32'
 // translation) as opposed to the gate command failing — treated as unavailable.
 const CD_FAIL = 97
 
-// This script lives at <repo>/scripts/chunk/agent-hook.mjs, so the repo root is
-// two directories up — derived from the script's own location, independent of
-// the hook's cwd or any env var. That keeps it identical for every agent
-// (Claude Code, Cursor, Codex, …) regardless of how they invoke hooks.
+// This script lives at <repo>/scripts/chunk/agent-hook.mjs, so the launcher's
+// own repo root is two directories up — derived from the script's location,
+// independent of any env var, so it's identical for every agent (Claude Code,
+// Cursor, Codex, …) regardless of how they invoke hooks. NOTE: this is the
+// *fallback* root for command-availability checks; the gates themselves run in
+// the work tree the hook event targets (its cwd's git toplevel), so commits made
+// inside a linked worktree are validated against the worktree — see runForGate.
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 /** Block the action (exit 2) with a message the agent will see on stderr. */
@@ -82,14 +85,43 @@ function toWslPath(winPath) {
  * contract parses hook stdout as JSON on exit 0. ~/.local/bin is prepended to
  * PATH because bootstrap.sh installs chunk there. A failed `cd` exits CD_FAIL so
  * the caller can tell a path problem apart from a real gate failure.
+ *
+ * `startDir` is the native (Windows on win32) directory to start from, defaulting
+ * to REPO_ROOT — the launcher's own checkout. When `worktreeRelative` is true we
+ * then `cd` to that directory's git toplevel, so a gate validates the *worktree*
+ * actually being committed rather than the main checkout the script lives in
+ * (see runForGate). Resolving the toplevel in the same shell avoids round-
+ * tripping the path through WSL translation.
  */
-function runInRepo(bashCmd) {
+function runInRepo(bashCmd, { startDir = REPO_ROOT, worktreeRelative = false } = {}) {
   const prelude = 'export PATH="$HOME/.local/bin:$PATH"; '
-  const target = IS_WINDOWS ? toWslPath(REPO_ROOT) : REPO_ROOT
-  const line = `cd ${shq(target)} || exit ${CD_FAIL}; ${prelude}${bashCmd}`
+  const start = IS_WINDOWS ? toWslPath(startDir) : startDir
+  // If the requested startDir is unusable, fall back to REPO_ROOT before failing.
+  const fallback = IS_WINDOWS ? toWslPath(REPO_ROOT) : REPO_ROOT
+  const cdToStart =
+    start === fallback
+      ? `cd ${shq(start)} || exit ${CD_FAIL}`
+      : `cd ${shq(start)} 2>/dev/null || cd ${shq(fallback)} || exit ${CD_FAIL}`
+  // `git rev-parse --show-toplevel` from a linked worktree prints the worktree
+  // root; on failure (not a work tree) the `&&` short-circuits and we stay put.
+  const cdToTree = worktreeRelative
+    ? `; __r="$(git rev-parse --show-toplevel 2>/dev/null)" && cd "$__r"`
+    : ''
+  const line = `${cdToStart}${cdToTree}; ${prelude}${bashCmd}`
   return IS_WINDOWS
     ? spawnSync('wsl.exe', ['-e', 'bash', '-lc', line], { encoding: 'utf8' })
     : spawnSync('bash', ['-lc', line], { encoding: 'utf8' })
+}
+
+/**
+ * Run a gate command (typecheck / chunk validate) in the work tree the hook
+ * event actually targets. `eventCwd` is the hook's cwd — the worktree when the
+ * agent is committing inside one, the main checkout otherwise — so resolving its
+ * git toplevel makes the gate see the right files. Falls back to REPO_ROOT when
+ * cwd is missing.
+ */
+function runForGate(bashCmd, eventCwd) {
+  return runInRepo(bashCmd, { startDir: eventCwd || REPO_ROOT, worktreeRelative: true })
 }
 
 /**
@@ -134,7 +166,9 @@ try {
     if (!hasCommand('pnpm')) {
       allow('pnpm not found in the Linux env — skipping the pre-commit typecheck gate (run scripts/chunk/bootstrap.sh).')
     }
-    const r = runInRepo('pnpm typecheck')
+    // Typecheck the work tree being committed (the worktree, if the agent is in
+    // one), not the launcher's own main checkout — see runForGate.
+    const r = runForGate('pnpm typecheck', event.cwd)
     const verdict = classify(r)
     if (verdict === 'unavailable') {
       allow('could not run the typecheck gate (no usable shell/WSL) — skipping.')
@@ -155,7 +189,9 @@ try {
     if (!hasCommand('chunk')) {
       allow('chunk not installed — skipping sidecar validation (run scripts/chunk/bootstrap.sh to enable inner-loop sidecars).')
     }
-    const r = runInRepo('chunk validate')
+    // Validate the work tree the turn happened in (the worktree, if any) — see
+    // runForGate — rather than the launcher's own main checkout.
+    const r = runForGate('chunk validate', event.cwd)
     const verdict = classify(r)
     if (verdict === 'unavailable') {
       allow('could not run chunk validate (no usable shell/WSL) — skipping sidecar validation.')

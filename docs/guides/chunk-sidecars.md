@@ -4,7 +4,7 @@ subsystem: ops
 audience: [contributor, ai-agent]
 status: current
 last_verified: 2026-06-04
-verified_against: 41d2402
+verified_against: ade93bc
 source_paths:
   - .chunk/config.json
   - scripts/chunk/agent-hook.mjs
@@ -61,9 +61,14 @@ The launcher is **platform-aware and fail-safe**:
   **exits 0 (non-blocking)**, so an un-onboarded machine is never bricked. Run
   the bootstrap below to opt in.
 
-Because the launcher derives the repo root from its own location, it behaves
-identically for any agent that supports command hooks (Claude Code today;
-Cursor/Codex can point their hook config at the same script).
+The launcher works for any agent that supports command hooks (Claude Code today;
+Cursor/Codex can point their hook config at the same script), and it is
+**worktree-aware**: the gate runs in the git work tree the hook event targets —
+i.e. the *linked worktree* when the agent commits inside one — not the main
+checkout the script file happens to live in. It does this by resolving
+`git rev-parse --show-toplevel` from the hook's own `cwd` (falling back to the
+launcher's repo root when there's no usable cwd). So `pnpm typecheck` /
+`chunk validate` always see the files actually being committed.
 
 ## One-time setup
 
