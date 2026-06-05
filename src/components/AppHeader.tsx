@@ -6,6 +6,7 @@ import ChatHistoryButton from './ChatHistoryButton'
 import HelpButton from './HelpButton'
 import ImportScoreButton from './ImportScoreButton'
 import NewScoreButton from './NewScoreButton'
+import PricingNavButton from './PricingNavButton'
 import SessionsButton from './SessionsButton'
 import ThemeToggle from './ThemeToggle'
 import AuthNavButton from './auth/AuthNavButton'
@@ -40,6 +41,7 @@ export default function AppHeader() {
         <BlankScoreButton />
         <NewScoreButton />
         <HelpButton />
+        <PricingNavButton />
         <ThemeToggle />
         <AuthNavButton />
         <HeaderMenu />
