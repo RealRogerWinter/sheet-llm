@@ -2,7 +2,7 @@
  * tokens (--ink / --graphite / --rule / --paper / --paper-warm / --playing),
  * which resolve in BOTH light and dark, so it avoids the dark-only
  * --surface/--text/--border vocabulary (those need fallbacks). Notice/badge
- * colors use the var(--ok-*/--warn-*, light-fallback) pattern AccountSettings
+ * colors use the var(--ok-* / --warn-*, light-fallback) pattern AccountSettings
  * established. */
 
 .section {
