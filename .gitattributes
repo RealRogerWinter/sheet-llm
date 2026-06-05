@@ -1,0 +1,4 @@
+# Keep the chunk inner-loop scripts LF so they run under bash/WSL regardless of a
+# contributor's core.autocrlf setting (they are executed in a Linux shell).
+scripts/chunk/*.sh  text eol=lf
+scripts/chunk/*.mjs text eol=lf

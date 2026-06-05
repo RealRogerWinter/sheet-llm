@@ -58,5 +58,13 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Claude Code local working dirs (agent worktrees, transcripts, caches)
-.claude/
+# Claude Code local working dirs (agent worktrees, transcripts, caches).
+# Ignore the directory's contents but KEEP the committed shared hooks that wire
+# chunk's inner-loop validation for every contributor.
+.claude/*
+!.claude/settings.json
+
+# chunk active-sidecar state (machine-local handles to a running microVM; never
+# committed — only .chunk/config.json is). Mirrors what `chunk init` ignores.
+.chunk/sidecar.json
+.chunk/sidecar.*.json

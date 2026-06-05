@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "_comment": "chunk inner-loop validation, wired through a cross-platform launcher (scripts/chunk/agent-hook.mjs) so the gates run via WSL on Windows and natively on macOS/Linux, and degrade to a no-op when chunk isn't installed. See docs/guides/chunk-sidecars.md.",
+  "permissions": {
+    "allow": ["Bash(chunk:*)"]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git commit*)",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/scripts/chunk/agent-hook.mjs\" commit-gate",
+            "timeout": 180
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/scripts/chunk/agent-hook.mjs\" stop-gate",
+            "timeout": 600
+          }
+        ]
+      }
+    ]
+  }
+}
