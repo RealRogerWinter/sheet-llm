@@ -17,3 +17,20 @@ CVE-2023-45853
 # non-root 'app' user via gosu before exec'ing Litestream -> node. The effective
 # runtime user is non-root, so a static "add USER" would break the volume chown.
 DS-0002
+
+# --- litestream prebuilt Go binary (/usr/local/bin/litestream) ---
+# Residual CRITICALs in litestream v0.3.14's vendored Go modules. litestream is a
+# LOCAL sidecar that replicates the SQLite WAL to Cloudflare R2 over HTTPS (S3
+# API); it runs no server and accepts no untrusted network input. These clear
+# only when litestream ships a build on Go >=1.24 with updated modules (fixable
+# upstream, not by us) — re-check on every litestream bump.
+#
+# x/crypto/ssh ServerConfig.PublicKeyCallback authz bypass — litestream uses no
+# SSH server / PublicKeyCallback, so the code path is unreachable.
+CVE-2024-45337
+# grpc/authz HTTP/2 path-validation authz bypass — R2 replication is the S3 API
+# over HTTPS, not gRPC; the grpc/authz path is unreachable.
+CVE-2026-33186
+# crypto/tls incorrect certificate validation (Go < 1.24.13) — litestream only
+# dials the single configured R2 endpoint; there are no untrusted TLS peers.
+CVE-2025-68121

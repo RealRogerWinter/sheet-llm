@@ -18,7 +18,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 build-essential ca-certificates wget \
   && rm -rf /var/lib/apt/lists/*
 # Litestream (downloaded here; only the binary is copied into the lean runtime).
-ARG LITESTREAM_VERSION=v0.3.13
+# v0.3.14 is the latest 0.3.x patch (newer Go stdlib); the 0.5.x line is a
+# config-changing rewrite. Residual Go-module CRITICALs in the prebuilt binary
+# (unreachable SSH/gRPC paths) are accepted, with rationale, in .trivyignore.
+ARG LITESTREAM_VERSION=v0.3.14
 RUN wget -qO /tmp/litestream.tar.gz \
       "https://github.com/benbjohnson/litestream/releases/download/${LITESTREAM_VERSION}/litestream-${LITESTREAM_VERSION}-linux-amd64.tar.gz" \
   && tar -xzf /tmp/litestream.tar.gz -C /usr/local/bin litestream \
