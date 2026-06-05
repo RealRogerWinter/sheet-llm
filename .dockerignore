@@ -17,6 +17,7 @@ playwright-report
 .env.*
 !.env.example
 .claude
+.chunk
 .vscode
 *.log
 npm-debug.log*

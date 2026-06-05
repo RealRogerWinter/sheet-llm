@@ -1,0 +1,17 @@
+{
+  "commands": [
+    { "name": "install", "run": "pnpm install --frozen-lockfile" },
+    { "name": "typecheck", "run": "pnpm typecheck", "role": "gate", "timeout": 300, "limit": 1 },
+    { "name": "test", "run": "pnpm test", "role": "gate", "timeout": 600, "limit": 3 }
+  ],
+  "vcs": { "org": "RealRogerWinter", "repo": "sheet-llm" },
+  "environment": {
+    "stack": "typescript",
+    "setup": [
+      { "name": "system", "command": "command -v corepack >/dev/null 2>&1 && corepack enable && corepack prepare pnpm@9.15.9 --activate || npm install -g pnpm@9.15.9" },
+      { "name": "install", "command": "pnpm install --frozen-lockfile" }
+    ],
+    "image": "cimg-node",
+    "image_version": "24.15"
+  }
+}
