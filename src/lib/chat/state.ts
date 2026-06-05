@@ -791,6 +791,15 @@ interface ChatStore {
   toggleSidebarCollapsed: () => void
   setSidebarCollapsed: (collapsed: boolean) => void
 
+  /**
+   * Monotonic counter the left SessionSidebar watches to force a re-fetch of the
+   * session list outside its usual chatId/auth/visibility triggers — e.g. after
+   * the post-login "Keep my work" adoption migrates anonymous sessions onto the
+   * account (which changes the list without changing chatId or auth status).
+   */
+  sessionsRefreshKey: number
+  refreshSessions: () => void
+
   // Chat history panel actions
   setTurns: (turns: TranscriptTurn[]) => void
   appendTurns: (turns: TranscriptTurn[]) => void
@@ -1094,6 +1103,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   toggleSidebarCollapsed: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
+  sessionsRefreshKey: 0,
+  refreshSessions: () => set((s) => ({ sessionsRefreshKey: s.sessionsRefreshKey + 1 })),
 
   beginRequest: (prompt) => {
     markChatActive(true)

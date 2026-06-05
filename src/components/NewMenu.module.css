@@ -1,0 +1,81 @@
+.root {
+  position: relative;
+  display: inline-flex;
+}
+
+/* Text button, matches the former NewScoreButton/BlankScoreButton look. */
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  font-size: 13px;
+  color: var(--graphite);
+  background: var(--paper);
+  cursor: pointer;
+  transition:
+    color 120ms,
+    border-color 120ms;
+}
+
+.button:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.plus {
+  font-size: 16px;
+  line-height: 1;
+}
+
+/* Portaled to <body> and positioned via inline top/right from the button's
+ * rect, so it escapes the header's sticky stacking context (mirrors
+ * HeaderMenu.module.css). Popover-level z-index sits above the docked side
+ * panels (--z-panel 81 / --z-ghost-panel 95). */
+.menu {
+  position: fixed;
+  z-index: var(--z-popover, 110);
+  min-width: 168px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--ink);
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.item:hover:not(:disabled) {
+  background: var(--hover, rgba(0, 0, 0, 0.06));
+}
+
+.item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

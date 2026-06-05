@@ -93,6 +93,24 @@ export async function logout(): Promise<AuthResult> {
   return mutateThenSync('/api/auth/logout', {})
 }
 
+/**
+ * Migrate the browser's pre-login anonymous sessions onto the just-logged-in
+ * account (the post-login "Keep my work" choice). Best-effort: returns the number
+ * of sessions migrated, or 0 on any failure — the current work is already loaded
+ * locally regardless. Unlike the other mutators it does NOT re-sync the session
+ * (auth state is unchanged — the user is already logged in).
+ */
+export async function adoptAnonWork(): Promise<number> {
+  try {
+    const res = await authPost('/api/auth/adopt-anon-work', {})
+    if (!res.ok) return 0
+    const body = (await res.json().catch(() => ({}))) as { migrated?: number }
+    return typeof body.migrated === 'number' ? body.migrated : 0
+  } catch {
+    return 0
+  }
+}
+
 export async function logoutAllDevices(): Promise<AuthResult> {
   return mutateThenSync('/api/auth/logout-all', {})
 }

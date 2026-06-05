@@ -1,0 +1,61 @@
+/* Fixed full-screen overlay that always CENTERS the widget. Kept above all app
+ * chrome (the bot check must never be hidden behind a panel/modal), matching the
+ * previous max-z behavior. Click-through while idle so a silent managed
+ * auto-pass never blocks the page; the box + (active) backdrop re-enable
+ * pointer events. */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  pointer-events: none;
+}
+
+.backdrop {
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  transition: background 150ms ease;
+  pointer-events: none;
+}
+
+/* An interactive challenge is showing → dim the rest of the page and capture
+ * clicks so the user can't interact with the page behind it. */
+.overlay[data-active='true'] .backdrop {
+  background: rgba(10, 10, 10, 0.55);
+  pointer-events: auto;
+}
+
+/* The widget container. Always interactable so the challenge is solvable even
+ * if the interactive callbacks never fire; zero-size + invisible while idle. */
+.box {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  pointer-events: auto;
+}
+
+/* Frame the box as a card while an interactive challenge (or an error) is up. */
+.overlay[data-show='true'] .box {
+  padding: 20px;
+  background: var(--paper, #fff);
+  border: 1px solid var(--rule, #d4d4d2);
+  border-radius: var(--radius, 8px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+}
+
+.error {
+  max-width: 300px;
+  padding: 6px 8px;
+  font-size: 12px;
+  line-height: 1.3;
+  color: #7a1f1f;
+  background: #fde8e8;
+  border: 1px solid #f5b5b5;
+  border-radius: 6px;
+}
