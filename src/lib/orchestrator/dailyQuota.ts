@@ -16,7 +16,13 @@ import type { GenerationTier } from '@/lib/orchestrator/generationTier'
  *
  * Tiers (see resolveGenerationTier / users.tier+emailVerified):
  *   - Pro                       → bypass (no row written)
- *   - verified logged-in free   → key 'u:<userId>', limit SL_DAILY_QUOTA_FREE (10)
+ *   - verified logged-in free   → counts against BOTH the per-DEVICE bucket
+ *       'a:<hmac(ip)>' (the SAME bucket anon usage lands in) AND the per-ACCOUNT
+ *       bucket 'u:<userId>', each at SL_DAILY_QUOTA_FREE (10); admitted only if
+ *       BOTH allow. Because the device bucket is shared with the anon path, a
+ *       device's anon + logged-in usage is ONE running total: 5 anon then login
+ *       grants 5 more (10/device), NOT a fresh 10. The account bucket then caps
+ *       the same user to 10/day even as they roam to new IPs.
  *   - anonymous OR unverified   → key 'a:<hmac(ip)>', limit SL_DAILY_QUOTA_ANON (5)
  *   - risky-IP + TRULY anon     → login_required (sign-in CTA), no row
  *
@@ -120,10 +126,21 @@ export interface QuotaInput {
   risk: RiskVerdict
 }
 
+/** One durable counter the request must pass: a quota key, its per-window
+ *  limit, and the userId stamped on the row (null = shared/anon-owned, e.g. the
+ *  per-device 'a:' bucket and the '*' instance ceiling — kept null so a GDPR
+ *  delete of one account never resets a bucket shared across users). */
+export interface QuotaBucket {
+  key: string
+  limit: number
+  userId: string | null
+}
+
 export type QuotaClass =
   | { kind: 'bypass'; reason: string }
   | { kind: 'needsSignIn' }
-  | { kind: 'counted'; key: string; limit: number; userId: string | null; isAnon: boolean }
+  // ALL buckets must allow for the request to be admitted; all increment together.
+  | { kind: 'counted'; buckets: QuotaBucket[]; isAnon: boolean }
 
 function isEmailVerified(db: ReturnType<typeof getDb>, userId: string): boolean {
   try {
@@ -138,20 +155,32 @@ export function classifyQuota(input: QuotaInput, db = getDb()): QuotaClass {
   const { user, tier, request, risk } = input
   if (tier === 'pro') return { kind: 'bypass', reason: 'pro' }
 
-  // Verified logged-in → free tier keyed on the account.
-  if (user.authenticated && isEmailVerified(db, user.userId)) {
-    return { kind: 'counted', key: 'u:' + user.userId, limit: freeLimit(), userId: user.userId, isAnon: false }
-  }
-
-  // Everyone else is the ANON CLASS (anonymous, or logged-in-but-unverified —
-  // so a farmed unverified account is worth no more than the anon path).
   // login_required applies ONLY to the truly-unauthenticated (an already-logged-in
   // unverified user must not be told to "sign in"; they just share the anon bucket).
   if (!user.authenticated && risk.risky && isAccountsEnabled()) return { kind: 'needsSignIn' }
 
-  const key = anonKeyForRequest(request)
-  if (!key) return { kind: 'bypass', reason: 'untrusted_ip' } // fail-open to availability
-  return { kind: 'counted', key, limit: anonLimit(), userId: null, isAnon: true }
+  // The per-DEVICE bucket (IP /24-or-/56, pseudonymized). Shared by the anon path
+  // AND the verified-logged-in path so login can't reset a device's running total.
+  const deviceKey = anonKeyForRequest(request)
+
+  // Verified logged-in → enforce BOTH the per-device cap (so a device's anon +
+  // logged-in usage stays one 10-total) AND a per-account cap (so the same user is
+  // bounded to 10/day even across devices/IPs). Each at the free limit; admitted
+  // only if both allow. If the device IP is untrusted (no key), the account bucket
+  // still applies — a logged-in user is never wholly un-capped.
+  if (user.authenticated && isEmailVerified(db, user.userId)) {
+    const buckets: QuotaBucket[] = []
+    if (deviceKey) buckets.push({ key: deviceKey, limit: freeLimit(), userId: null })
+    buckets.push({ key: 'u:' + user.userId, limit: freeLimit(), userId: user.userId })
+    return { kind: 'counted', buckets, isAnon: false }
+  }
+
+  // Everyone else is the ANON CLASS (anonymous, or logged-in-but-unverified — so a
+  // farmed unverified account is worth no more than the anon path): one per-device
+  // bucket at the lower anon limit. Same key as the verified device bucket above,
+  // so the count carries across the login boundary.
+  if (!deviceKey) return { kind: 'bypass', reason: 'untrusted_ip' } // fail-open to availability
+  return { kind: 'counted', buckets: [{ key: deviceKey, limit: anonLimit(), userId: null }], isAnon: true }
 }
 
 // ---------------------------------------------------------------------------
@@ -253,20 +282,29 @@ export function checkDailyQuota(input: QuotaInput): QuotaResult {
     refreshRowCountIfStale(db)
     const now = Math.floor(Date.now() / 1000)
     const win = windowSec()
-    const globalLimit = cls.isAnon ? anonGlobalLimit() : null
 
-    // Evaluate BOTH the instance ceiling and the per-key bucket, then commit both
-    // only if both allow — so a per-key reject never burns a global slot and vice
-    // versa. The callback is synchronous (no await): within this Node process it
-    // runs to completion before any other request's, and the guard-in-the-write
-    // UPDATE prevents overshoot even across connections.
+    // The full set of counters this request must pass, in order: the optional
+    // instance-wide anon ceiling ('*', anon only) first, then the per-key buckets
+    // from classifyQuota (per-device and/or per-account). Tagged isGlobal so a
+    // ceiling reject is reported distinctly from a per-user cap.
+    const buckets: Array<QuotaBucket & { isGlobal?: boolean }> = []
+    const globalLimit = cls.isAnon ? anonGlobalLimit() : null
+    if (globalLimit != null) buckets.push({ key: '*', limit: globalLimit, userId: null, isGlobal: true })
+    buckets.push(...cls.buckets)
+
+    // Evaluate ALL buckets first, then commit them ALL — only if every one allows
+    // — so a reject on any bucket never burns a slot on another. The callback is
+    // synchronous (no await): within this Node process it runs to completion before
+    // any other request's, and the guard-in-the-write UPDATE prevents overshoot
+    // even across connections.
     const outcome = db.transaction((tx): { ok: true } | { ok: false; which: 'global' | 'key'; windowStart: number } => {
-      const gDec = globalLimit != null ? evaluate(tx, '*', globalLimit, now, win) : null
-      if (gDec && !gDec.allow) return { ok: false, which: 'global', windowStart: gDec.windowStart }
-      const kDec = evaluate(tx, cls.key, cls.limit, now, win)
-      if (!kDec.allow) return { ok: false, which: 'key', windowStart: kDec.windowStart }
-      if (gDec && globalLimit != null) apply(tx, '*', null, gDec, globalLimit, now)
-      apply(tx, cls.key, cls.userId, kDec, cls.limit, now)
+      const pending: Array<{ b: (typeof buckets)[number]; d: Decision }> = []
+      for (const b of buckets) {
+        const d = evaluate(tx, b.key, b.limit, now, win)
+        if (!d.allow) return { ok: false, which: b.isGlobal ? 'global' : 'key', windowStart: d.windowStart }
+        pending.push({ b, d })
+      }
+      for (const { b, d } of pending) apply(tx, b.key, b.userId, d, b.limit, now)
       return { ok: true }
     })
 

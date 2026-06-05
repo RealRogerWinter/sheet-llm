@@ -3,8 +3,8 @@ title: Daily Request Quota & Abuse Gating
 subsystem: daily-quota
 audience: [contributor, ai-agent]
 status: current
-last_verified: 2026-06-04
-verified_against: ab82027
+last_verified: 2026-06-05
+verified_against: 3fcf277
 source_paths:
   - src/lib/orchestrator/dailyQuota.ts
   - src/lib/security/ipRisk.ts
@@ -42,10 +42,14 @@ gate — bound *rate* and *bots* but not *daily spend*, and both reset on every
 container redeploy. This layer adds a **durable daily request quota** plus an
 **IP‑reputation gate**, and nudges users toward signing up / Pro.
 
-Targets: **anonymous = 5 / 24h**, **logged‑in free = 10 / 24h**, **Pro = unlimited**
-(Pro is operator‑assigned via `users.tier`; there is no checkout yet — the limit
-CTA points at a `/pro` waitlist). All limits are env‑tuneable and read fresh per
-request.
+Targets: **anonymous = 5 / 24h**, **logged‑in free = 10 / 24h per device AND per
+account**, **Pro = unlimited** (Pro is operator‑assigned via `users.tier`; there
+is no checkout yet — the limit CTA points at a `/pro` waitlist). All limits are
+env‑tuneable and read fresh per request. The free 10/24h is enforced on **both**
+the device (IP) bucket and the account bucket: a device's anon + logged‑in usage
+is ONE running total (5 anon then login grants 5 more, **10/device total — not a
+fresh 10**), and the account cap follows the user across IPs — so neither
+account‑farming on one device nor IP‑rotation by one account exceeds 10.
 
 ## Layered defense
 
@@ -63,10 +67,13 @@ request.
 ## How it works
 
 - **Identity keying** (`classifyQuota`): Pro → bypass (no row); verified logged‑in
-  free → `u:<userId>` (10/24h); anonymous **and unverified‑logged‑in** →
+  free → **two** buckets, each at 10/24h — the per‑device `a:<hmac(ip)>` (the SAME
+  bucket the anon path uses, so login can't reset a device's running total) AND the
+  per‑account `u:<userId>` — admitted only when both allow (if the IP is untrusted,
+  the account bucket alone still applies); anonymous **and unverified‑logged‑in** →
   `a:<hmac(ip)>` (5/24h, so farming unverified accounts is worth no more than the
   anon path); risky **truly‑anonymous** IP → `login_required` (sign‑in CTA). An
-  untrusted/`local` IP → bypass (never a shared counted bucket).
+  untrusted/`local` IP → bypass for the anon path (never a shared counted bucket).
 - **IP key**: `CF-Connecting-IP`, trusted only when `isCfRequest()`, normalized to
   `/24` (v4) or `/56` (v6, closes the `/64` self‑rotation multiplier; `ipMath.ts`
   also fixes the abbreviated‑IPv6 bug the shared `normalizeIp` has), then
@@ -74,9 +81,11 @@ request.
   IP comes from the hop‑aware `extractClientIp` **only when `TRUSTED_PROXY_HOPS` is
   set**; otherwise the request bypasses entirely (never a shared `local` bucket).
 - **Window**: a fixed 24h window anchored at first hit, one durable `request_quota`
-  row per key (`schema.ts`). One synchronous `db.transaction` evaluates the
-  instance ceiling + per‑key bucket and commits both only if both pass; a
-  guard‑in‑the‑write `UPDATE … WHERE count < limit` makes over‑count impossible.
+  row per key (`schema.ts`). One synchronous `db.transaction` evaluates the full set
+  of buckets the request must pass (instance ceiling + device + account, as
+  applicable) and commits them ALL only if every one passes — so a reject on any
+  bucket never burns a slot on another; a guard‑in‑the‑write
+  `UPDATE … WHERE count < limit` makes over‑count impossible.
 - **Count‑on‑admission, never refunded.** The increment is pre‑dispatch (refunds
   would be an abuse oracle). Reset hints are coarsened to the minute (no
   to‑the‑second boundary leak).

@@ -83,13 +83,69 @@ describe('checkDailyQuota', () => {
     expect((await keys())[0]).toMatch(/^a:/)
   })
 
-  it('verified logged-in free: keyed on userId, 10 ok then 429', async () => {
+  it('verified logged-in free: 10 ok then 429, keyed on BOTH the device and account buckets', async () => {
     await seedUser('u1', 1, 'free')
     const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
-    const i = input({ user: { userId: 'u1', authenticated: true }, tier: 'free' })
+    const i = input({ user: { userId: 'u1', authenticated: true }, tier: 'free', ip: '9.9.9.9' })
     for (let n = 0; n < 10; n++) expect(checkDailyQuota(i).ok).toBe(true)
     expect(checkDailyQuota(i).ok).toBe(false)
-    expect(await keys()).toContain('u:u1')
+    const k = await keys()
+    expect(k).toContain('u:u1') // per-account bucket
+    expect(k.some((x) => x.startsWith('a:'))).toBe(true) // per-device bucket too
+  })
+
+  it('anon 5 then verified login on the SAME device → only 5 more (10 TOTAL/device, not 15)', async () => {
+    await seedUser('u1', 1, 'free')
+    const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
+    const ip = '9.9.9.9'
+    // 5 anonymous hits exhaust the anon sub-cap on the device bucket.
+    let anonOk = 0
+    for (let n = 0; n < 12; n++) {
+      if (checkDailyQuota(input({ user: { userId: 'anon', authenticated: false }, tier: 'free', ip })).ok) anonOk++
+      else break
+    }
+    expect(anonOk).toBe(5)
+    // Logging in lifts the device bucket's limit to 10 — but the 5 anon hits
+    // already counted, so exactly 5 more are granted (not a fresh 10).
+    let loggedInOk = 0
+    for (let n = 0; n < 12; n++) {
+      if (checkDailyQuota(input({ user: { userId: 'u1', authenticated: true }, tier: 'free', ip })).ok) loggedInOk++
+      else break
+    }
+    expect(loggedInOk).toBe(5)
+    expect(anonOk + loggedInOk).toBe(10) // 10 max per device per day
+  })
+
+  it('account farming on ONE device is closed: a 2nd verified account gets 0 more', async () => {
+    await seedUser('u1', 1, 'free')
+    await seedUser('u2', 1, 'free')
+    const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
+    const ip = '9.9.9.9'
+    // First account burns the whole per-device budget.
+    let a = 0
+    for (let n = 0; n < 14; n++) {
+      if (checkDailyQuota(input({ user: { userId: 'u1', authenticated: true }, tier: 'free', ip })).ok) a++
+      else break
+    }
+    expect(a).toBe(10)
+    // A freshly-created second account on the same device shares the device bucket
+    // (now exhausted) → no extra generations, even though its own account bucket is empty.
+    expect(checkDailyQuota(input({ user: { userId: 'u2', authenticated: true }, tier: 'free', ip })).ok).toBe(false)
+  })
+
+  it('per-account cap follows the user across devices (roaming IPs): 10 total, not 10 per IP', async () => {
+    await seedUser('u1', 1, 'free')
+    const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
+    // Device A: 6 hits.
+    let a = 0
+    for (let n = 0; n < 6; n++) if (checkDailyQuota(input({ user: { userId: 'u1', authenticated: true }, tier: 'free', ip: '1.1.1.1' })).ok) a++
+    expect(a).toBe(6)
+    // Device B (different IP, fresh device bucket): the account bucket carries 6,
+    // so only 4 more before the per-account cap of 10 bites.
+    let b = 0
+    for (let n = 0; n < 8; n++) if (checkDailyQuota(input({ user: { userId: 'u1', authenticated: true }, tier: 'free', ip: '2.2.2.2' })).ok) b++
+    expect(b).toBe(4)
+    expect(a + b).toBe(10)
   })
 
   it('unverified logged-in is demoted to the anon tier (5, keyed on IP — defeats account-farming)', async () => {
