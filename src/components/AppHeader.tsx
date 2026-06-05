@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react'
 import HelpButton from './HelpButton'
 import ImportScoreButton from './ImportScoreButton'
 import NewMenu from './NewMenu'
+import PricingNavButton from './PricingNavButton'
 import SessionsButton from './SessionsButton'
 import ThemeToggle from './ThemeToggle'
 import UsageCounter from './UsageCounter'
@@ -38,6 +39,7 @@ export default function AppHeader() {
         <NewMenu />
         <UsageCounter />
         <HelpButton />
+        <PricingNavButton />
         <ThemeToggle />
         <AuthNavButton />
         <HeaderMenu />
