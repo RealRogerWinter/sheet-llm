@@ -26,7 +26,7 @@ interface DeleteReceipt {
  * "DELETE" before the button activates (the server enforces this
  * too via Zod literal validation).
  */
-export default function SettingsContent() {
+export default function SettingsContent({ legalEnabled = false }: { legalEnabled?: boolean }) {
   const [confirm, setConfirm] = useState('')
   const [deleting, setDeleting] = useState(false)
   const [receipt, setReceipt] = useState<DeleteReceipt | null>(null)
@@ -177,6 +177,26 @@ export default function SettingsContent() {
           </p>
         )}
       </section>
+
+      {legalEnabled && (
+        <p className={styles.lede}>
+          <Link href="/terms" className={styles.link}>Terms of Service</Link>
+          {' · '}
+          <Link href="/privacy" className={styles.link}>Privacy Policy</Link>
+        </p>
+      )}
+      <p className={styles.lede}>
+        Open source and built in public on{' '}
+        <a
+          href="https://github.com/RealRogerWinter/sheet-llm"
+          className={styles.link}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          GitHub
+        </a>
+        .
+      </p>
     </main>
   )
 }

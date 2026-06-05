@@ -441,3 +441,25 @@ Readers: `src/lib/orchestrator/dailyQuota.ts`, `src/lib/security/ipRisk.ts`.
 | `SL_IP_RISK_DEBUG` | off | Log per-request risk verdicts (hashed IP only). |
 | `SL_EDGE_AUTH_SECRET` | unset | Shared secret a CF Transform Rule SETs as `x-sl-edge-auth`; makes `isCfRequest()` independent of the CF-IP firewall. |
 | `SL_PRO_WAITLIST_NOTIFY` | unset | Operator email for `/api/pro-interest` (else `/pro` uses a `mailto:` fallback). |
+
+## Legal pages (Terms of Service & Privacy Policy)
+
+The public `/terms` and `/privacy` pages (and their UI links on the signup and
+settings footers) are **gated on three REQUIRED operator-identity values**. If
+any is unset/blank, both pages `notFound()` (404) and the links are hidden — we
+never surface a legal document that still reads "[LEGAL ENTITY]". The values are
+substituted into the page text at render time (`renderLegalDoc` in
+`src/lib/legal/config.ts`). Read at RUNTIME (the pages are `force-dynamic`), so a
+`.env` change takes effect on the next request after the container reloads — no
+image rebuild. The documents still contain other bracketed `[PLACEHOLDERS]`
+(contact mailboxes, retention periods, transfer mechanisms, …) that need legal
+review before launch.
+
+| Flag | Default | Effect / read site |
+| --- | --- | --- |
+| `SL_LEGAL_ENTITY` | unset | Operator's registered legal name (GDPR controller), e.g. `Jane Doe` or `Acme GmbH`. `legal/config.ts:getLegalConfig` |
+| `SL_LEGAL_ADDRESS` | unset | Operator's business/registered address (Stripe requires this; EU may require an Impressum). `legal/config.ts:getLegalConfig` |
+| `SL_LEGAL_JURISDICTION` | unset | Governing law / forum, e.g. `Germany`; also used for the tax-records retention reference. `legal/config.ts:getLegalConfig` |
+
+**Gating summary:** all three must be non-empty → `isLegalEnabled()` true → pages
+render + links show; otherwise 404 + no links.
