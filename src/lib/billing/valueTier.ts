@@ -69,20 +69,29 @@ export function costToCredits(microUsd: number, markup: number): number {
 }
 
 // ── Worst-case hold sizing ────────────────────────────────────────────────
-// A PROVABLE upper bound on what a Pro NON-STREAMING turn can settle to, so a
-// hold sized to it guarantees creditsCharged ≤ hold and `settleHold`'s overHold
-// flag is a paging-alert backstop, never the business model. Bounds (not
-// estimates), at the priciest in-scope model — Sonnet 4.6; Advanced/Opus
-// routing is PR-8 — all input billed UNCACHED (the most expensive case; real
-// turns pay the cheaper cache-read rate):
+// A PROVABLE upper bound on what a Pro turn can settle to, so a hold sized to it
+// guarantees creditsCharged ≤ hold and `settleHold`'s overHold flag is a
+// paging-alert backstop, never the business model. Bounds (not estimates), all
+// input billed UNCACHED (the most expensive case; real turns pay the cheaper
+// cache-read rate):
 //   handler: up to MAX_HANDLER_ATTEMPTS attempts, each `maxOutputTokens` out +
 //            WORST_INPUT_TOKENS_PER_CALL in
 //   overhead: classifier (Haiku) + planner + dispatcher, folded into one
-//            generous Sonnet-priced bound
-// Sonnet 4.6 is the priciest IN-SCOPE model. PR-8 adds Advanced/Opus routing —
-// re-derive WORST_MODEL when that lands (Opus computes to a larger hold), else an
-// Opus turn would routinely trip overHold.
-const WORST_MODEL = 'claude-sonnet-4-6'
+//            generous Sonnet-priced bound — these NEVER route to Opus (selective
+//            routing, PR-8), so the overhead term is always Sonnet-priced.
+//
+// PR-8 Advanced Composer: an Advanced turn routes its heavy single-pass call to
+// Opus 4.7 (~1.67× Sonnet) AND bypasses the sectional stream, so its bound is
+// the NON-STREAMING handler at Opus pricing only (no sectional term). A Standard
+// turn can resolve to the sectional stream, so its bound takes the MAX of the
+// non-streaming and 12-section bounds at Sonnet pricing. The `advanced` flag on
+// the sizing functions selects between them — sizing the hold to the model the
+// turn will ACTUALLY use, so an Opus turn never under-provisions its hold.
+export const WORST_MODEL_STANDARD = 'claude-sonnet-4-6'
+// The Opus model the `large` tier resolves to (providers/registry.ts). Opus 4.7
+// and 4.8 share the $5/$25 tier in pricing.ts, so this bound holds for either; a
+// drift-guard test pins it to the registry `large` entry AND to PRICING.
+export const WORST_MODEL_ADVANCED = 'claude-opus-4-7'
 /** completeWithRetry default maxRetries = 2 ⇒ 1 initial + 2 retries. */
 const MAX_HANDLER_ATTEMPTS = 3
 // Non-streaming per-call input bound: render_score schema (~13k) + a large
@@ -112,6 +121,12 @@ const SECTION_INPUT_TOKENS = 12_000
  * is a rare paging-alert backstop, never the model. Never below
  * {@link VALUE_TIERS}.standard.
  *
+ * `advanced` (PR-8): when the Advanced toggle is resolved-on for the turn, the
+ * heavy call routes to Opus 4.7 and the turn bypasses the sectional stream, so
+ * the bound is the non-streaming handler at Opus pricing (~1.67× Sonnet, no
+ * sectional term). This raises the START GATE / floor for an Advanced turn so an
+ * Opus settle never trips overHold. Default `false` = the Sonnet bound above.
+ *
  * NOTE (PR-7b-2c): this is the non-streaming bound, the START GATE, and the hold
  * FLOOR — not the whole story for a large sectional. A sectional has an UNCAPPED
  * section count (planToSegments caps only at MAX_TOTAL_BARS=512), and each bounded
@@ -124,24 +139,32 @@ const SECTION_INPUT_TOKENS = 12_000
  * `respondWithScoreStream` / `sectionalAbortReason`. settleHold's debit cap remains
  * the hard overdraft backstop.
  */
-export function worstCaseHoldCredits(maxOutputTokens: number): number {
+export function worstCaseHoldCredits(maxOutputTokens: number, advanced = false): number {
+  const handlerModel = advanced ? WORST_MODEL_ADVANCED : WORST_MODEL_STANDARD
   const nonStreamingUsd =
     MAX_HANDLER_ATTEMPTS *
-    billableCostUsd(WORST_MODEL, {
+    billableCostUsd(handlerModel, {
       uncachedInputTokens: WORST_INPUT_TOKENS_PER_CALL,
       outputTokens: maxOutputTokens,
       cacheReadInputTokens: 0,
       cacheCreationInputTokens: 0,
     })
-  const sectionalUsd =
-    MAX_SECTIONS *
-    billableCostUsd(WORST_MODEL, {
-      uncachedInputTokens: SECTION_INPUT_TOKENS,
-      outputTokens: maxOutputTokens,
-      cacheReadInputTokens: 0,
-      cacheCreationInputTokens: 0,
-    })
-  const overheadUsd = billableCostUsd(WORST_MODEL, {
+  // A Standard turn can resolve to the sectional stream; an Advanced turn
+  // bypasses it for a single Opus pass (the sectional seed/extend loop stays
+  // Sonnet-tuned, never Opus — see modelClass.ts), so the sectional bound only
+  // applies to Standard, priced at the turn's handler model.
+  const sectionalUsd = advanced
+    ? 0
+    : MAX_SECTIONS *
+      billableCostUsd(handlerModel, {
+        uncachedInputTokens: SECTION_INPUT_TOKENS,
+        outputTokens: maxOutputTokens,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 0,
+      })
+  // Overhead (classifier/planner/dispatcher) never routes to Opus — always
+  // Sonnet-priced regardless of `advanced`.
+  const overheadUsd = billableCostUsd(WORST_MODEL_STANDARD, {
     uncachedInputTokens: OVERHEAD_INPUT_TOKENS,
     outputTokens: OVERHEAD_OUTPUT_TOKENS,
     cacheReadInputTokens: 0,
@@ -206,9 +229,17 @@ export function freePieceBudgetCredits(): number {
  * `available >= worstCaseHoldCredits(...)` (→ 402) before placing the hold — when
  * `available` is below the floor this returns the floor (which `placeHold` then
  * fail-closes on), so it is safe either way.
+ *
+ * `advanced` (PR-8) raises the floor to the Opus non-streaming bound for an
+ * Advanced turn (pass the SAME value used for the start-gate check above). The
+ * cap is a credit ceiling, model-independent, so it is unchanged.
  */
-export function generationHoldCredits(availableCredits: number, maxOutputTokens: number): number {
-  const floor = worstCaseHoldCredits(maxOutputTokens)
+export function generationHoldCredits(
+  availableCredits: number,
+  maxOutputTokens: number,
+  advanced = false,
+): number {
+  const floor = worstCaseHoldCredits(maxOutputTokens, advanced)
   const cap = Math.max(floor, maxGenerationHoldCredits())
   const want = Number.isFinite(availableCredits) ? Math.floor(availableCredits) : floor
   return Math.min(Math.max(want, floor), cap)
@@ -228,9 +259,13 @@ const SECTION_INPUT_TOKENS_MAX = 48_000
  * charge at the priciest in-scope model. Sized generously (real sections are
  * ~constant ~16k input); `settleHold`'s cap is the hard backstop if a section
  * overshoots anyway (we then under-earn + page via overHold, never overdraft).
+ *
+ * Always Sonnet-priced: the sectional seed/extend loop is never routed to Opus
+ * (an Advanced turn bypasses the sectional stream entirely — see modelClass.ts),
+ * so there is no `advanced` variant of this margin.
  */
 export function sectionAbortMarginCredits(maxOutputTokens: number): number {
-  const usd = billableCostUsd(WORST_MODEL, {
+  const usd = billableCostUsd(WORST_MODEL_STANDARD, {
     uncachedInputTokens: SECTION_INPUT_TOKENS_MAX,
     outputTokens: maxOutputTokens,
     cacheReadInputTokens: 0,

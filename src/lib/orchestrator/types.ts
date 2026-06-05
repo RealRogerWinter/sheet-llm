@@ -102,6 +102,18 @@ export interface OrchestratorInput {
    */
   generationTier?: import('./generationTier').GenerationTier
   /**
+   * PR-8 Advanced Composer — the RESOLVED Opus-routing entitlement for this
+   * turn. When true, the heavy single-pass compositional call (generateComplex /
+   * compose / regenerate_all / standalone extend) routes to the Opus (`large`)
+   * tier and a from-scratch generation bypasses the sectional stream. Resolved
+   * in `route.ts` (a client toggle, honored ONLY for an authenticated paid Pro
+   * generation — never free tier, never the free piece — and behind
+   * `SL_ADVANCED_COMPOSER`), then threaded as the resolved boolean, never the raw
+   * client field. The orchestrator/handlers trust it as-is (same boundary as
+   * `generationTier`). Absent ⇒ Standard (Sonnet).
+   */
+  advancedComposer?: boolean
+  /**
    * D5 — deterministic 0-based measure-range hint from the right-click AI
    * entries. Threaded to the tool dispatcher as structured region context
    * so it gets the indices directly rather than parsing them from prose.

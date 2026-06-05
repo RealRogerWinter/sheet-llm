@@ -1,6 +1,7 @@
 import { recordUsage } from '../budget'
 import type { Classification, OrchestratorResult } from '../types'
 import { selectProvider } from '@/lib/providers/select'
+import { resolveModelClass } from '@/lib/providers/modelClass'
 import {
   ANNOTATIONS_REFERENCE,
   BARLINES_REFERENCE,
@@ -28,6 +29,9 @@ export interface RunGenerateComplexInput {
   userText: string
   /** Debug-only: force a different model id (defaults to large tier). */
   modelOverride?: string
+  /** PR-8: route this whole-score emit to Opus (`large` tier). Set only for a
+   *  resolved Advanced paid Pro turn; see modelClass.ts. */
+  advancedComposer?: boolean
 }
 
 /**
@@ -70,8 +74,12 @@ export async function runGenerateComplex(
   input: RunGenerateComplexInput,
 ): Promise<OrchestratorResult> {
   const t0 = Date.now()
-  // No Opus (user directive + cost): generate on the medium tier (Sonnet).
-  const selected = selectProvider('medium', input.chatId)
+  // PR-8: Standard routes to the medium tier (Sonnet); an Advanced paid Pro turn
+  // routes this whole-score emit to Opus (`large`). Debug modelOverride still wins.
+  const selected = selectProvider(
+    resolveModelClass({ advancedComposer: input.advancedComposer, callType: 'whole_score' }),
+    input.chatId,
+  )
   const result = await callWithScoreRetry(
     { ...selected, chatId: input.chatId },
     {

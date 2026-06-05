@@ -13,8 +13,12 @@ import {
   maxGenerationHoldCredits,
   sectionAbortMarginCredits,
   VALUE_TIERS,
+  WORST_MODEL_ADVANCED,
+  WORST_MODEL_STANDARD,
   worstCaseHoldCredits,
 } from '@/lib/billing/valueTier'
+import { PRICING } from '@/lib/billing/pricing'
+import { getModelEntry } from '@/lib/providers/registry'
 
 describe('costToCredits (cost-plus, round UP, 1-credit floor)', () => {
   it('reproduces the locked generation anchors at the 2.5× markup', () => {
@@ -170,5 +174,65 @@ describe('freePieceBudgetCredits (PR-7b-2c free-piece per-run cost ceiling)', ()
       vi.stubEnv('SL_FREE_PIECE_BUDGET_CREDITS', bad)
       expect(freePieceBudgetCredits()).toBe(DEFAULT_FREE_PIECE_BUDGET_CREDITS)
     }
+  })
+})
+
+describe('PR-8 Advanced Composer (Opus) hold sizing', () => {
+  it('an Advanced turn is bounded by the Opus non-streaming cost only → 473 credits', () => {
+    // 3×Opus(80k in @ $5/M + 8k out @ $25/M) = 3×$0.60 = $1.80; overhead (Sonnet,
+    // classifier/planner/dispatcher never go Opus) = $0.09 → $1.89 ×2.5 / 1¢ = 473.
+    // No sectional term: an Advanced turn bypasses the sectional stream.
+    expect(worstCaseHoldCredits(8_000, true)).toBe(473)
+  })
+
+  it('the Advanced bound EXCLUDES the sectional term, the Standard bound INCLUDES it', () => {
+    // Standard's worst case is the 12-section Sonnet sectional ($1.872), which
+    // exceeds 3 Opus single-shot attempts ($1.80) — so the Advanced floor sits
+    // just BELOW the Standard floor even though Opus is the pricier model. This
+    // is correct: each floor bounds the path that tier can actually take.
+    expect(worstCaseHoldCredits(8_000, false)).toBe(491)
+    expect(worstCaseHoldCredits(8_000, true)).toBeLessThan(worstCaseHoldCredits(8_000, false))
+  })
+
+  it('stays at/below the $5 min pack (500 cr) so a min-pack buyer can start Advanced', () => {
+    expect(worstCaseHoldCredits(8_000, true)).toBeLessThanOrEqual(500)
+  })
+
+  it('generationHoldCredits floors an Advanced hold at the Opus bound', () => {
+    const advFloor = worstCaseHoldCredits(8_000, true)
+    expect(generationHoldCredits(0, 8_000, true)).toBe(advFloor)
+    expect(generationHoldCredits(advFloor, 8_000, true)).toBe(advFloor)
+    // Between floor and cap → the available balance; above cap → the cap.
+    expect(generationHoldCredits(900, 8_000, true)).toBe(900)
+    expect(generationHoldCredits(5_000, 8_000, true)).toBe(DEFAULT_MAX_GENERATION_HOLD_CREDITS)
+  })
+
+  it('defaults to the Standard (Sonnet) bound when advanced is omitted (back-compat)', () => {
+    expect(worstCaseHoldCredits(8_000)).toBe(worstCaseHoldCredits(8_000, false))
+    expect(generationHoldCredits(1_000, 8_000)).toBe(generationHoldCredits(1_000, 8_000, false))
+  })
+})
+
+describe('worst-case model constants stay in sync with the registry + pricing (drift guard)', () => {
+  it('WORST_MODEL_STANDARD is the registry `medium` model and is priced', () => {
+    expect(WORST_MODEL_STANDARD).toBe(getModelEntry('anthropic', 'medium')!.modelId)
+    expect(PRICING[WORST_MODEL_STANDARD]).toBeDefined()
+  })
+
+  it('WORST_MODEL_ADVANCED is the registry `large` (Opus) model and is priced', () => {
+    // If the `large` tier model changes (providers/registry.ts), this fails to
+    // remind you to re-derive the Advanced hold bound — else an Opus turn could
+    // be priced against the wrong model and under-provision its hold.
+    expect(WORST_MODEL_ADVANCED).toBe(getModelEntry('anthropic', 'large')!.modelId)
+    expect(PRICING[WORST_MODEL_ADVANCED]).toBeDefined()
+  })
+
+  it('the Advanced (Opus) model is strictly pricier than the Standard (Sonnet) model', () => {
+    expect(PRICING[WORST_MODEL_ADVANCED].inputPerM).toBeGreaterThan(
+      PRICING[WORST_MODEL_STANDARD].inputPerM,
+    )
+    expect(PRICING[WORST_MODEL_ADVANCED].outputPerM).toBeGreaterThan(
+      PRICING[WORST_MODEL_STANDARD].outputPerM,
+    )
   })
 })

@@ -2,8 +2,11 @@
  * Product / paywall tier for score generation — distinct from and ORTHOGONAL
  * to the provider model-size `Tier` (small | medium | large) in
  * `src/lib/providers/*`. This gates SCOPE and per-request ceilings, not model
- * quality: both tiers stay on the medium (Sonnet 4.6) model per the
- * "no Opus, cost" directive.
+ * quality: both tiers DEFAULT to the medium (Sonnet 4.6) model. (PR-8 Advanced
+ * Composer is the one exception — a Pro PAID turn with the Advanced toggle on
+ * routes its heavy compositional call to Opus via `resolveModelClass`; see
+ * `isAdvancedComposerEnabled` below and `providers/modelClass.ts`. The free tier
+ * is always Sonnet.)
  *
  * - `free` (default): a fresh from-scratch generation is served by ONE bounded
  *   `render_score` call (`runGenerateBounded`) — at most 4 bars of grand staff,
@@ -100,6 +103,23 @@ export function isForceFreeTier(): boolean {
  */
 export function isEntitlementsDbEnabled(): boolean {
   const v = process.env.SL_ENTITLEMENTS_DB
+  return v === '1' || v?.toLowerCase() === 'true'
+}
+
+/**
+ * Is "Advanced Composer Mode" (Opus routing) enabled for this instance?
+ * (PR-8) When `SL_ADVANCED_COMPOSER` is set, an authenticated Pro user's
+ * per-request Advanced toggle is honored — the heavy single-pass
+ * compositional calls (generateComplex / compose / regenerate_all / standalone
+ * extend) route to the Opus (`large`) tier and are debited cost-plus on the
+ * (higher) Opus metered cost. DARK by default: the toggle is a client field
+ * that only ever RAISES the user's own spend (no free-unlock), but it is
+ * forced OFF for the free tier + the free piece and gated behind this flag so
+ * the feature stays dark until launch. Read fresh; no redeploy. Off → the
+ * toggle is ignored and every turn stays on Sonnet.
+ */
+export function isAdvancedComposerEnabled(): boolean {
+  const v = process.env.SL_ADVANCED_COMPOSER
   return v === '1' || v?.toLowerCase() === 'true'
 }
 
