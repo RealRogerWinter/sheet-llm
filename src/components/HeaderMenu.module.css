@@ -38,11 +38,12 @@
   display: block;
 }
 
+/* Portaled to <body> and positioned via inline top/right from the button's
+ * rect, so it escapes the header's sticky stacking context. Popover-level
+ * z-index sits above the docked side panels (--z-panel 81 / --z-ghost-panel 95). */
 .menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: var(--z-header, 20);
+  position: fixed;
+  z-index: var(--z-popover, 110);
   min-width: 168px;
   display: flex;
   flex-direction: column;
