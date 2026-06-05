@@ -4,7 +4,7 @@ subsystem: ops
 audience: [contributor, ai-agent]
 status: current
 last_verified: 2026-06-04
-verified_against: ade93bc
+verified_against: 11c6ffe
 source_paths:
   - .chunk/config.json
   - scripts/chunk/agent-hook.mjs
@@ -49,7 +49,9 @@ cross-platform launcher, [`scripts/chunk/agent-hook.mjs`](../../scripts/chunk/ag
   `pnpm typecheck` and **blocks the commit (exit 2)** on a type error.
 - **Stop** → `node … agent-hook.mjs stop-gate`. The launcher runs
   `chunk validate`; a failure **blocks the turn (exit 2)** so the agent fixes it
-  before stopping. It honors `stop_hook_active` to avoid re-entrant loops.
+  before stopping. It honors `stop_hook_active` to avoid re-entrant loops, and it
+  **skips the sidecar entirely when the turn changed nothing testable** (see
+  [Stop-gate diff-skip](#stop-gate-diff-skip)).
 
 The launcher is **platform-aware and fail-safe**:
 
@@ -69,6 +71,40 @@ checkout the script file happens to live in. It does this by resolving
 `git rev-parse --show-toplevel` from the hook's own `cwd` (falling back to the
 launcher's repo root when there's no usable cwd). So `pnpm typecheck` /
 `chunk validate` always see the files actually being committed.
+
+## Stop-gate diff-skip
+
+`chunk validate` is **not diff-aware** — it boots a sidecar and runs the whole
+gate suite (`pnpm typecheck` + `pnpm test`) over the entire repo on *every* turn.
+When a turn only touched files that cannot change a typecheck/test outcome
+(docs, an operational script), that sidecar boot is pure cost with no new signal.
+The stop-gate therefore **skips `chunk validate` when every file the turn changed
+is "inert."**
+
+It works out the changed set the same way CI would — the union of committed
+branch changes (vs the `origin/main` merge-base), the working tree, and untracked
+files — and skips only when that set is non-empty-but-all-inert, or empty. It is
+**conservative**: any file it can't prove inert, an unresolved `origin/main`
+base, or any failure to compute the diff all fall through to running the gate.
+
+A path is **inert** when it matches an inert glob **and** is not a TypeScript
+compiler input:
+
+| | |
+| --- | --- |
+| **Inert globs** (default) | `**/*.md`, `**/*.mdx`, `**/*.txt`, `docs/**`, `scripts/**` |
+| **Always testable** (overrides the globs) | `**/*.{ts,tsx,mts,cts}` — `tsc` inputs; tests import `.ts` even from `scripts/` |
+
+So a docs-only turn or an edit to `scripts/chunk/agent-hook.mjs` skips, while a
+change to `scripts/backfill-orchestrator-turns.ts` (imported by a test) still
+runs the full suite.
+
+Two env vars tune it (both unset by default):
+
+- `SL_CHUNK_STOP_GATE_INERT` — extra inert globs (whitespace/comma-separated),
+  appended to the defaults, when you know a path is safe to ignore.
+- `SL_CHUNK_STOP_GATE_NO_DIFF_SKIP=1` — disable the optimization; always run
+  `chunk validate` on Stop (the pre-diff-skip behavior).
 
 ## One-time setup
 
@@ -151,10 +187,11 @@ chunk sidecar snapshot list --org-id "$CIRCLECI_ORG_ID"   # note the new snapsho
 
 ## Opting out / disabling
 
-> Cost note: the stop-gate boots a CircleCI sidecar on **every** turn (real
-> CircleCI usage; up to a few minutes per turn before the snapshot warms it).
-> If that cadence is too expensive for a given checkout, disable it per-repo with
-> `chunk hook disable`.
+> Cost note: the stop-gate boots a CircleCI sidecar on every turn **that changed
+> something testable** (real CircleCI usage; up to a few minutes per turn before
+> the snapshot warms it). Docs/script-only turns are skipped (see
+> [Stop-gate diff-skip](#stop-gate-diff-skip)). If the cadence is still too
+> expensive for a given checkout, disable it per-repo with `chunk hook disable`.
 
 - Per-repo, temporarily: `chunk hook disable` (re-enable with `chunk hook enable`).
 - Per-machine: don't install chunk — the hooks degrade to a no-op automatically.
@@ -166,6 +203,8 @@ chunk sidecar snapshot list --org-id "$CIRCLECI_ORG_ID"   # note the new snapsho
 | Symptom | Cause / fix |
 | --- | --- |
 | Stop-gate prints "chunk not installed — skipping" | chunk isn't on PATH (in WSL on Windows). Run `bash scripts/chunk/bootstrap.sh`. |
+| Stop-gate prints "skipping sidecar validation — only inert files changed" | Working as designed — the turn changed nothing that affects typecheck/test (see [diff-skip](#stop-gate-diff-skip)). Force a run with `SL_CHUNK_STOP_GATE_NO_DIFF_SKIP=1`. |
+| Stop-gate skipped a turn that *should* validate | The changed path isn't classified testable. If it's a non-`.ts` file in the test graph, narrow `scripts/**` or set `SL_CHUNK_STOP_GATE_NO_DIFF_SKIP=1`. |
 | `npm: command not found` during `sidecar setup` | The sidecar is a bare base. Create from the `cimg-node` snapshot first (see above). |
 | Stop-gate hangs / times out | First sidecar boot with no snapshot installs deps from scratch. Create a snapshot, then sidecars boot fast. |
 | Commit-gate slow on Windows | It runs `pnpm typecheck` in WSL over `/mnt/c`. Expected; it only fires on `git commit`. |
