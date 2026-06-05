@@ -6,6 +6,7 @@ import { clearBackup } from '@/lib/auth/clientBackup'
 import { refreshSession } from '@/lib/auth/authClient'
 import { errorMessageFromResponse } from '@/lib/auth/authMessages'
 import AccountSettings from '@/components/auth/AccountSettings'
+import WalletSettings from '@/components/billing/WalletSettings'
 import styles from './SettingsContent.module.css'
 
 interface DeleteReceipt {
@@ -122,6 +123,8 @@ export default function SettingsContent() {
       <h1 className={styles.heading}>Settings</h1>
 
       <AccountSettings />
+
+      <WalletSettings />
 
       <section className={styles.section}>
         <h2 className={styles.subheading}>Export my data</h2>

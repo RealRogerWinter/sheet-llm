@@ -89,8 +89,10 @@ export async function POST(request: Request) {
     pack,
     userId: user!.userId,
     email: account!.email!,
-    successUrl: `${origin}/?checkout=success`,
-    cancelUrl: `${origin}/?checkout=cancel`,
+    // Return to the wallet (settings) the buyer started from — WalletSettings
+    // surfaces the result and re-pulls the balance. Same-origin via resolveAppBaseUrl.
+    successUrl: `${origin}/settings?checkout=success`,
+    cancelUrl: `${origin}/settings?checkout=cancel`,
     ...(process.env.SL_STRIPE_TAX_CODE ? { taxCode: process.env.SL_STRIPE_TAX_CODE } : {}),
   })
 
