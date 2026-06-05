@@ -215,6 +215,7 @@ condensed cards for AI agents live under `docs/ai-agents/context-cards/`.)
 | [export](../subsystems/export.md) | Exports the Score as MusicXML 4.0 (built from the model) or MIDI/PDF (derived from the rendered ABC), wired via `ExportBar`. |
 | [persistence-db](../subsystems/persistence-db.md) | better-sqlite3/Drizzle layer: users (anon + claimed accounts), sessions, transcript, an append-only chain of versioned Score checkpoints with O(1) head pointer, CAS writes, the `auth_sessions`/`oauth_accounts`/`auth_tokens` account tables, and migrations. |
 | [auth-gdpr](../subsystems/auth-gdpr.md) | Anonymous identity via a jose-signed session JWT + recovery-token backup + same-origin GDPR export/delete; plus the accounts milestone (email+password+OAuth+settings+paywall tier, behind `SL_ACCOUNTS_ENABLED`) that claims an anon row in place. |
+| [billing](../subsystems/billing.md) | Hosted-only prepaid-credit paywall (dark by default): meters real Anthropic cost → cost-plus credit charge from an atomic wallet (hold→settle/refund), Stripe top-ups + webhook grants, an in-process reconcile/reap janitor, and the GDPR export of the credit tables. Self-host = BYOK. |
 
 > Note: there is no standalone `docs/subsystems/app-shell.md` or
 > `evals-testing.md` at this commit — the App Router shell is described in this

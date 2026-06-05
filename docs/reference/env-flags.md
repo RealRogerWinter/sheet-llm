@@ -3,12 +3,19 @@ title: Environment Flags & Config Reference
 subsystem: cross-cutting
 audience: [contributor, ai-agent]
 status: current
-last_verified: 2026-06-04
-verified_against: ab82027
+last_verified: 2026-06-05
+verified_against: 8227618
 source_paths:
   - src/lib/orchestrator/flags.ts
   - src/lib/orchestrator/generationTier.ts
   - src/lib/auth/account.ts
+  - src/lib/billing/valueTier.ts
+  - src/lib/billing/stripe.ts
+  - src/lib/billing/checkout.ts
+  - src/lib/billing/checkoutRateLimit.ts
+  - src/lib/billing/scheduler.ts
+  - src/lib/billing/webhookProcess.ts
+  - src/lib/billing/surface.ts
   - src/lib/auth/authRateLimit.ts
   - src/lib/auth/email/index.ts
   - src/lib/auth/oauth/config.ts
@@ -41,6 +48,7 @@ related:
   - orchestrator
   - providers-llm
   - auth-gdpr
+  - billing
   - chat-session
   - evals-testing
 ---
@@ -225,6 +233,64 @@ per environment, in order:
 
 See also: [`auth-data-lifecycle.md`](../subsystems/auth-data-lifecycle.md) (retention
 + breach rotation), [`durability-runbook.md`](../guides/durability-runbook.md).
+
+---
+
+## Billing & paywall (prepaid credits)
+
+**HOSTED sheetllm.com ONLY; OFF BY DEFAULT** — the whole credit paywall + Stripe
+money path is dark unless an operator opts in. A self-hosted install never touches
+Stripe (open-source self-host IS the BYOK path: bring your own `ANTHROPIC_API_KEY`,
+generate for free, no credits). Every billing route 404s without `STRIPE_SECRET_KEY`,
+and `/api/chat` never holds/charges credits without `SL_PAID_GENERATION`. Read fresh
+per request (the janitor interval is read at boot). Full design:
+[`billing.md`](../subsystems/billing.md).
+
+### Paid generation (the credit paywall on `/api/chat`)
+
+| Flag | Default | Type | Effect / read site |
+| --- | --- | --- | --- |
+| `SL_PAID_GENERATION` | unset (**off**) | bool (`1`/`true`) | Master switch for the credit paywall. Off → `/api/chat` never holds or debits; the wallet engine is inert. On → an authenticated **Pro** request places a worst-case hold pre-dispatch (fail-CLOSED) and settles to the cost-plus charge. `account.ts:isPaidGenerationEnabled` |
+| `SL_MAX_GEN_HOLD_CREDITS` | `1500` | positive int | Cap (credits; 1cr = 1¢) on the pre-dispatch hold = the most a single sectional generation can spend before the pump aborts at budget. `valueTier.ts:maxGenerationHoldCredits` |
+| `SL_FREE_PIECE_BUDGET_CREDITS` | `250` | positive int | Per-run cost ceiling for the one-time free full piece (it has no hold, so this bounds its spend). `valueTier.ts:freePieceBudgetCredits` |
+| `SL_ADVANCED_COMPOSER` | unset (off) | bool (`1`/`true`) | Enables the **Advanced Composer** (Opus) Pro toggle — a paid Pro turn may route its heavy compositional call to Opus (self-funding via the higher metered cost; no premium markup). Honored only for a paid Pro generation (never free / free-piece). `generationTier.ts:isAdvancedComposerEnabled` |
+
+### Stripe (money-in)
+
+| Flag | Default | Type | Effect / read site |
+| --- | --- | --- | --- |
+| `STRIPE_SECRET_KEY` | unset | string | Gates `isStripeEnabled()` — without it every `/api/billing/*` route 404s and `getStripe()` throws. `stripe.ts:isStripeEnabled` |
+| `STRIPE_WEBHOOK_SECRET` | unset | string | Signing secret for `POST /api/billing/webhook`; the endpoint is dark (404) unless BOTH this and `STRIPE_SECRET_KEY` are set. `webhook/route.ts:isWebhookConfigured` |
+| `SL_STRIPE_TAX_CODE` | `txcd_10000000` | string | Stripe Tax product tax code (digital goods) set explicitly on each Checkout line item so `automatic_tax` computes. `checkout.ts:DEFAULT_STRIPE_TAX_CODE` |
+
+### Checkout rate limit (per-user + per-IP throttle on session creation)
+
+| Flag | Default | Type | Effect / read site |
+| --- | --- | --- | --- |
+| `SL_CHECKOUT_USER_RATE_LIMIT` | `10` | positive int | Checkout-session creations / hour / claimed user. `checkoutRateLimit.ts` |
+| `SL_CHECKOUT_IP_RATE_LIMIT` | `20` | positive int | Checkout-session creations / hour / client IP (catches one host spraying accounts). `checkoutRateLimit.ts` |
+| `SL_CHECKOUT_RATE_MAX_ENTRIES` | `50000` | positive int | In-memory store-size cap; fail-CLOSED for a new key once reached (anti-OOM). `checkoutRateLimit.ts` |
+
+### Billing janitor scheduler (PR-13, in-process)
+
+The deployment is a single long-lived container, so the money-critical janitors
+run on an in-process boot-sweep + interval started from `instrumentation.ts` (no
+external cron). The timer only starts if a billing subsystem is enabled.
+
+| Flag | Default | Type | Effect / read site |
+| --- | --- | --- | --- |
+| `SL_BILLING_JANITOR_INTERVAL_MS` | `300000` (5 min) | positive int | Period of the in-process billing janitor: reaps expired credit holds, **reconciles** Stripe webhook grants stuck at `received`/`failed` (the only auto-heal for a paid-but-not-granted purchase — a transient webhook failure still returns 200, so Stripe won't retry), prunes aged `stripe_events`, evicts cold checkout-rate keys. `scheduler.ts:startBillingScheduler` |
+| `SL_STRIPE_EVENT_RETENTION_DAYS` | `90` | positive int | Retention window for terminal-good (`processed`/`ignored`) `stripe_events` inbox rows before the janitor prunes their raw payloads. `webhookProcess.ts:pruneStripeEvents` |
+
+**Gating summary:** the customer wallet UI (`/settings` → Credits) shows iff
+`isBillingSurfaceEnabled()` = `isStripeEnabled() || isPaidGenerationEnabled()`
+(`surface.ts`) — a self-host with neither sees nothing. The paywall (credit
+hold/charge) is gated on `SL_PAID_GENERATION`; the buy flow on `STRIPE_SECRET_KEY`.
+**Do NOT flip `SL_PAID_GENERATION` until the launch gates land** (Stripe
+account/keys/Tax/Radar, attorney memo, Anthropic ToS) — see
+[`billing.md`](../subsystems/billing.md#launch--operator-checklist).
+
+See also: [`docs/subsystems/billing.md`](../subsystems/billing.md).
 
 ---
 

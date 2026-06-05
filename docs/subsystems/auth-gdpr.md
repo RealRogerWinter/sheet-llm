@@ -3,8 +3,8 @@ title: Auth, Sessions & GDPR
 subsystem: auth-gdpr
 audience: [contributor, ai-agent]
 status: current
-last_verified: 2026-06-03
-verified_against: e6f5a58
+last_verified: 2026-06-05
+verified_against: 8227618
 source_paths:
   - src/lib/auth/session.ts
   - src/lib/auth/account.ts
@@ -64,7 +64,7 @@ they rotate independently.
 | `src/lib/auth/restoreRateLimit.ts` | In-memory sliding-window limiter, `globalThis`-cached for HMR safety. Two buckets, `LIMIT=10` hits / `WINDOW_MS=5min`: per-IP (`checkIp`) and per-sub (`checkSub`). `extractClientIp` reads leftmost `x-forwarded-for` → `x-real-ip` → `'local'`, collapsing IPv6 to `/64`. Fails closed at `MAX_ENTRIES=10000`. `__resetForTesting()` wipes it. |
 | `src/lib/auth/clientBackup.ts` | Client-only (`'use client'`). `installBackupInterceptor` wraps global `fetch` to stash any `X-Session-Recovery` header (length > 20) into `localStorage`; `bootRestoreIfNeeded` POSTs `/api/auth/restore` when the `sl_present` cookie is absent but a non-expired backup exists, reloading on 204 (unless a chat is in flight); `clearBackup` drops it. |
 | `src/components/RecoveryBoot.tsx` | Mounts in `src/app/layout.tsx` on every route. Calls `installBackupInterceptor()` at module-import time and `bootRestoreIfNeeded()` in a `useEffect`. Renders `null`. |
-| `src/lib/gdpr/exportUser.ts` | `buildUserExport` (full read of user + sessions + messages + scoreVersions, *including* soft-deleted, JSON kept opaque) and `hardDeleteUser` (deletes the `users` row, relies on FK `ON DELETE CASCADE`, counts rows first for the receipt). Exports `EXPORT_SCHEMA_VERSION=1` and the `UserExport` type. |
+| `src/lib/gdpr/exportUser.ts` | `buildUserExport` (full read of every users-keyed table — user, sessions, messages, scoreVersions, the auth tables, daily quota, and the prepaid-credit billing tables, with Stripe-internal ids + our raw cost REDACTED; soft-deleted included, JSON kept opaque) and `hardDeleteUser` (deletes the `users` row; FK `ON DELETE CASCADE` sweeps the rest; counts first for the receipt). Exports `EXPORT_SCHEMA_VERSION=2` and the `UserExport` type. |
 | `src/app/api/auth/restore/route.ts` | `POST /api/auth/restore`. Same-origin + body-size gate, per-IP limit, verify token, per-sub limit, atomic single-use nonce CAS `UPDATE`, then `reissueSessionForRecovery`. Status codes 204/400/401/409/410/413/429. |
 | `src/app/api/me/export/route.ts` | `GET /api/me/export`. Same-origin gated, `getExistingUserId` (no mint), `buildUserExport`, returns a JSON attachment with a date-based filename and `Cache-Control: no-store`. |
 | `src/app/api/me/delete/route.ts` | `DELETE /api/me/delete`. Requires `{confirm:'DELETE'}`, `getExistingUserId` (no mint), `hardDeleteUser`, `clearSessionCookie`, returns receipt + `clearLocalStorage:['sheet-llm:recovery']` body directive and a `Clear-Site-Data: "storage"` header. |
@@ -184,22 +184,33 @@ optimistic prompt / in-progress assistant response.
 ### GDPR export & delete
 
 `buildUserExport(db, userId)` returns `undefined` if the user is gone, else a
-`UserExport` envelope (`schemaVersion: 1`, `exportedAt`, `user`, `sessions`,
-`messages`, `scoreVersions`). It reads **all** sessions with **no `deletedAt`
-filter** (Art. 15 covers soft-deleted data) and keeps `contentJson`/`scoreJson`
-as the opaque DB strings (no re-parse — preserves fidelity, saves CPU). The
-route emits it as a `Content-Disposition: attachment` JSON with a date-only
-filename (`sheet-llm-export-YYYYMMDD.json`, UTC — no userId in the downloads
-list) and `Cache-Control: no-store`.
+`UserExport` envelope (`schemaVersion: 2`, `exportedAt`, and the user's data across
+every users-keyed table: `user`, `sessions`, `messages`, `scoreVersions`,
+`authSessions`, `oauthAccounts`, `authTokens`, `dailyQuota`, plus the
+prepaid-credit billing tables — `creditWallet`, `usageLedger`, `creditPurchases`,
+`creditHolds`, `refundCounters`, `stripeEvents`). It reads **all** sessions with
+**no `deletedAt` filter** (Art. 15 covers soft-deleted data) and keeps
+`contentJson`/`scoreJson` as the opaque DB strings. Credential material
+(`password_hash`, every `token_hash`) is NEVER exported; the billing sections
+REDACT Stripe-internal ids (`external_ref`, the Stripe event id + its raw payload)
+and our raw cost basis (`cost_micro_usd`) — see [`billing.md` § GDPR](billing.md#gdpr).
+A `foreign_key_list` guard test (`api-me-gdpr.test.ts`) fails if a future users-FK'd
+table escapes the export. The route emits a `Content-Disposition: attachment` JSON
+with a date-only filename (`sheet-llm-export-YYYYMMDD.json`, UTC) and
+`Cache-Control: no-store`.
 
 `hardDeleteUser(db, userId)` counts sessions/messages/versions *first* (the
 cascade obliterates everything in one statement), then deletes **only** the
-`users` row — SQLite FK `ON DELETE CASCADE` sweeps `sessions → messages` and
-`sessions → scoreVersions`. Returns `{ok:true, deletedSessions, deletedMessages,
-deletedVersions}` or `{ok:false, reason:'user_not_found'}`. The route then
-`clearSessionCookie()`s both cookies and responds with the receipt plus
-`clearLocalStorage:['sheet-llm:recovery']` and `Clear-Site-Data: "storage"`, so
-the deleted user cannot ghost-restore on the next boot.
+`users` row — SQLite FK `ON DELETE CASCADE` sweeps `sessions → messages`,
+`sessions → scoreVersions`, the account tables, and the five users-FK'd billing
+tables (`credit_wallets`, `credit_purchases`, `usage_ledger`, `credit_holds`,
+`refund_counters`). **`stripe_events` has NO users FK and is RETAINED past erasure**
+(financial/tax record; its erasure-time redaction is gated on the launch attorney
+memo — see [`billing.md`](billing.md#gdpr)). Returns `{ok:true, deletedSessions,
+deletedMessages, deletedVersions, …}` (the account-table counts; billing rows
+cascade but are not separately counted) or `{ok:false, reason:'user_not_found'}`.
+The route then `clearSessionCookie()`s both cookies and responds with the receipt
+plus `clearLocalStorage:['sheet-llm:recovery']` and `Clear-Site-Data: "storage"`.
 
 ## Invariants & gotchas
 

@@ -74,7 +74,7 @@ describe('GET /api/me/export', () => {
     )
     expect(res.headers.get('cache-control')).toBe('no-store')
     const body = await res.json()
-    expect(body.schemaVersion).toBe(1)
+    expect(body.schemaVersion).toBe(2)
     expect(body.user.id).toBe(session.userId)
     expect(body.sessions).toHaveLength(1)
     expect(body.sessions[0].id).toBe(chatId)
@@ -253,6 +253,93 @@ describe('GET /api/me/export', () => {
     expect(dump).not.toContain('SECRET_PW_HASH')
     expect(dump).not.toContain('SECRET_TOKEN_HASH')
     expect('passwordHash' in body.user).toBe(false)
+  })
+
+  it('includes the billing tables, with Stripe internals + our raw cost REDACTED (PR-14)', async () => {
+    const { getOrCreateUserId } = await import('@/lib/auth/session')
+    const session = await getOrCreateUserId()
+    const uid = session.userId
+    const { getDb } = await import('@/lib/db')
+    const { creditWallets, usageLedger, creditPurchases, creditHolds, refundCounters, stripeEvents } =
+      await import('@/lib/db/schema')
+    getDb().insert(creditWallets).values({ userId: uid, balance: 1000, held: 50, version: 3, updatedAt: 10 }).run()
+    getDb().insert(creditHolds).values({ id: 'h1', userId: uid, requestId: 'r1', idempotencyKey: 'gen:r1', credits: 50, status: 'active', expiresAt: 99, createdAt: 5 }).run()
+    getDb().insert(usageLedger).values({ id: 'l1', userId: uid, requestId: 'r0', idempotencyKey: 'gen:r0', kind: 'chat_generate', generationTier: 'pro', outputTokens: 1200, costMicroUsd: 90123, creditsCharged: 23, balanceAfter: 977, createdAt: 4 }).run()
+    getDb().insert(creditPurchases).values({ id: 'p1', userId: uid, source: 'stripe', externalRef: 'cs:SECRET_SESSION_ID', creditsDelta: 1000, amountMinorUsd: 1000, currency: 'usd', status: 'settled', createdAt: 3 }).run()
+    getDb().insert(refundCounters).values({ userId: uid, day: 20000, refundCount: 1, refundCredits: 23, updatedAt: 6 }).run()
+    getDb().insert(stripeEvents).values({ eventId: 'evt_SECRET_EVENT', type: 'checkout.session.completed', status: 'processed', payload: '{"raw":"SECRET stripe payload — customer email"}', userId: uid, creditsGranted: 1000, receivedAt: 2, processedAt: 3 }).run()
+    // Another user's stripe_event must NOT leak — stripe_events has no FK, so the
+    // user_id-column scoping is the only isolation for it.
+    getDb().insert(stripeEvents).values({ eventId: 'evt_OTHER', type: 'checkout.session.completed', status: 'processed', payload: '{}', userId: '00000000-0000-0000-0000-0000000000dd', creditsGranted: 500, receivedAt: 1, processedAt: 1 }).run()
+
+    const { GET } = await import('@/app/api/me/export/route')
+    const res = await GET(new Request('http://localhost:3000/api/me/export', { method: 'GET', headers: origin() }))
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.schemaVersion).toBe(2)
+    // Wallet, with derived available.
+    expect(body.creditWallet).toEqual({ balance: 1000, held: 50, available: 950, version: 3, updatedAt: 10 })
+    // Ledger: the customer charge + token usage are disclosed; our raw cost basis
+    // (cost_micro_usd) and the internal idempotency_key are NOT.
+    expect(body.usageLedger).toHaveLength(1)
+    expect(body.usageLedger[0].creditsCharged).toBe(23)
+    expect('costMicroUsd' in body.usageLedger[0]).toBe(false)
+    expect('idempotencyKey' in body.usageLedger[0]).toBe(false)
+    // Purchase disclosed; the Stripe external_ref is REDACTED.
+    expect(body.creditPurchases).toHaveLength(1)
+    expect(body.creditPurchases[0].amountMinorUsd).toBe(1000)
+    expect('externalRef' in body.creditPurchases[0]).toBe(false)
+    expect(body.creditHolds).toHaveLength(1)
+    expect(body.refundCounters).toHaveLength(1)
+    // Stripe event: outcome disclosed; the Stripe event id + raw payload REDACTED,
+    // and only THIS user's event is present.
+    expect(body.stripeEvents).toHaveLength(1)
+    expect(body.stripeEvents[0].type).toBe('checkout.session.completed')
+    expect('eventId' in body.stripeEvents[0]).toBe(false)
+    expect('payload' in body.stripeEvents[0]).toBe(false)
+    expect(body.user.freeFullPieceUsedAt).toBeNull()
+    // CRITICAL: no redacted internal appears anywhere in the dump.
+    const dump = JSON.stringify(body)
+    expect(dump).not.toContain('SECRET_SESSION_ID')
+    expect(dump).not.toContain('SECRET_EVENT')
+    expect(dump).not.toContain('SECRET stripe payload')
+    expect(dump).not.toContain('90123') // our raw cost_micro_usd
+  })
+
+  it('GDPR completeness guard: every users-FK table is covered by the export', async () => {
+    // Introspect the live schema: any table with a direct users FK must be in the
+    // export allowlist, so a future financial/PII table can't silently escape
+    // Art. 15. (stripe_events has NO users FK and is handled via its user_id column.)
+    const tdb = makeTestDb()
+    const client = tdb.$client
+    const EXPORTED = new Set([
+      'sessions',
+      'auth_sessions',
+      'oauth_accounts',
+      'auth_tokens',
+      'request_quota',
+      'credit_wallets',
+      'credit_purchases',
+      'usage_ledger',
+      'credit_holds',
+      'refund_counters',
+    ])
+    const tableNames = (
+      client
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '__drizzle%'",
+        )
+        .all() as Array<{ name: string }>
+    ).map((r) => r.name)
+    for (const t of tableNames) {
+      const fks = client.pragma(`foreign_key_list(${t})`) as Array<{ table: string }>
+      if (fks.some((f) => f.table === 'users')) {
+        expect(
+          EXPORTED.has(t),
+          `table "${t}" FK-references users but is not in the GDPR export allowlist — add it to buildUserExport (Art. 15) or document the exclusion`,
+        ).toBe(true)
+      }
+    }
   })
 })
 

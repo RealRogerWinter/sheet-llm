@@ -76,6 +76,7 @@ be detected mechanically — see
 | [Persistence, Schema & Score Versioning](subsystems/persistence-db.md) | Drizzle schema, conversations, score versions, fork/revert, janitor/retention. |
 | [Auth, Sessions & GDPR](subsystems/auth-gdpr.md) | Anonymous sessions + the accounts milestone (email/password/OAuth/settings/paywall tier, behind `SL_ACCOUNTS_ENABLED`), recovery codes, rate limiting, GDPR export/delete. |
 | [Auth Data Lifecycle](subsystems/auth-data-lifecycle.md) | Account-table retention, the opportunistic janitor/GC, and breach-response secret rotation. Companion to auth-gdpr. |
+| [Billing & Prepaid Credits](subsystems/billing.md) | Hosted-only credit paywall (dark by default): metering → cost-plus wallet (hold/settle/refund), Stripe top-ups + webhook grants, an in-process reconcile/reap janitor, and the GDPR export of the credit tables. Self-host = BYOK. |
 | [App Shell, Routes & Boot](subsystems/app-shell.md) | Root layout, boot/instrumentation, recovery boot, page composition. |
 | [Testing & Eval Harness](subsystems/evals-testing.md) | Vitest configs, factories, mock/live/visual evals, local check commands. |
 
@@ -123,7 +124,7 @@ be detected mechanically — see
 Per-subsystem **context cards** for agents live under
 [`ai-agents/context-cards/`](ai-agents/context-cards/) — terse,
 high-signal companions to the subsystem docs above (abc-rendering,
-app-shell, auth-gdpr, chat-session, command-palette, edit-operations,
+app-shell, auth-gdpr, billing, chat-session, command-palette, edit-operations,
 editor-ui, evals-testing, export, ghost-preview, import, music-model,
 orchestrator, persistence-db, providers-llm, transport).
 
