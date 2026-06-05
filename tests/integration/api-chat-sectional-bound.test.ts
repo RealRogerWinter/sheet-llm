@@ -58,7 +58,8 @@ const cfg = vi.hoisted(() => ({
   sectionCount: 6,
   sectionInputTokens: 200_000,
   sectionOutputTokens: 0,
-  errorBeforeSections: false, // yield an error before any section (zero cost)
+  errorBeforeSections: false, // yield an error before any section
+  seedCostBeforeError: false, // (with errorBeforeSections) fire a provider call first → cost incurred, no section
   errorAfterSection: null as number | null, // yield an error after N sections (cost incurred)
   invalidDoneScore: false, // make the `done` score invalid → persist() throws (refund branch)
 }))
@@ -70,6 +71,16 @@ vi.mock('@/lib/orchestrator', async (importActual) => {
     run: async (input: { requestId: string; chatId?: string }) => {
       const events = (async function* (): AsyncGenerator<ScoreStreamEvent> {
         if (cfg.errorBeforeSections) {
+          if (cfg.seedCostBeforeError) {
+            // Model the planner/seed provider call real sectionalEvents makes BEFORE
+            // any section: real metered cost with zero sections delivered.
+            recordProviderCall('claude-sonnet-4-6', {
+              inputTokens: 40_000,
+              outputTokens: 0,
+              cachedInputTokens: 0,
+              cacheCreationInputTokens: 0,
+            })
+          }
           yield { type: 'error', error: new Error('mock pre-section failure') }
           return
         }
@@ -162,6 +173,7 @@ describe('/api/chat sectional cost-bound (PR-7b-2c)', () => {
     cfg.errorBeforeSections = false
     cfg.errorAfterSection = null
     cfg.invalidDoneScore = false
+    cfg.seedCostBeforeError = false
     vi.stubEnv('SESSION_SECRET', 'test-session-secret-at-least-32-bytes!')
     vi.stubEnv('SL_PAID_GENERATION', '1')
     vi.stubEnv('SL_GENERATION_TIER', 'pro')
@@ -254,6 +266,7 @@ describe('/api/chat free-piece cost bound (PR-7b-2c)', () => {
     cfg.errorBeforeSections = false
     cfg.errorAfterSection = null
     cfg.invalidDoneScore = false
+    cfg.seedCostBeforeError = false
     vi.stubEnv('SESSION_SECRET', 'test-session-secret-at-least-32-bytes!')
     vi.stubEnv('SL_PAID_GENERATION', '1')
     vi.stubEnv('SL_GENERATION_TIER', 'pro')
@@ -290,13 +303,27 @@ describe('/api/chat free-piece cost bound (PR-7b-2c)', () => {
     expect(await freePieceUsed()).toBe(true) // KEPT consumed — a section was generated (we ate cost)
   })
 
-  it('a FREE piece that fails BEFORE any section RELEASES the grant (clean retry, zero cost)', async () => {
+  it('a FREE piece that fails with NO billable call (zero cost) RELEASES the grant (clean retry)', async () => {
     await setVerified(true)
-    cfg.errorBeforeSections = true // error before any section → zero cost incurred
+    cfg.errorBeforeSections = true // immediate error, no provider call → meter null
     const out = await postAndDrain('compose a free piece that fails immediately')
     expect(out.status).toBe(200)
     expect(out.sectionFrames).toBe(0)
     expect(out.errorFrame).toBeDefined()
     expect(await freePieceUsed()).toBe(false) // released → the user can retry their free piece
+  })
+
+  it('a FREE piece that fails at the SEED stage (cost metered, NO section) KEEPS the grant consumed', async () => {
+    // Regression for the review catch: cost is incurred at the planner/seed call
+    // BEFORE the first section, so a no-section failure with a metered call must NOT
+    // release (else an induced seed-stage failure re-burns that cost per retry).
+    await setVerified(true)
+    cfg.errorBeforeSections = true
+    cfg.seedCostBeforeError = true // a provider call fired, THEN error, zero sections
+    const out = await postAndDrain('compose a free piece that fails after the seed call')
+    expect(out.status).toBe(200)
+    expect(out.sectionFrames).toBe(0)
+    expect(out.errorFrame).toBeDefined()
+    expect(await freePieceUsed()).toBe(true) // metered cost → grant stays consumed (not repeatable)
   })
 })

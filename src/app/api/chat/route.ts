@@ -1959,7 +1959,6 @@ async function respondWithScoreStream(
       // backfill the optimistically-recorded turn at `done`/abort.
       await runWithUsageMeter(requestId, async () => {
         let lastSectionScore: Score | undefined
-        let sectionsGenerated = 0
         try {
           for await (const ev of outcome.events) {
             if (ev.type === 'section') {
@@ -1978,7 +1977,6 @@ async function respondWithScoreStream(
                 scoreJson: ev.score,
               })
               lastSectionScore = ev.score
-              sectionsGenerated++
 
               // PR-7b-2c cost + wall-clock abort. A sectional has an UNCAPPED section
               // count (only MAX_TOTAL_BARS=512), and each bounded section is a
@@ -2042,13 +2040,15 @@ async function respondWithScoreStream(
           // this leaves it for the reaper.
           if (holdId && !holdSettled) safeReleaseHold(holdId, requestId)
           // PR-7b-2c free-piece consume-on-cost-incurred: release the grant ONLY when
-          // NOTHING was generated (a clean pre-cost failure → retry eligible). Once a
-          // section was produced we incurred raw cost, so KEEP it consumed even on a
-          // later error — the grant is the free piece's cost bound; releasing it would
-          // let an induced mid-run error burn free generation cost repeatedly. A
-          // delivered piece (delivered=true) likewise keeps it. Only one of {holdId,
-          // freePiece} is ever set.
-          if (freePiece && !delivered && sectionsGenerated === 0) {
+          // NO billable provider call was metered on this stream — the true clean
+          // pre-cost failure (meterStreamCost() is null iff callCount===0). Cost is
+          // incurred BEFORE the first section: the planner (runPlanScore) AND the seed
+          // chunk both fire recordProviderCall in THIS pump scope, so a seed-stage
+          // failure that yields `error` with no section has already cost us → KEEP it
+          // consumed (releasing would let an induced seed-stage failure re-burn that
+          // cost). A delivered piece (delivered=true) keeps it too. Only one of
+          // {holdId, freePiece} is ever set.
+          if (freePiece && !delivered && meterStreamCost().costMicroUsd == null) {
             safeReleaseFreePiece(userId, requestId)
           }
           if (keepalive) clearInterval(keepalive)
