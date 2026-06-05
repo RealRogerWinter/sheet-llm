@@ -285,23 +285,27 @@ export function checkDailyQuota(input: QuotaInput): QuotaResult {
 
     // The full set of counters this request must pass, in order: the optional
     // instance-wide anon ceiling ('*', anon only) first, then the per-key buckets
-    // from classifyQuota (per-device and/or per-account). Tagged isGlobal so a
-    // ceiling reject is reported distinctly from a per-user cap.
-    const buckets: Array<QuotaBucket & { isGlobal?: boolean }> = []
+    // from classifyQuota (per-device and/or per-account). Each carries the
+    // `quotaClass` to surface if IT is the bucket that denies — so the response
+    // reflects WHICH limit actually bit (carried per-bucket rather than re-derived
+    // from cls.isAnon, which can't tell a shared-device deny from an account deny).
+    type ReportClass = 'global' | 'anon' | 'free'
+    const buckets: Array<QuotaBucket & { report: ReportClass }> = []
     const globalLimit = cls.isAnon ? anonGlobalLimit() : null
-    if (globalLimit != null) buckets.push({ key: '*', limit: globalLimit, userId: null, isGlobal: true })
-    buckets.push(...cls.buckets)
+    if (globalLimit != null) buckets.push({ key: '*', limit: globalLimit, userId: null, report: 'global' })
+    const perKeyReport: ReportClass = cls.isAnon ? 'anon' : 'free'
+    for (const b of cls.buckets) buckets.push({ ...b, report: perKeyReport })
 
     // Evaluate ALL buckets first, then commit them ALL — only if every one allows
     // — so a reject on any bucket never burns a slot on another. The callback is
     // synchronous (no await): within this Node process it runs to completion before
     // any other request's, and the guard-in-the-write UPDATE prevents overshoot
     // even across connections.
-    const outcome = db.transaction((tx): { ok: true } | { ok: false; which: 'global' | 'key'; windowStart: number } => {
+    const outcome = db.transaction((tx): { ok: true } | { ok: false; report: ReportClass; windowStart: number } => {
       const pending: Array<{ b: (typeof buckets)[number]; d: Decision }> = []
       for (const b of buckets) {
         const d = evaluate(tx, b.key, b.limit, now, win)
-        if (!d.allow) return { ok: false, which: b.isGlobal ? 'global' : 'key', windowStart: d.windowStart }
+        if (!d.allow) return { ok: false, report: b.report, windowStart: d.windowStart }
         pending.push({ b, d })
       }
       for (const { b, d } of pending) apply(tx, b.key, b.userId, d, b.limit, now)
@@ -309,12 +313,17 @@ export function checkDailyQuota(input: QuotaInput): QuotaResult {
     })
 
     if (outcome.ok) return { ok: true }
+    // The reset hint is the denying bucket's window. For a verified user blocked by
+    // the SHARED device bucket (busy /24-/56) this is the shared pool's reset — which
+    // is genuinely when they can next generate — and it is already minute-coarsened
+    // (resetInfo), so it leaks no fine-grained neighbour timing. The 'free' class
+    // still routes to the Pro CTA, which correctly bypasses the device cap too.
     const info = resetInfo(outcome.windowStart, now)
     return {
       ok: false,
       code: 'quota_exceeded',
       httpStatus: 429,
-      quotaClass: outcome.which === 'global' ? 'global' : cls.isAnon ? 'anon' : 'free',
+      quotaClass: outcome.report,
       reason: 'limit',
       ...info,
     }

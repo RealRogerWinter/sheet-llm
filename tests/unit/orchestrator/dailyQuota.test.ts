@@ -131,6 +131,27 @@ describe('checkDailyQuota', () => {
     // A freshly-created second account on the same device shares the device bucket
     // (now exhausted) → no extra generations, even though its own account bucket is empty.
     expect(checkDailyQuota(input({ user: { userId: 'u2', authenticated: true }, tier: 'free', ip })).ok).toBe(false)
+    // All-or-nothing: the device-bucket deny must NOT have created/incremented u2's
+    // own account row (a reject on one bucket never burns a slot on another).
+    expect(await keys()).not.toContain('u:u2')
+  })
+
+  it('all-or-nothing the OTHER way: account-cap deny does not burn the device bucket', async () => {
+    await seedUser('u1', 1, 'free')
+    const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
+    const { getDb } = await import('@/lib/db')
+    const { requestQuota } = await import('@/lib/db/schema')
+    const { eq } = await import('drizzle-orm')
+    // u1 exhausts the per-ACCOUNT bucket from device A.
+    for (let n = 0; n < 10; n++) expect(checkDailyQuota(input({ user: { userId: 'u1', authenticated: true }, tier: 'free', ip: '1.1.1.1' })).ok).toBe(true)
+    // Move to a FRESH device B: the account bucket (u:u1=10) denies before the
+    // brand-new device bucket is ever written — so device B's 'a:' row must not exist.
+    expect(checkDailyQuota(input({ user: { userId: 'u1', authenticated: true }, tier: 'free', ip: '2.2.2.2' })).ok).toBe(false)
+    const account = getDb().select().from(requestQuota).where(eq(requestQuota.quotaKey, 'u:u1')).get()
+    expect(account?.count).toBe(10) // not 11 — the account row wasn't over-incremented either
+    // Only device A's 'a:' row exists; device B's was never inserted by the denied request.
+    const deviceRows = (await keys()).filter((k) => k.startsWith('a:'))
+    expect(deviceRows).toHaveLength(1)
   })
 
   it('per-account cap follows the user across devices (roaming IPs): 10 total, not 10 per IP', async () => {
