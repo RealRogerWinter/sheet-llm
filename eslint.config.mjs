@@ -30,7 +30,14 @@ const eslintConfig = defineConfig([
       "no-restricted-syntax": [
         "error",
         {
+          // String literal: 'claude-opus-4-7'
           selector: "Literal[value=/claude-opus/]",
+          message:
+            "Do not hard-code an Opus model id here — route model selection through resolveModelClass (providers/modelClass.ts) + selectProvider so the Opus credit hold (billing/valueTier.ts) can't be bypassed.",
+        },
+        {
+          // Template literal: `claude-opus-4-7` / `...claude-opus...`
+          selector: "TemplateElement[value.raw=/claude-opus/]",
           message:
             "Do not hard-code an Opus model id here — route model selection through resolveModelClass (providers/modelClass.ts) + selectProvider so the Opus credit hold (billing/valueTier.ts) can't be bypassed.",
         },

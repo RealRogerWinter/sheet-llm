@@ -2,8 +2,11 @@
  * Product / paywall tier for score generation — distinct from and ORTHOGONAL
  * to the provider model-size `Tier` (small | medium | large) in
  * `src/lib/providers/*`. This gates SCOPE and per-request ceilings, not model
- * quality: both tiers stay on the medium (Sonnet 4.6) model per the
- * "no Opus, cost" directive.
+ * quality: both tiers DEFAULT to the medium (Sonnet 4.6) model. (PR-8 Advanced
+ * Composer is the one exception — a Pro PAID turn with the Advanced toggle on
+ * routes its heavy compositional call to Opus via `resolveModelClass`; see
+ * `isAdvancedComposerEnabled` below and `providers/modelClass.ts`. The free tier
+ * is always Sonnet.)
  *
  * - `free` (default): a fresh from-scratch generation is served by ONE bounded
  *   `render_score` call (`runGenerateBounded`) — at most 4 bars of grand staff,

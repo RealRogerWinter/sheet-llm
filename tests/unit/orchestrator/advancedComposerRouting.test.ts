@@ -59,7 +59,6 @@ const scoreStream = () => ({
   outcomeKind: 'score_stream' as const,
   classification: GEN_COMPLEX_CLASS,
   model: 'claude-sonnet-4-6',
-  // eslint-disable-next-line require-yield
   events: (async function* () {})(),
   chatId: 'c',
   latencyMs: 1,
