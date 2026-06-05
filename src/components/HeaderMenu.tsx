@@ -98,6 +98,12 @@ export default function HeaderMenu() {
             aria-label="More"
             style={{ top: pos.top, right: pos.right }}
           >
+            {/* Deliberately ALSO offered here, even though PricingNavButton already
+                shows a prominent header button. Pricing is the one upsell surface we
+                want maximally discoverable, and this is the natural home for site
+                nav (Terms/Privacy/GitHub live here too). The header button can wrap
+                off-screen or be overlooked on narrow viewports; the menu is the
+                stable fallback. */}
             <Link href="/pricing" role="menuitem" className={styles.item} onClick={() => setOpen(false)}>
               Pricing
             </Link>

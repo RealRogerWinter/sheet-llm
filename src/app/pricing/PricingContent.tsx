@@ -99,8 +99,10 @@ export default function PricingContent({ packs }: { packs: PricingPack[] }) {
       </header>
 
       <main className={styles.main}>
-        {/* Launch banner — billing isn't switched on yet, so be upfront. */}
-        <div className={styles.banner} role="status">
+        {/* Launch banner — billing isn't switched on yet, so be upfront. role="note"
+            (not "status"): it's static page content, not a live region that should
+            be announced on load. */}
+        <div className={styles.banner} role="note">
           <span className={styles.bannerDot} aria-hidden="true" />
           <span>
             <strong>Paid credits are launching soon.</strong> Prices below are final — join the list
@@ -309,11 +311,16 @@ export default function PricingContent({ packs }: { packs: PricingPack[] }) {
             </p>
           ) : (
             <form className={styles.form} onSubmit={onSubmit}>
+              {/* Visible-to-AT label (visually hidden), matching /pro's labelled
+                  field. A placeholder is not an accessible label. */}
+              <label className={styles.srOnly} htmlFor="pricing-waitlist-email">
+                Email address
+              </label>
               <input
+                id="pricing-waitlist-email"
                 className={styles.input}
                 type="email"
                 name="email"
-                aria-label="Email address"
                 placeholder="you@example.com"
                 autoComplete="email"
                 required
