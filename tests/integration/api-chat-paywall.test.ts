@@ -4,7 +4,7 @@ import type { Score } from '@/lib/music/types'
 import { installTestDb, TEST_USER_ID } from '../factories/testEnv'
 import { creditHolds, usageLedger } from '@/lib/db/schema'
 import { creditWallet, getWallet } from '@/lib/billing/wallet'
-import { worstCaseHoldCredits } from '@/lib/billing/valueTier'
+import { generationHoldCredits, maxGenerationHoldCredits, worstCaseHoldCredits } from '@/lib/billing/valueTier'
 import { policyFor } from '@/lib/orchestrator/generationTier'
 
 /**
@@ -202,15 +202,48 @@ describe('/api/chat credit paywall (PR-7b-1)', () => {
 
     it('charge is CAPPED at the hold (creditsCharged ≤ hold) even on an absurd cost', async () => {
       cfg.costMicroUsd = 999_999_999 // would settle far above the reservation
-      creditWallet({ userId: TEST_USER_ID, creditsDelta: 1000, source: 'test' })
+      // Fund ABOVE the cap so the hold = the cap (not the whole balance), leaving
+      // headroom that proves the charge is bounded by the hold, not the balance.
+      const funded = maxGenerationHoldCredits() + 500
+      creditWallet({ userId: TEST_USER_ID, creditsDelta: funded, source: 'test' })
       const res = await postChat('compose a melody')
       expect(res.status).toBe(200)
-      const hold = worstCaseHoldCredits(policyFor('pro').maxOutputTokens)
+      // PR-7b-2c fork (b): the hold is min(available, cap) — here the cap.
+      const hold = generationHoldCredits(funded, policyFor('pro').maxOutputTokens)
+      expect(hold).toBe(maxGenerationHoldCredits())
       const { getDb } = await import('@/lib/db')
       const ledger = getDb().select().from(usageLedger).all()
       expect(ledger[0].creditsCharged).toBe(hold) // capped at the hold, never overdrafts
-      expect(getWallet(TEST_USER_ID).balance).toBe(1000 - hold)
+      expect(getWallet(TEST_USER_ID).balance).toBe(funded - hold)
       expect(getWallet(TEST_USER_ID).balance).toBeGreaterThanOrEqual(0)
+    })
+
+    it('PR-7b-2c fork (b): the hold is sized to AVAILABLE balance (held = min(available, cap))', async () => {
+      // Below the cap → the hold is the whole available balance; an absurd cost
+      // caps the charge there. Proves a large sectional could settle up to the
+      // user's balance, not a fixed 491.
+      cfg.costMicroUsd = 999_999_999
+      const funded = worstCaseHoldCredits(policyFor('pro').maxOutputTokens) + 200 // 691, < cap
+      creditWallet({ userId: TEST_USER_ID, creditsDelta: funded, source: 'test' })
+      const res = await postChat('compose a melody')
+      expect(res.status).toBe(200)
+      const { getDb } = await import('@/lib/db')
+      const ledger = getDb().select().from(usageLedger).all()
+      expect(ledger[0].creditsCharged).toBe(funded) // hold = full available balance
+      expect(getWallet(TEST_USER_ID).balance).toBe(0)
+    })
+
+    it('PR-7b-2c fork (b): below the worst-case floor → 402 and NEVER dispatches', async () => {
+      // The start gate stays at the non-streaming worst case (which has no abort,
+      // so the hold must cover it). A balance under that floor fails closed.
+      const floor = worstCaseHoldCredits(policyFor('pro').maxOutputTokens)
+      creditWallet({ userId: TEST_USER_ID, creditsDelta: floor - 1, source: 'test' })
+      const res = await postChat('compose a melody')
+      expect(res.status).toBe(402)
+      expect((await res.json()).code).toBe('insufficient_credits')
+      expect(cfg.runCalls).toBe(0)
+      expect(await countRows(usageLedger)).toBe(0)
+      expect(getWallet(TEST_USER_ID).held).toBe(0) // no stranded hold
     })
   })
 

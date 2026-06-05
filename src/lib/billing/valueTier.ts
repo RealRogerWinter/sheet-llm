@@ -149,3 +149,68 @@ export function worstCaseHoldCredits(maxOutputTokens: number): number {
   const microUsd = Math.ceil((Math.max(nonStreamingUsd, sectionalUsd) + overheadUsd) * 1_000_000)
   return Math.max(VALUE_TIERS.standard, costToCredits(microUsd, MARKUP_GENERATE))
 }
+
+// ── Fork (b): available-balance hold + abort-at-budget (PR-7b-2c) ───────────
+// A FIXED worst-case hold under-provisions a LARGE sectional, whose per-call
+// input GROWS (the full score is re-sent each section) with no call cap (only
+// maxDuration; planToSegments caps at MAX_TOTAL_BARS=512). The launch-gate fix
+// (user decision 2026-06-04) sizes the pre-dispatch hold to the user's AVAILABLE
+// balance (capped), and the sectional pump ABORTS before the metered cost can
+// exceed it — so a paying user can generate a large piece in one request while
+// `settleHold`'s debit cap stays the HARD overdraft backstop.
+
+/** Default ceiling on a single generation's hold/charge (credits). Caps the most
+ *  one request can ever reserve/spend; operator-tunable via SL_MAX_GEN_HOLD_CREDITS.
+ *  ~1500 cr ($15) ≈ a ~120-bar sectional — generous for one piece; beyond it the
+ *  user gets a partial + "ask to continue". */
+export const DEFAULT_MAX_GENERATION_HOLD_CREDITS = 1_500
+
+/**
+ * Operator-tunable ceiling (credits) on a single Pro generation's hold/charge.
+ * Reads `SL_MAX_GEN_HOLD_CREDITS` fresh (no caching); a missing / non-positive /
+ * non-integer value falls back to {@link DEFAULT_MAX_GENERATION_HOLD_CREDITS}.
+ */
+export function maxGenerationHoldCredits(): number {
+  const raw = Number(process.env.SL_MAX_GEN_HOLD_CREDITS)
+  return Number.isInteger(raw) && raw > 0 ? raw : DEFAULT_MAX_GENERATION_HOLD_CREDITS
+}
+
+/**
+ * The pre-dispatch hold (credits) for a Pro turn under fork (b): the user's
+ * AVAILABLE balance, clamped to `[worstCaseHoldCredits, maxGenerationHoldCredits]`.
+ *
+ * The floor ({@link worstCaseHoldCredits}) guarantees a non-streaming turn (which
+ * has NO abort) always fits the hold, so its settle never trips overHold. The cap
+ * bounds one request's exposure. The CALLER must independently gate
+ * `available >= worstCaseHoldCredits(...)` (→ 402) before placing the hold — when
+ * `available` is below the floor this returns the floor (which `placeHold` then
+ * fail-closes on), so it is safe either way.
+ */
+export function generationHoldCredits(availableCredits: number, maxOutputTokens: number): number {
+  const floor = worstCaseHoldCredits(maxOutputTokens)
+  const cap = Math.max(floor, maxGenerationHoldCredits())
+  const want = Number.isFinite(availableCredits) ? Math.floor(availableCredits) : floor
+  return Math.min(Math.max(want, floor), cap)
+}
+
+/** A large growing-section input bound (tokens, billed UNCACHED) — a single
+ *  section near the budget can re-send a big score. */
+const SECTION_INPUT_TOKENS_MAX = 96_000
+
+/**
+ * Credit headroom the sectional cost-abort keeps BELOW the hold so that stopping
+ * AFTER a completed section (the check point) leaves room for that section's
+ * charge to stay within the hold — a provable bound on ONE large section's
+ * cost-plus charge at the priciest in-scope model. Sized generously; `settleHold`'s
+ * cap is the hard backstop if a pathological section overshoots anyway (we then
+ * under-earn + page via overHold, never overdraft).
+ */
+export function sectionAbortMarginCredits(maxOutputTokens: number): number {
+  const usd = billableCostUsd(WORST_MODEL, {
+    uncachedInputTokens: SECTION_INPUT_TOKENS_MAX,
+    outputTokens: maxOutputTokens,
+    cacheReadInputTokens: 0,
+    cacheCreationInputTokens: 0,
+  })
+  return costToCredits(Math.ceil(usd * 1_000_000), MARKUP_GENERATE)
+}

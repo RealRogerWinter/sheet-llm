@@ -51,13 +51,16 @@ import { summarizeAction } from '@/lib/orchestrator/summarizeAction'
 import { recordUsage } from '@/lib/orchestrator/budget'
 import { currentMeterTotals, runWithUsageMeter, toMicroUsd } from '@/lib/billing/usageMeter'
 import { isPaidGenerationEnabled } from '@/lib/auth/account'
-import { ensureWallet, placeHold, refund, releaseHold, settleHold, type SettleResult } from '@/lib/billing/wallet'
+import { ensureWallet, getWallet, placeHold, refund, releaseHold, settleHold, type SettleResult } from '@/lib/billing/wallet'
 import { maybeReapExpiredHolds } from '@/lib/billing/reap'
-import { consumeFreePiece, isFreePieceEligible } from '@/lib/billing/freePiece'
+import { releaseFreePiece, reserveFreePiece } from '@/lib/billing/freePiece'
 import {
   costToCredits,
   fallbackCreditsForKind,
+  generationHoldCredits,
   markupForKind,
+  MARKUP_GENERATE,
+  sectionAbortMarginCredits,
   worstCaseHoldCredits,
 } from '@/lib/billing/valueTier'
 import { checkRequestIp, extractClientIp } from '@/lib/orchestrator/requestRateLimit'
@@ -83,6 +86,13 @@ export const runtime = 'nodejs'
 // are still individually bounded, so this is a ceiling, not a target.
 export const maxDuration = 300
 export const dynamic = 'force-dynamic'
+
+// PR-7b-2c: wall-clock budget for the streamed SECTIONAL pump on a money-adjacent
+// request (a placed hold, or a free piece). Stop pulling sections a margin before
+// `maxDuration` so a long generation ends cleanly at a synthesized `done` (→ settle
+// the metered partial) instead of being killed mid-flight → reaped → free (a real
+// loss on the paid path). 30s of headroom covers the final settle + persist.
+const SECTIONAL_STREAM_DEADLINE_MS = (maxDuration - 30) * 1_000
 
 // M25-PR-5: raised from 24KB. A 16-bar grand-staff Score sent back up as
 // `editedScore` on a refinement is ~30-50KB and was 413-ing on the very
@@ -532,24 +542,36 @@ async function handleChat(
   // See isTierOverrideAllowed in generationTier.ts.
   let generationTier = await resolveGenerationTier(userId, parsed.debug?.generationTier)
 
-  // ── Free full piece (PR-7b-3): a VERIFIED account's ONE-TIME pro-scope
-  // generation, free + OFF the money path (a charge-SKIP, never a credit grant —
-  // which would open refund farming). DARK with the paid layer. Restricted to
-  // FROM-SCRATCH requests (no existing score ⇒ always a generation, never a free
-  // edit/converse, so it can't be farmed). When eligible, upgrade THIS request to
-  // pro scope (the full product) and skip the hold below; the grant is consumed
-  // on successful DELIVERY (not on failure) so a failed piece doesn't burn it.
+  // ── Free full piece (PR-7b-3 + PR-7b-2c reservation). A VERIFIED account's
+  // ONE-TIME pro-scope generation, free + OFF the money path (a charge-SKIP, never
+  // a credit grant — which would open refund farming). Restricted to FROM-SCRATCH
+  // requests (no existing score ⇒ always a generation, never a free edit/converse,
+  // so it can't be farmed). PR-7b-2c CLAIMS the grant here PRE-DISPATCH via the
+  // atomic reserveFreePiece (folding the eligibility check INTO the claim) — closing
+  // the consume-on-delivery TOCTOU where a concurrent from-scratch burst could each
+  // run a free piece before the first consumed. The claim is symmetric with the
+  // credit hold: this request now OWNS the grant and RELEASES it on any non-delivery
+  // exit (releasePreDispatch here + the two orchestrator responders), keeping it for
+  // a retry; it stays consumed only on a DELIVERED piece. `&&` short-circuits, so
+  // reserveFreePiece runs only for an eligible-shaped request (flag on + verified +
+  // from-scratch) — never on an edit/converse, never when the flag is off.
   const freePiece =
-    isPaidGenerationEnabled() && authenticated && !orchestratorScore && isFreePieceEligible(userId)
+    isPaidGenerationEnabled() && authenticated && !orchestratorScore && reserveFreePiece(userId)
   if (freePiece) generationTier = 'pro'
-  // KNOWN (deferred to the pre-launch hardening, with PR-7b-2c): eligibility is
-  // read here but the grant is consumed only on DELIVERY, so a CONCURRENT burst
-  // of from-scratch requests could each run a free piece before the first
-  // consumes (the idempotent flag still prevents a second persisted grant — only
-  // the concurrent COST leaks). Bounded by the per-IP burst limiter + Turnstile +
-  // the verified-account requirement; the robust fix is a pre-dispatch
-  // reservation (claim → release-on-non-delivery, symmetric with the credit
-  // hold). Dark until SL_PAID_GENERATION, so no live exposure.
+
+  // Pre-dispatch reservation state + the single release for BOTH pre-dispatch
+  // reservations (the credit hold and the free-piece claim). Declared BEFORE the
+  // quota gate so a quota rejection — or any later non-delivery exit — can release a
+  // free-piece reservation already claimed above. holdId/holdCredits are assigned by
+  // the paywall block below; only one of {holdId, freePiece} is ever set
+  // (paidGeneration requires !freePiece). Each is a no-op when its reservation
+  // wasn't made / already terminal, so it is safe to call on any non-delivery exit.
+  let holdId: string | undefined
+  let holdCredits = 0
+  const releasePreDispatch = (): void => {
+    if (holdId) safeReleaseHold(holdId, requestId)
+    if (freePiece) safeReleaseFreePiece(userId, requestId)
+  }
 
   // Daily request-quota gate (hosted abuse-gating layer; OFF by default — inert
   // for self-hosters). Slotted AFTER identity + tier are known and BEFORE any
@@ -560,33 +582,51 @@ async function handleChat(
   // turn-cap/stale-score) never reach here, so they don't burn quota.
   const quota = evaluateRequestQuota({ userId, authenticated }, generationTier, request)
   if (!quota.ok) {
+    releasePreDispatch() // give back a free-piece reservation claimed above (no-op otherwise)
     const body = quotaErrorBody(quota)
     return errorResponse(body.code, body.httpStatus, body.message, chatId, body.cta)
   }
 
-  // ── Credit paywall (PR-7b-1): atomic PRE-DISPATCH hold, fail-CLOSED. DARK
-  // until SL_PAID_GENERATION. Slotted AFTER the request-quota gate and BEFORE
-  // any orchestrator/LLM dispatch — the ordering is origin → bot-gate → quota
-  // (fail-OPEN) → balance/hold (fail-CLOSED) → run → settle. Only an
-  // authenticated Pro request touches money; free tier + anon stay off the
-  // money path entirely. The hold is sized to the PROVABLE worst case so the
-  // cost-plus settle is always ≤ the hold; it is settled in
-  // respondWithOrchestratorResult (non-streaming) and released on every other
-  // outcome — streaming settle is PR-7b-2. A crashed request self-heals via
-  // reapExpiredHolds.
+  // ── Credit paywall (PR-7b-1 hold; PR-7b-2c fork-(b) sizing). Atomic PRE-DISPATCH
+  // hold, fail-CLOSED. DARK until SL_PAID_GENERATION. Ordering: origin → bot-gate →
+  // quota (fail-OPEN) → balance/hold (fail-CLOSED) → run → settle. Only an
+  // authenticated Pro request (not a free piece) touches money; free tier + anon
+  // stay off the money path entirely.
+  //
+  // PR-7b-2c sizes the hold to the user's AVAILABLE balance, clamped to
+  // [worstCase, cap], instead of a fixed worst-case — so a large sectional can
+  // settle up to the cap (the pump aborts before exceeding it; see
+  // respondWithScoreStream). The START GATE stays at the non-streaming worst case:
+  // a non-streaming turn has NO abort, so the hold must always cover it. A crashed
+  // request self-heals via reapExpiredHolds.
   const paidGeneration =
     isPaidGenerationEnabled() && authenticated && generationTier === 'pro' && !freePiece
-  let holdId: string | undefined
   if (paidGeneration) {
     try {
       ensureWallet(userId)
+      const maxOutputTokens = policyFor('pro').maxOutputTokens
+      const minToStart = worstCaseHoldCredits(maxOutputTokens)
+      const available = getWallet(userId).available
+      if (available < minToStart) {
+        // Can't even cover the non-streaming worst case — fail closed before run.
+        return errorResponse(
+          'insufficient_credits',
+          402,
+          "You're out of credits for Pro generation. Top up to keep going.",
+          chatId,
+        )
+      }
+      holdCredits = generationHoldCredits(available, maxOutputTokens)
       const hold = placeHold({
         userId,
         requestId,
         idempotencyKey: `gen:${requestId}`,
-        credits: worstCaseHoldCredits(policyFor('pro').maxOutputTokens),
+        credits: holdCredits,
       })
       if (!hold.ok) {
+        // The hold was sized to the just-read available balance, so this only
+        // fails when a CONCURRENT request drained it between the read and the
+        // atomic guard-in-the-write — fail closed.
         return errorResponse(
           'insufficient_credits',
           402,
@@ -596,11 +636,8 @@ async function handleChat(
       }
       if (hold.reused) {
         // A reused hold means this exact request id already placed one —
-        // anomalous in PR-7b-1, where requestId is a fresh per-request UUID so
-        // `gen:${requestId}` is never reused. Refuse rather than risk serving or
-        // charging twice. (A reused-ACTIVE hold becomes a real double-settle
-        // hazard once PR-7b-2 / sectional introduce a STABLE hold key — reuse
-        // must be handled explicitly there.)
+        // anomalous: requestId is a fresh per-request UUID so `gen:${requestId}`
+        // is never reused. Refuse rather than risk serving or charging twice.
         console.error('[paywall] placeHold returned a reused hold — refusing (anomalous for a per-request key)', {
           requestId,
           status: hold.status,
@@ -628,12 +665,6 @@ async function handleChat(
       )
     }
   }
-  // Release the (still-active) hold without charging. A no-op once the hold has
-  // settled (settleHold flips it to 'settled'; releaseHold only touches
-  // 'active'), so it is safe to call on any non-settle exit, even redundantly.
-  const releaseGenHold = (): void => {
-    if (holdId) safeReleaseHold(holdId, requestId)
-  }
 
   let orchestratorOutcome: Awaited<ReturnType<typeof runOrchestrator>> = null
   const tOrchStart = Date.now()
@@ -653,9 +684,10 @@ async function handleChat(
       })
     }
   } catch (e) {
-    // Paid path: any orchestrator throw means nothing settled — release the
-    // reservation (no-op off the paid path).
-    releaseGenHold()
+    // Any orchestrator throw means nothing was delivered — release both
+    // pre-dispatch reservations (the credit hold and/or the free-piece claim;
+    // no-op off the paid + free-piece paths).
+    releasePreDispatch()
     if (mode === 'shadow') {
       const errMsg = e instanceof Error ? e.message : 'Unknown orchestrator error'
       logShadowDivergence({
@@ -700,7 +732,7 @@ async function handleChat(
 
   if (mode === 'primary' && orchestratorOutcome) {
     if ('refused' in orchestratorOutcome) {
-      releaseGenHold() // a refusal carries no Score and never charges.
+      releasePreDispatch() // a refusal carries no Score: never charges, frees the grant.
       return errorResponse('refused', 422, orchestratorOutcome.reason, chatId)
     }
     if (isOrchestratorConverseStream(orchestratorOutcome)) {
@@ -710,14 +742,17 @@ async function handleChat(
     }
     if (isOrchestratorScoreStream(orchestratorOutcome)) {
       // PR-7b-2: settled at `done` off the (backfilled) full sectional cost.
-      // PR-7b-3: a from-scratch free piece (holdId undefined) consumes the grant
-      // at `done` instead of settling.
-      return await respondWithScoreStream(userId, chatId, orchestratorOutcome, mode, generationTier, requestId, holdId, freePiece)
+      // PR-7b-2c: the responder OWNS the hold + the free-piece reservation — it
+      // settles/keeps on delivery and releases both on a non-delivery exit, and it
+      // ABORTS the sectional before the metered cost exceeds `holdCredits` (or a
+      // wall-clock budget). holdCredits is the placed hold amount (0 off the paid
+      // path → no cost-abort; a free piece is wall-clock-bounded only).
+      return await respondWithScoreStream(userId, chatId, orchestratorOutcome, mode, generationTier, requestId, holdId, freePiece, holdCredits)
     }
     if (!('fellThrough' in orchestratorOutcome)) {
-      // Non-streaming result: respondWithOrchestratorResult OWNS the hold's
-      // fate — it settles (charge cost-plus) on success or releases on a
-      // validation failure — so we must NOT releaseGenHold() here.
+      // Non-streaming result: respondWithOrchestratorResult OWNS the hold + the
+      // free-piece reservation — it settles/keeps on delivery and releases both on
+      // a validation/persist failure — so we must NOT releasePreDispatch() here.
       return await respondWithOrchestratorResult(
         userId,
         chatId,
@@ -735,9 +770,11 @@ async function handleChat(
   }
 
   // Everything below is the fall-through / legacy single-shot path, which
-  // PR-7b-1 does not meter or charge — release any paid hold now. No-op off the
-  // paid path, or if it was already released/settled above.
-  releaseGenHold()
+  // PR-7b-1 does not meter or charge — release any pre-dispatch reservation now
+  // (credit hold and/or free-piece claim). No-op off those paths, or if already
+  // released/settled above. The free-piece backstop below then refuses (keeping
+  // the now-released grant unspent for a retry); a paid request likewise refuses.
+  releasePreDispatch()
 
   // Capture the orchestrator's fall-through outcome (if any) so the
   // debug payload can surface WHY the legacy path served this turn.
@@ -1043,6 +1080,25 @@ function safeReleaseHold(holdId: string, requestId: string): void {
   }
 }
 
+/**
+ * Release a pre-dispatch FREE-PIECE reservation (PR-7b-2c) without delivering —
+ * un-claims `free_full_piece_used_at` so a retry is eligible again. Logs, never
+ * throws (a stranded reservation is a one-time, low-impact perk loss, not a money
+ * fault). Call on any non-delivery exit of a request that reserved the free piece;
+ * NEVER after a delivered piece (that keeps the grant consumed). Symmetric with
+ * safeReleaseHold.
+ */
+function safeReleaseFreePiece(userId: string, requestId: string): void {
+  try {
+    releaseFreePiece(userId)
+  } catch (e) {
+    console.error('[paywall] free-piece reservation release failed', {
+      requestId,
+      error: e instanceof Error ? e.message : String(e),
+    })
+  }
+}
+
 /** The metered RAW cost (µUSD) + token split a settle charges against. */
 interface SettleCost {
   costMicroUsd: number | null
@@ -1181,8 +1237,10 @@ async function respondWithOrchestratorResult(
   try {
     validateScore(result.score)
   } catch (e) {
-    // Not delivering a result → release the paid hold (nothing to charge for).
+    // Not delivering a result → release BOTH pre-dispatch reservations (the paid
+    // hold and/or the free-piece claim; nothing to charge / keep for).
     if (holdId && requestId) safeReleaseHold(holdId, requestId)
+    if (freePiece && requestId) safeReleaseFreePiece(userId, requestId)
     if (e instanceof ValidationError) {
       return errorResponse('validation_failed', 422, `Orchestrator emitted an invalid score: ${e.message}`, chatId)
     }
@@ -1195,6 +1253,7 @@ async function respondWithOrchestratorResult(
     await validateAbc(abc)
   } catch (e) {
     if (holdId && requestId) safeReleaseHold(holdId, requestId)
+    if (freePiece && requestId) safeReleaseFreePiece(userId, requestId)
     if (e instanceof ValidationError) {
       return errorResponse('validation_failed', 422, e.message, chatId)
     }
@@ -1307,15 +1366,16 @@ async function respondWithOrchestratorResult(
         })
       }
     }
+    // A free piece (no hold) was reserved pre-dispatch but never delivered →
+    // release the reservation so a retry is eligible again.
+    if (freePiece && requestId) safeReleaseFreePiece(userId, requestId)
     throw e
   }
 
-  // PR-7b-3: a delivered from-scratch free piece consumes the one-time grant
-  // (idempotent; off the money path). Only on success — a failure above already
-  // returned/threw before here, leaving the grant for a retry. freePiece is only
-  // set for a from-scratch (no prior score) request, which is always a
-  // generation, so this never burns the grant on an edit/converse.
-  if (freePiece) consumeFreePiece(userId)
+  // PR-7b-2c: the free piece was CLAIMED pre-dispatch (reserveFreePiece), so a
+  // delivered piece simply KEEPS it consumed — nothing to do here. Every
+  // non-delivery path above released the reservation instead. (The grant is only
+  // ever set for a from-scratch request, so it never burns on an edit/converse.)
 
   const keyConfigured = !!process.env.ANTHROPIC_API_KEY
   const debug: ChatDebugPayload = {
@@ -1389,6 +1449,37 @@ function backfillStreamedTurnCost(requestId: string): void {
     outputTokens: m.outputTokens,
     costMicroUsd: toMicroUsd(m.costUsd),
   })
+}
+
+/**
+ * PR-7b-2c sectional abort decision (pure, exported for unit tests). Decides, after
+ * each completed section, whether the streamed sectional pump should STOP pulling
+ * more sections:
+ *   - 'budget' (PAID path): the cost-plus credits of the metered cost so far has
+ *     reached `budgetCredits − abortMargin`. Checked AFTER a section completes, so
+ *     the margin leaves room for that section's charge to stay within the hold;
+ *     settleHold's cap is the hard backstop if a pathological section overshoots.
+ *   - 'wall_clock' (paid OR free piece): elapsed has reached the stream deadline,
+ *     so the pump ends cleanly (→ settle the partial) instead of being killed at
+ *     maxDuration → reaped → free.
+ * `budgetCredits` undefined ⇒ no cost-abort (off the paid path). A null metered
+ * cost counts as 0 credits (never spuriously aborts on budget).
+ */
+export function sectionalAbortReason(args: {
+  budgetCredits: number | undefined
+  meteredMicroUsd: number | null
+  abortMargin: number
+  enforceWallClock: boolean
+  elapsedMs: number
+  deadlineMs: number
+}): 'budget' | 'wall_clock' | undefined {
+  if (args.budgetCredits !== undefined) {
+    const meteredCredits =
+      args.meteredMicroUsd != null ? costToCredits(args.meteredMicroUsd, MARKUP_GENERATE) : 0
+    if (meteredCredits >= args.budgetCredits - args.abortMargin) return 'budget'
+  }
+  if (args.enforceWallClock && args.elapsedMs >= args.deadlineMs) return 'wall_clock'
+  return undefined
 }
 
 /**
@@ -1572,19 +1663,32 @@ async function respondWithConverseStream(
               })
             } else if (ev.type === 'error') {
               await finalize('errored', 'upstream_error')
+              // PR-7b-2c: log the raw upstream detail, return a generic message —
+              // never echo provider internals to the client (matches the
+              // non-streaming path).
+              console.error('[chat] converse stream upstream error', {
+                chatId,
+                requestId,
+                error: ev.error.message,
+              })
               write('error', {
                 code: 'upstream_error',
-                error: ev.error.message,
+                error: 'The model is unavailable right now. Please try again.',
               })
             }
           }
         } catch (e) {
           // Defensive: any other throw (network drop on the iterator) —
-          // finalize as errored and report.
+          // finalize as errored and report (raw detail logged, generic to client).
           await finalize('errored', 'upstream_error')
+          console.error('[chat] converse stream failed', {
+            chatId,
+            requestId,
+            error: e instanceof Error ? e.message : String(e),
+          })
           write('error', {
             code: 'upstream_error',
-            error: e instanceof Error ? e.message : 'Stream failed',
+            error: 'The model is unavailable right now. Please try again.',
           })
         } finally {
           // PR-7b-2: release the hold unless the stream COMPLETED and settled
@@ -1647,6 +1751,10 @@ async function respondWithScoreStream(
   requestId: string,
   holdId?: string,
   freePiece?: boolean,
+  // PR-7b-2c: the placed hold's credit amount = the sectional cost budget. The
+  // pump aborts before the metered cost reaches it. 0 / undefined off the paid
+  // path (no cost-abort; a free piece is wall-clock-bounded only).
+  holdCredits?: number,
 ): Promise<Response> {
   const keyConfigured = !!process.env.ANTHROPIC_API_KEY
   const debug: ChatDebugPayload = {
@@ -1698,9 +1806,21 @@ async function respondWithScoreStream(
     return { abc, toolUseId: id, ...(headVersionId !== undefined ? { headVersionId } : {}) }
   }
 
-  let holdSettled = false // PR-7b-2: paid-path hold settled at `done`?
+  let holdSettled = false // PR-7b-2: paid-path hold settled (at `done` or abort)?
   let settledCredits = 0 // captured for refund-on-persist-failure
+  let delivered = false // PR-7b-2c: a `done` frame was written (score persisted)?
   let keepalive: ReturnType<typeof setInterval> | undefined
+
+  // PR-7b-2c abort budgets. The COST abort applies to the PAID path (a placed
+  // hold); the WALL-CLOCK applies to any money-adjacent stream (paid OR a free
+  // piece — both cost us raw spend). The margin keeps a stop-AFTER-a-section's
+  // charge within the hold; settleHold's cap is the hard backstop if a section
+  // overshoots anyway (we under-earn + page via overHold, never overdraft).
+  const budgetCredits = holdId !== undefined ? holdCredits : undefined
+  const abortMargin = sectionAbortMarginCredits(policyFor('pro').maxOutputTokens)
+  const enforceWallClock = holdId !== undefined || freePiece === true
+  const streamStartedAt = Date.now()
+
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const enc = new TextEncoder()
@@ -1720,11 +1840,105 @@ async function respondWithScoreStream(
         }
       }, 15_000)
 
+      // Finalize a (full OR partial-but-valid) sectional score: backfill the
+      // metered cost, settle the paid hold against it BEFORE persisting (the cost
+      // was incurred regardless of whether persist succeeds), persist the
+      // assistant turn, and emit `done`. Shared by the natural `done` event and the
+      // PR-7b-2c early-abort path. On a persist failure it refunds a settled charge;
+      // the free-piece reservation is released in the finally (driven by
+      // `delivered`). Sets holdSettled / settledCredits / delivered.
+      const finishStream = async (
+        score: Score,
+        introText: string,
+        toolUseId: string | undefined,
+        warnings: string[] | undefined,
+        model: string | undefined,
+      ): Promise<void> => {
+        backfillStreamedTurnCost(requestId)
+        // The pump runs to here even on client disconnect (no AbortSignal
+        // propagation), so a paid sectional is charged exactly once; the finally
+        // releases on any non-finalizing exit.
+        if (holdId) {
+          const settle = settleHeldGeneration({
+            holdId,
+            requestId,
+            chatId,
+            generationTier,
+            kind: outcome.classification.kind,
+            model: model ?? null,
+            cost: meterStreamCost(), // streamed sectional cost from the pump meter
+          })
+          holdSettled = settle.ok
+          if (settle.ok) {
+            settledCredits = settle.creditsCharged
+          } else {
+            console.error('[paywall] score-stream settle hold_not_active (anomalous; sections already delivered)', {
+              requestId,
+              chatId,
+              holdId,
+            })
+          }
+        }
+        try {
+          const persisted = await persist(score, introText, toolUseId)
+          delivered = true // grant stays consumed; the finally won't release it
+          write('done', {
+            abc: persisted.abc,
+            scoreJson: score,
+            toolUseId: persisted.toolUseId,
+            introText,
+            ...(persisted.headVersionId !== undefined ? { headVersionId: persisted.headVersionId } : {}),
+            ...(warnings && warnings.length > 0 ? { warnings } : {}),
+          })
+        } catch (e) {
+          // Charged but the final score couldn't be persisted/delivered → refund
+          // OUR failure (refund:* key namespaced from settle:*, idempotent,
+          // abuse-bounded; return value checked). Raw detail is LOGGED, never
+          // echoed to the client (PR-7b-2c SSE sanitize).
+          console.error('[chat] score-stream finalize failed', {
+            chatId,
+            requestId,
+            error: e instanceof Error ? e.message : String(e),
+          })
+          if (holdId && settledCredits > 0) {
+            try {
+              const r = refund({
+                userId,
+                requestId,
+                holdId,
+                credits: settledCredits,
+                reason: 'error',
+                sessionId: chatId,
+                idempotencyKey: `refund:${requestId}:persist_failed`,
+              })
+              if (!r.ok) {
+                console.error('[paywall] score-stream refund after persist failure DENIED — manual reconcile', {
+                  requestId,
+                  chatId,
+                  reason: r.reason,
+                })
+              }
+            } catch (re) {
+              console.error('[paywall] score-stream refund after persist failure FAILED — manual reconcile', {
+                requestId,
+                chatId,
+                error: re instanceof Error ? re.message : String(re),
+              })
+            }
+          }
+          write('error', {
+            code: 'validation_failed' as ChatErrorCode,
+            error: 'The generated score could not be finalized. Please try again.',
+          })
+        }
+      }
+
       // Each sectional sub-call fires HERE as the route pumps the generator —
       // outside run()'s usage-meter scope. Wrap the pump so every section is
       // metered (this is the MOST expensive path — many chained calls), then
-      // backfill the optimistically-recorded turn at `done`.
+      // backfill the optimistically-recorded turn at `done`/abort.
       await runWithUsageMeter(requestId, async () => {
+        let lastSectionScore: Score | undefined
         try {
           for await (const ev of outcome.events) {
             if (ev.type === 'section') {
@@ -1742,86 +1956,46 @@ async function respondWithScoreStream(
                 abc,
                 scoreJson: ev.score,
               })
-            } else if (ev.type === 'done') {
-              // Cost was incurred across all sections regardless of whether the
-              // final score persists — backfill before the settle + persist.
-              backfillStreamedTurnCost(requestId)
-              // PR-7b-2: settle the full sectional cost BEFORE persisting. The
-              // pump runs to `done` even on client disconnect (no AbortSignal
-              // propagation), so a paid sectional generation is charged exactly
-              // once here; release-on-error is the finally below.
-              if (holdId) {
-                const settle = settleHeldGeneration({
-                  holdId,
+              lastSectionScore = ev.score
+
+              // PR-7b-2c cost + wall-clock abort. A large sectional re-sends a
+              // growing score with no call cap, so without this it could settle
+              // ABOVE the hold (overHold under-earn) or run past maxDuration →
+              // reaped → free. recordProviderCall fires DURING the section call
+              // (before the yield), so the meter already includes the section just
+              // delivered — this is the true cost so far. Breaking after a section
+              // yield is cost-safe: the generator is suspended BETWEEN calls, so
+              // the next (un-run) section's call never fires.
+              const abortReason = sectionalAbortReason({
+                budgetCredits,
+                meteredMicroUsd: meterStreamCost().costMicroUsd,
+                abortMargin,
+                enforceWallClock,
+                elapsedMs: Date.now() - streamStartedAt,
+                deadlineMs: SECTIONAL_STREAM_DEADLINE_MS,
+              })
+              if (abortReason !== undefined && lastSectionScore) {
+                console.warn('[paywall] sectional stopped before overspend — settling the partial', {
                   requestId,
                   chatId,
-                  generationTier,
-                  kind: outcome.classification.kind,
-                  model: ev.model,
-                  cost: meterStreamCost(), // streamed sectional cost from the pump meter
+                  reason: abortReason,
+                  ...(budgetCredits !== undefined ? { budgetCredits } : {}),
                 })
-                holdSettled = settle.ok
-                if (settle.ok) {
-                  settledCredits = settle.creditsCharged
-                } else {
-                  console.error('[paywall] score-stream settle hold_not_active (anomalous; sections already delivered)', {
-                    requestId,
-                    chatId,
-                    holdId,
-                  })
-                }
+                const warning =
+                  abortReason === 'budget'
+                    ? 'Stopped at the credit budget for this generation — ask me to continue to add more sections.'
+                    : 'This piece is taking a while to generate — stopped here. Ask me to continue to add more.'
+                await finishStream(
+                  lastSectionScore,
+                  `Composed ${lastSectionScore.measures.length} bars.`,
+                  undefined,
+                  [warning],
+                  outcome.model,
+                )
+                break
               }
-              try {
-                const persisted = await persist(ev.score, ev.introText, ev.toolUseId)
-                // PR-7b-3: a delivered from-scratch free piece (no hold) consumes
-                // the one-time grant here (idempotent; off the money path).
-                if (freePiece) consumeFreePiece(userId)
-                write('done', {
-                  abc: persisted.abc,
-                  scoreJson: ev.score,
-                  toolUseId: persisted.toolUseId,
-                  introText: ev.introText,
-                  ...(persisted.headVersionId !== undefined
-                    ? { headVersionId: persisted.headVersionId }
-                    : {}),
-                  ...(ev.warnings ? { warnings: ev.warnings } : {}),
-                })
-              } catch (e) {
-                // Charged but the final score couldn't be persisted/delivered →
-                // refund OUR failure (refund:* key namespaced from settle:*,
-                // idempotent, abuse-bounded; return value checked).
-                if (holdId && settledCredits > 0) {
-                  try {
-                    const r = refund({
-                      userId,
-                      requestId,
-                      holdId,
-                      credits: settledCredits,
-                      reason: 'error',
-                      sessionId: chatId,
-                      idempotencyKey: `refund:${requestId}:persist_failed`,
-                    })
-                    if (!r.ok) {
-                      console.error('[paywall] score-stream refund after persist failure DENIED — manual reconcile', {
-                        requestId,
-                        chatId,
-                        reason: r.reason,
-                      })
-                    }
-                  } catch (re) {
-                    console.error('[paywall] score-stream refund after persist failure FAILED — manual reconcile', {
-                      requestId,
-                      chatId,
-                      error: re instanceof Error ? re.message : String(re),
-                    })
-                  }
-                }
-                const msg = e instanceof Error ? e.message : 'finalize failed'
-                write('error', {
-                  code: 'validation_failed' as ChatErrorCode,
-                  error: `The generated score could not be finalized: ${msg}`,
-                })
-              }
+            } else if (ev.type === 'done') {
+              await finishStream(ev.score, ev.introText, ev.toolUseId, ev.warnings, ev.model)
             } else {
               write('error', scoreStreamErrorFrame(ev.error))
             }
@@ -1829,6 +2003,7 @@ async function respondWithScoreStream(
         } catch (e) {
           console.error('[chat] score stream failed', {
             chatId,
+            requestId,
             error: e instanceof Error ? e.message : String(e),
           })
           write('error', {
@@ -1836,10 +2011,15 @@ async function respondWithScoreStream(
             error: 'Something went wrong while generating your score. Please try again.',
           })
         } finally {
-          // PR-7b-2: release the hold unless the stream reached `done` and
-          // settled above (error / mid-pump throw → our failure → free). No-op
-          // once settled; a process-kill before this leaves it for the reaper.
+          // PR-7b-2: release the hold unless it settled above (error / mid-pump
+          // throw → our failure → free). PR-7b-2c: release the free-piece
+          // reservation unless a piece was actually DELIVERED (a delivered partial
+          // KEEPS the grant consumed — which also bounds free-piece cost on the
+          // wall-clock path). No-op once settled/delivered; a process-kill before
+          // this leaves the hold for the reaper. Only one of {holdId, freePiece}
+          // is ever set.
           if (holdId && !holdSettled) safeReleaseHold(holdId, requestId)
+          if (freePiece && !delivered) safeReleaseFreePiece(userId, requestId)
           if (keepalive) clearInterval(keepalive)
           try {
             controller.close()
@@ -1851,9 +2031,9 @@ async function respondWithScoreStream(
     },
     cancel() {
       // PR-7b-2 MONEY INVARIANT (see respondWithConverseStream.cancel): the pump
-      // is NOT cancelled here, so a paid sectional settles at `done` even on
+      // is NOT cancelled here, so a paid sectional settles at `done`/abort even on
       // disconnect. Do NOT wire this to an AbortSignal that stops generation
-      // without first moving settle off the done-only path — else the `finally`
+      // without first moving settle off the done/abort path — else the `finally`
       // releases the hold → a delivered-but-free paid generation.
       if (keepalive) clearInterval(keepalive)
     },
