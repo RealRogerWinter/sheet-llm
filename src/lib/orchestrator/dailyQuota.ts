@@ -365,9 +365,10 @@ export type QuotaPeek =
  * is off (counter hidden) and FAILS to the same conservative {enabled:false} on
  * any error — a usage read must never break the page (and never block chat).
  *
- * Reflects ONLY the caller's own per-key bucket — deliberately NOT the
- * instance-wide anon ceiling (`SL_DAILY_QUOTA_ANON_GLOBAL`), which is a hidden
- * backstop we don't disclose. So when that ceiling is in force the counter may
+ * Reflects ONLY the caller's own buckets (the binding/fewest-remaining of the
+ * per-device and, for a verified account, per-account counters) — deliberately
+ * NOT the instance-wide anon ceiling (`SL_DAILY_QUOTA_ANON_GLOBAL`), which is a
+ * hidden backstop we don't disclose. So when that ceiling is in force the counter may
  * read "N left" while a request is still globally throttled ("busy"); that's an
  * accepted UX edge in exchange for not leaking the instance cap.
  */
@@ -384,29 +385,39 @@ export function peekDailyQuota(
     if (cls.kind === 'needsSignIn') return { enabled: true, tier, needsSignIn: true }
     const now = Math.floor(Date.now() / 1000)
     const win = windowSec()
-    const row = db.select().from(requestQuota).where(eq(requestQuota.quotaKey, cls.key)).get()
-    // No row, or the fixed window has rolled over → a full allowance is available.
-    if (!row || now >= row.windowStart + win) {
-      return {
-        enabled: true,
-        tier,
-        isAnon: cls.isAnon,
-        limit: cls.limit,
-        used: 0,
-        remaining: cls.limit,
-        resetsInHours: Math.max(1, Math.round(win / 3600)),
+    const fullWindowHours = Math.max(1, Math.round(win / 3600))
+    // A counted request is admitted only if EVERY bucket allows (per-device AND,
+    // for a verified account, per-account), so the caller's real standing is the
+    // MOST-CONSTRAINED bucket. Read each one read-only (never write) and report the
+    // binding bucket — the fewest-remaining is what the user can actually still do.
+    let binding: { limit: number; used: number; remaining: number; resetsInHours: number } | null = null
+    for (const b of cls.buckets) {
+      const row = db.select().from(requestQuota).where(eq(requestQuota.quotaKey, b.key)).get()
+      let used: number
+      let resetsInHours: number
+      if (!row || now >= row.windowStart + win) {
+        // No row, or the fixed window has rolled over → a full allowance.
+        used = 0
+        resetsInHours = fullWindowHours
+      } else {
+        used = Math.min(row.count, b.limit)
+        resetsInHours = resetInfo(row.windowStart, now).resetsInHours
+      }
+      const remaining = Math.max(0, b.limit - used)
+      if (!binding || remaining < binding.remaining) {
+        binding = { limit: b.limit, used, remaining, resetsInHours }
       }
     }
-    const used = Math.min(row.count, cls.limit)
-    const { resetsInHours } = resetInfo(row.windowStart, now)
+    // `counted` always carries >= 1 bucket; treat an empty set as a safe bypass.
+    if (!binding) return { enabled: true, tier, bypass: true }
     return {
       enabled: true,
       tier,
       isAnon: cls.isAnon,
-      limit: cls.limit,
-      used,
-      remaining: Math.max(0, cls.limit - used),
-      resetsInHours,
+      limit: binding.limit,
+      used: binding.used,
+      remaining: binding.remaining,
+      resetsInHours: binding.resetsInHours,
     }
   } catch (e) {
     logIpRisk('quota_peek_failed', { message: e instanceof Error ? e.message : String(e) }, true)
