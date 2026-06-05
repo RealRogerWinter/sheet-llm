@@ -95,6 +95,15 @@ describe('listRecentTransactions', () => {
     expect(listRecentTransactions('u1', 50, db).map((t) => t.id)).toEqual(['ps'])
   })
 
+  it('applies the settled filter BEFORE the limit — pending/reversed rows cannot starve settled ones', () => {
+    // Five NEWER pending rows + one OLD settled row, with a tiny limit. A
+    // post-limit JS filter would return [] (the limit eats the pending rows); the
+    // SQL where-clause keeps the settled row in the page.
+    for (let i = 0; i < 5; i++) purchase(db, { id: `pend${i}`, userId: 'u1', source: 'stripe', creditsDelta: 9, status: 'pending', createdAt: 1000 + i })
+    purchase(db, { id: 'old-settled', userId: 'u1', source: 'stripe', creditsDelta: 500, status: 'settled', createdAt: 1 })
+    expect(listRecentTransactions('u1', 2, db).map((t) => t.id)).toEqual(['old-settled'])
+  })
+
   it('caps at the limit across BOTH tables (true top-N, not N-per-table)', () => {
     for (let i = 0; i < 5; i++) ledger(db, { id: `l${i}`, userId: 'u1', kind: 'chat_generate', creditsCharged: 1, createdAt: 100 + i })
     for (let i = 0; i < 5; i++) purchase(db, { id: `p${i}`, userId: 'u1', source: 'stripe', creditsDelta: 1, createdAt: 200 + i })

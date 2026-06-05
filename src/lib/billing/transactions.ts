@@ -1,4 +1,4 @@
-import { desc, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { getDb } from '@/lib/db'
 import { creditPurchases, usageLedger } from '@/lib/db/schema'
 
@@ -89,15 +89,16 @@ export function listRecentTransactions(
       source: creditPurchases.source,
       creditsDelta: creditPurchases.creditsDelta,
       amountMinorUsd: creditPurchases.amountMinorUsd,
-      status: creditPurchases.status,
       createdAt: creditPurchases.createdAt,
     })
     .from(creditPurchases)
-    .where(eq(creditPurchases.userId, userId))
+    // Settled-only is part of the WHERE (not a post-`.limit()` JS filter) so the
+    // SQL LIMIT applies to settled rows — otherwise a future stream of
+    // pending/reversed rows could starve older settled rows out of the page.
+    .where(and(eq(creditPurchases.userId, userId), eq(creditPurchases.status, 'settled')))
     .orderBy(desc(creditPurchases.createdAt))
     .limit(cap)
     .all()
-    .filter((p) => p.status === 'settled')
     .map(
       (p): WalletTransaction => ({
         id: p.id,

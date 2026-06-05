@@ -14,6 +14,7 @@ import { fetchPacks, fetchTransactions, fetchWallet, startCheckout } from '@/lib
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+  window.history.replaceState(null, '', '/settings') // reset the URL between tests
 })
 
 function setAuth(status: 'loading' | 'anon' | 'authed', emailVerified = true) {
@@ -83,5 +84,21 @@ describe('WalletSettings', () => {
     render(<WalletSettings />)
     expect(await screen.findByText('Generation')).toBeTruthy()
     expect(screen.getByText(/[−-]23/)).toBeTruthy()
+  })
+
+  it('surfaces a checkout=success return and strips the ?checkout param', async () => {
+    window.history.replaceState(null, '', '/settings?checkout=success')
+    setAuth('authed')
+    render(<WalletSettings />)
+    expect(await screen.findByText(/Payment received/i)).toBeTruthy()
+    await waitFor(() => expect(window.location.search).toBe(''))
+  })
+
+  it('surfaces a checkout=cancel return', async () => {
+    window.history.replaceState(null, '', '/settings?checkout=cancel')
+    setAuth('authed')
+    render(<WalletSettings />)
+    expect(await screen.findByText(/Checkout canceled/i)).toBeTruthy()
+    await waitFor(() => expect(window.location.search).toBe(''))
   })
 })
