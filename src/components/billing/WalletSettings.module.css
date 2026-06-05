@@ -1,0 +1,241 @@
+/* Wallet / Credits settings section (PR-12). Uses the always-defined design
+ * tokens (--ink / --graphite / --rule / --paper / --paper-warm / --playing),
+ * which resolve in BOTH light and dark, so it avoids the dark-only
+ * --surface/--text/--border vocabulary (those need fallbacks). Notice/badge
+ * colors use the var(--ok-*/--warn-*, light-fallback) pattern AccountSettings
+ * established. */
+
+.section {
+  /* match AccountSettings' borderless-section rhythm (bottom 36px) */
+  margin: 0 0 36px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-4, 16px);
+}
+
+.heading {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 650;
+  color: var(--ink, #0a0a0a);
+}
+
+.subheading {
+  margin: 0 0 var(--gap-2, 8px);
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ink, #0a0a0a);
+}
+
+.muted {
+  margin: 0;
+  color: var(--graphite, #6b6b6b);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.error {
+  margin: 0 0 var(--gap-2, 8px);
+  color: var(--signal, #b91c1c);
+  font-size: 0.85rem;
+}
+
+.noticeOk,
+.noticeWarn {
+  margin: 0;
+  padding: var(--gap-2, 8px) var(--gap-3, 12px);
+  border-radius: var(--radius, 6px);
+  font-size: 0.85rem;
+  border: 1px solid;
+}
+
+.noticeOk {
+  color: var(--ok-text, #166534);
+  background: var(--ok-bg, #f0fdf4);
+  border-color: var(--ok-border, #bbf7d0);
+}
+
+.noticeWarn {
+  color: var(--warn-text, #92400e);
+  background: var(--warn-bg, #fffbeb);
+  border-color: var(--warn-border, #fde68a);
+}
+
+/* ── Balance card ──────────────────────────────────────────────────────── */
+.balanceCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-2, 8px);
+  padding: var(--gap-4, 16px);
+  border: 1px solid var(--rule, #d4d4d2);
+  border-radius: 12px;
+  background: var(--paper-warm, #f4f4f2);
+}
+
+.balanceMain {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--gap-2, 8px);
+}
+
+.balanceCredits {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--ink, #0a0a0a);
+  letter-spacing: -0.01em;
+}
+
+.balanceUsd {
+  font-size: 0.95rem;
+  color: var(--graphite, #6b6b6b);
+}
+
+.linkButton {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--playing, #1e40af);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.linkButton:hover {
+  text-decoration: underline;
+}
+
+/* ── Buy block ─────────────────────────────────────────────────────────── */
+.buyBlock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-2, 8px);
+}
+
+.packs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: var(--gap-2, 8px);
+}
+
+.pack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--gap-3, 12px);
+  border: 1px solid var(--rule, #d4d4d2);
+  border-radius: 10px;
+  background: var(--paper, #fff);
+  color: var(--ink, #0a0a0a);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.pack:hover:not(:disabled) {
+  border-color: var(--playing, #1e40af);
+  background: var(--hover, #0a0a0a08);
+}
+
+.pack:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.packLabel {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--graphite, #6b6b6b);
+}
+
+.packPrice {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.packCredits {
+  font-size: 0.82rem;
+  color: var(--graphite, #6b6b6b);
+}
+
+.packBonus {
+  color: var(--ok-text, #166534);
+  font-weight: 600;
+}
+
+.packBusy {
+  margin-top: 2px;
+  font-size: 0.75rem;
+  color: var(--playing, #1e40af);
+}
+
+.fineprint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--graphite, #6b6b6b);
+}
+
+/* ── History ───────────────────────────────────────────────────────────── */
+.historyBlock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-2, 8px);
+}
+
+.history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--rule, #d4d4d2);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.historyRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-3, 12px);
+  padding: var(--gap-3, 12px) var(--gap-4, 16px);
+  border-top: 1px solid var(--rule, #d4d4d2);
+}
+
+.historyRow:first-child {
+  border-top: none;
+}
+
+.historyLeft {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.historyDesc {
+  font-size: 0.88rem;
+  color: var(--ink, #0a0a0a);
+}
+
+.historyDate {
+  font-size: 0.76rem;
+  color: var(--graphite, #6b6b6b);
+}
+
+.deltaPos,
+.deltaNeg {
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.deltaPos {
+  color: var(--ok-text, #166534);
+}
+
+.deltaNeg {
+  color: var(--ink, #0a0a0a);
+}
