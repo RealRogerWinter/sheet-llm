@@ -44,7 +44,13 @@ ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0 PORT=3000
 # tini: PID1 signal forwarding + zombie reaping (so SIGTERM reaches node through
 # Litestream on `compose down`). gosu: drop root after chowning the data volume.
 # ca-certificates: TLS to Anthropic / R2.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# `apt-get upgrade` pulls the latest Debian security patches into the SHIPPING
+# layer (e.g. libgnutls30 -> deb12u7, fixing CVE-2026-33845/-42010). Without it
+# the base ships known-fixed CRITICAL CVEs and the Trivy gate (fail-on-critical)
+# trips. Unfixed/will_not_fix base CVEs are handled by --ignore-unfixed/.trivyignore.
+RUN apt-get update \
+  && apt-get upgrade -y \
+  && apt-get install -y --no-install-recommends \
       tini gosu ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 COPY --from=build /usr/local/bin/litestream /usr/local/bin/litestream
