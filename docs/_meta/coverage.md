@@ -64,7 +64,8 @@ hand from the `---` blocks) rather than letting rows drift.
 | subsystems/import.md | import | 17 | 2026-06-03 | 150cb15 |
 | subsystems/export.md | export | 5 | 2026-06-03 | 150cb15 |
 | subsystems/persistence-db.md | persistence-db | 19 | 2026-06-03 | 150cb15 |
-| subsystems/auth-gdpr.md | auth-gdpr | 16 | 2026-06-03 | e6f5a58 |
+| subsystems/auth-gdpr.md | auth-gdpr | 16 | 2026-06-05 | 8227618 |
+| subsystems/billing.md | billing | 15 | 2026-06-05 | 8227618 |
 | subsystems/auth-data-lifecycle.md | auth | 6 | 2026-06-03 | e6f5a58 |
 | subsystems/app-shell.md | app-shell | 23 | 2026-06-03 | 150cb15 |
 | subsystems/evals-testing.md | evals-testing | 23 | 2026-06-03 | 150cb15 |
@@ -114,7 +115,8 @@ hand from the `---` blocks) rather than letting rows drift.
 | ai-agents/context-cards/import.md | import | 12 | 2026-06-03 | 150cb15 |
 | ai-agents/context-cards/export.md | export | 4 | 2026-06-03 | 150cb15 |
 | ai-agents/context-cards/persistence-db.md | persistence-db | 14 | 2026-06-03 | 150cb15 |
-| ai-agents/context-cards/auth-gdpr.md | auth-gdpr | 18 | 2026-06-03 | 150cb15 |
+| ai-agents/context-cards/auth-gdpr.md | auth-gdpr | 16 | 2026-06-05 | 8227618 |
+| ai-agents/context-cards/billing.md | billing | 15 | 2026-06-05 | 8227618 |
 | ai-agents/context-cards/app-shell.md | app-shell | 19 | 2026-06-03 | 150cb15 |
 | ai-agents/context-cards/evals-testing.md | evals-testing | 14 | 2026-06-03 | 150cb15 |
 

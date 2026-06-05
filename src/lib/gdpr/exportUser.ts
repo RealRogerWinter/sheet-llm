@@ -3,11 +3,17 @@ import type { getDb } from '@/lib/db'
 import {
   authSessions,
   authTokens,
+  creditHolds,
+  creditPurchases,
+  creditWallets,
   messages,
   oauthAccounts,
+  refundCounters,
   requestQuota,
   scoreVersions,
   sessions,
+  stripeEvents,
+  usageLedger,
   users,
 } from '@/lib/db/schema'
 
@@ -15,8 +21,12 @@ import {
  * Schema version for the export envelope. Bump whenever the wire shape
  * (not just the columns) changes meaningfully — gives future tooling a
  * stable way to dispatch on format.
+ *
+ * v2 (PR-14, prepaid credits): added the billing sections — creditWallet,
+ * usageLedger, creditPurchases, creditHolds, refundCounters, stripeEvents — and
+ * user.freeFullPieceUsedAt.
  */
-export const EXPORT_SCHEMA_VERSION = 1
+export const EXPORT_SCHEMA_VERSION = 2
 
 export interface UserExport {
   schemaVersion: typeof EXPORT_SCHEMA_VERSION
@@ -31,6 +41,10 @@ export interface UserExport {
     claimedAt: number | null
     createdAt: number
     lastSeenAt: number
+    // PR-14: epoch-seconds the account consumed its one-time free full piece
+    // (NULL = never). The internal owner token (free_full_piece_claim_token) is an
+    // implementation marker, not personal data, and is never exported.
+    freeFullPieceUsedAt: number | null
     // NOTE: password_hash is intentionally NEVER exported — it is credential
     // material, not user-facing personal data. Same for every token_hash.
   }
@@ -126,6 +140,90 @@ export interface UserExport {
     count: number
     updatedAt: number
   }>
+  /**
+   * Prepaid-credit WALLET (PR-14). One row keyed to the account, or null if the
+   * user never touched the paid path. `available` = balance − held (derived).
+   */
+  creditWallet: {
+    balance: number
+    held: number
+    available: number
+    version: number
+    updatedAt: number
+  } | null
+  /**
+   * The immutable USAGE LEDGER — one row per billed action (charge or refund).
+   * The customer charge (creditsCharged), token usage, tier/model, and post-debit
+   * balance are the user's data and are included. Our RAW Anthropic cost
+   * (cost_micro_usd) is our internal cost basis / margin — NOT the subject's
+   * personal data — so it is omitted; the internal idempotency_key is too.
+   */
+  usageLedger: Array<{
+    id: string
+    sessionId: string | null
+    requestId: string
+    holdId: string | null
+    kind: string
+    reason: string | null
+    model: string | null
+    generationTier: string | null
+    inputTokens: number | null
+    cachedInputTokens: number | null
+    cacheCreationInputTokens: number | null
+    outputTokens: number | null
+    creditsCharged: number
+    balanceAfter: number | null
+    createdAt: number
+  }>
+  /**
+   * Credit PURCHASES (Stripe / promo / refund / manual). `external_ref` (the
+   * Stripe checkout-session / PaymentIntent id) is a Stripe-internal identifier
+   * and is REDACTED — `source` records that it was a Stripe purchase and the
+   * amount / credits / date fully describe it.
+   */
+  creditPurchases: Array<{
+    id: string
+    source: string
+    creditsDelta: number
+    amountMinorUsd: number | null
+    currency: string | null
+    status: string
+    createdAt: number
+  }>
+  /** Pre-authorization credit HOLDS (the reserve → settle/release lifecycle). */
+  creditHolds: Array<{
+    id: string
+    requestId: string
+    credits: number
+    status: string
+    expiresAt: number
+    createdAt: number
+    settledAt: number | null
+  }>
+  /** Per-day service-refund counters (abuse-ceiling bookkeeping). */
+  refundCounters: Array<{
+    day: number
+    refundCount: number
+    refundCredits: number
+    updatedAt: number
+  }>
+  /**
+   * The user's Stripe webhook events (PR-14), REDACTED. The Stripe event id and
+   * the RAW payload (Stripe-internal customer / payment-intent / session ids, plus
+   * a duplicate of the purchase) are dropped; only the user-meaningful outcome is
+   * disclosed. NOTE: unlike the cascade-deleted credit tables, stripe_events has
+   * NO users FK and is RETAINED past account erasure as a financial/tax record
+   * (lawful basis; see the billing subsystem doc) — disclosed for ACCESS (Art. 15)
+   * but not removed on erasure (Art. 17(3)(b)).
+   */
+  stripeEvents: Array<{
+    type: string
+    status: string
+    creditsGranted: number | null
+    reason: string | null
+    receivedAt: number
+    processedAt: number | null
+  }>
 }
 
 type Db = ReturnType<typeof getDb>
@@ -140,21 +238,19 @@ type Db = ReturnType<typeof getDb>
  * worst case ≈ 50 MB in memory. Realistic p99 well under 5 MB. NDJSON
  * streaming deferred until somebody hits this ceiling in production.
  *
- * TODO(PR-14, prepaid-credits): the financial-PII tables added in migrations
- * 0009 (credit_purchases, usage_ledger, credit_holds) and 0011
- * (refund_counters) are NOT yet in this export envelope. Account ERASURE
- * already covers those five (the single `DELETE FROM users` FK-cascades them),
- * but GDPR Art. 15 ACCESS must add them when the credits feature ships — land a
- * `foreign_key_list`-introspection guard test then so a future users-FK'd table
- * can't silently escape the export, and decide anonymize-vs-delete for the
- * immutable financial ledgers against record-retention.
+ * PR-14 (prepaid credits): the export now includes the billing tables — the
+ * credit_wallets row, usage_ledger, credit_purchases, credit_holds, and
+ * refund_counters (all users-FK'd; ACCESS Art. 15) — with Stripe-internal ids and
+ * our raw cost basis redacted (see the UserExport billing sections). A
+ * `foreign_key_list`-introspection guard test (api-me-gdpr.test.ts) fails if a
+ * future users-FK'd table is added without also being exported here.
  *
- * SEPARATE CASE: `stripe_events` (0012, the webhook inbox) DELIBERATELY has NO
- * users FK, so erasure does NOT cascade it — its payload carries PII (Stripe
- * customer email/address) but it is a financial/tax record with a retention
- * basis. PR-14 + the launch attorney memo must settle the retention window and
- * whether erasure redacts the payload vs. keeps it under a legal-obligation
- * lawful basis. Do NOT add a naive cascade here without that decision.
+ * stripe_events (0012, the webhook inbox) DELIBERATELY has NO users FK, so account
+ * ERASURE does not cascade it — it is RETAINED as a financial/tax record (lawful
+ * basis). Its user-meaningful fields ARE disclosed for ACCESS, keyed off its plain
+ * `user_id` column and redacted (no Stripe event id, no raw payload). The
+ * erasure-time redaction-vs-retain decision for the retained payload stays gated on
+ * the launch attorney memo; do NOT add a naive users cascade here without it.
  */
 export async function buildUserExport(
   db: Db,
@@ -171,6 +267,7 @@ export async function buildUserExport(
       claimedAt: users.claimedAt,
       createdAt: users.createdAt,
       lastSeenAt: users.lastSeenAt,
+      freeFullPieceUsedAt: users.freeFullPieceUsedAt,
     })
     .from(users)
     .where(eq(users.id, userId))
@@ -285,6 +382,92 @@ export async function buildUserExport(
     .from(requestQuota)
     .where(eq(requestQuota.userId, userId))
 
+  // ── Billing / prepaid-credit tables (PR-14). All users-FK'd → single indexed
+  // reads. Stripe-internal ids (external_ref, stripe event id/payload) and our raw
+  // cost basis (cost_micro_usd) are deliberately NOT selected (redacted).
+  const walletRow = await db
+    .select({
+      balance: creditWallets.balance,
+      held: creditWallets.held,
+      version: creditWallets.version,
+      updatedAt: creditWallets.updatedAt,
+    })
+    .from(creditWallets)
+    .where(eq(creditWallets.userId, userId))
+    .get()
+  const creditWallet = walletRow ? { ...walletRow, available: walletRow.balance - walletRow.held } : null
+
+  const usageLedgerRows = await db
+    .select({
+      id: usageLedger.id,
+      sessionId: usageLedger.sessionId,
+      requestId: usageLedger.requestId,
+      holdId: usageLedger.holdId,
+      kind: usageLedger.kind,
+      reason: usageLedger.reason,
+      model: usageLedger.model,
+      generationTier: usageLedger.generationTier,
+      inputTokens: usageLedger.inputTokens,
+      cachedInputTokens: usageLedger.cachedInputTokens,
+      cacheCreationInputTokens: usageLedger.cacheCreationInputTokens,
+      outputTokens: usageLedger.outputTokens,
+      creditsCharged: usageLedger.creditsCharged,
+      balanceAfter: usageLedger.balanceAfter,
+      createdAt: usageLedger.createdAt,
+    })
+    .from(usageLedger)
+    .where(eq(usageLedger.userId, userId))
+
+  const creditPurchaseRows = await db
+    .select({
+      id: creditPurchases.id,
+      source: creditPurchases.source,
+      creditsDelta: creditPurchases.creditsDelta,
+      amountMinorUsd: creditPurchases.amountMinorUsd,
+      currency: creditPurchases.currency,
+      status: creditPurchases.status,
+      createdAt: creditPurchases.createdAt,
+    })
+    .from(creditPurchases)
+    .where(eq(creditPurchases.userId, userId))
+
+  const creditHoldRows = await db
+    .select({
+      id: creditHolds.id,
+      requestId: creditHolds.requestId,
+      credits: creditHolds.credits,
+      status: creditHolds.status,
+      expiresAt: creditHolds.expiresAt,
+      createdAt: creditHolds.createdAt,
+      settledAt: creditHolds.settledAt,
+    })
+    .from(creditHolds)
+    .where(eq(creditHolds.userId, userId))
+
+  const refundCounterRows = await db
+    .select({
+      day: refundCounters.day,
+      refundCount: refundCounters.refundCount,
+      refundCredits: refundCounters.refundCredits,
+      updatedAt: refundCounters.updatedAt,
+    })
+    .from(refundCounters)
+    .where(eq(refundCounters.userId, userId))
+
+  // stripe_events has NO users FK, but its plain user_id column resolves the
+  // subject. The Stripe event id + raw payload are NOT selected (redacted).
+  const stripeEventRows = await db
+    .select({
+      type: stripeEvents.type,
+      status: stripeEvents.status,
+      creditsGranted: stripeEvents.creditsGranted,
+      reason: stripeEvents.reason,
+      receivedAt: stripeEvents.receivedAt,
+      processedAt: stripeEvents.processedAt,
+    })
+    .from(stripeEvents)
+    .where(eq(stripeEvents.userId, userId))
+
   return {
     schemaVersion: EXPORT_SCHEMA_VERSION,
     exportedAt: Math.floor(Date.now() / 1000),
@@ -296,6 +479,12 @@ export async function buildUserExport(
     oauthAccounts: oauthAccountRows,
     authTokens: authTokenRows,
     dailyQuota: dailyQuotaRows,
+    creditWallet,
+    usageLedger: usageLedgerRows,
+    creditPurchases: creditPurchaseRows,
+    creditHolds: creditHoldRows,
+    refundCounters: refundCounterRows,
+    stripeEvents: stripeEventRows,
   }
 }
 

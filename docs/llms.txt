@@ -33,6 +33,7 @@ does not).
 - [Export — MusicXML, MIDI, PDF](subsystems/export.md): MusicXML emit, MIDI/PDF generation, export bar.
 - [Persistence, Schema & Score Versioning](subsystems/persistence-db.md): Drizzle schema, conversations, score versions, fork/revert, janitor.
 - [Auth, Sessions & GDPR](subsystems/auth-gdpr.md): anonymous sessions, recovery codes, rate limiting, GDPR export/delete.
+- [Billing & Prepaid Credits](subsystems/billing.md): hosted-only credit paywall (dark by default), metering→cost-plus wallet (hold/settle/refund), Stripe top-ups+webhook, in-process reconcile/reap janitor, GDPR export. Self-host=BYOK.
 - [App Shell, Routes & Boot](subsystems/app-shell.md): root layout, boot/instrumentation, recovery boot, page composition.
 - [Testing & Eval Harness](subsystems/evals-testing.md): Vitest configs, factories, mock/live/visual evals, local check commands.
 
@@ -62,7 +63,7 @@ does not).
 - [Doc Coverage & Freshness Map](_meta/coverage.md): regenerable table of every doc with source_paths count and verified SHA.
 
 Per-subsystem context cards (terse agent companions) live under
-`ai-agents/context-cards/`: abc-rendering, app-shell, auth-gdpr, chat-session,
+`ai-agents/context-cards/`: abc-rendering, app-shell, auth-gdpr, billing, chat-session,
 command-palette, edit-operations, editor-ui, evals-testing, export,
 ghost-preview, import, music-model, orchestrator, persistence-db, providers-llm,
 transport.

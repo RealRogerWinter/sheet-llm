@@ -3,8 +3,8 @@ title: Auth, Sessions & GDPR — context card
 subsystem: auth-gdpr
 audience: [ai-agent, contributor]
 status: current
-last_verified: 2026-06-03
-verified_against: 150cb15
+last_verified: 2026-06-05
+verified_against: 8227618
 source_paths:
   - src/lib/auth/session.ts
   - src/lib/auth/account.ts
@@ -45,7 +45,7 @@ Anonymous cookie-less identity is the FOUNDATION: a `crypto.randomUUID()` is the
 - `src/lib/auth/restoreRateLimit.ts` — in-memory globalThis limiter, 10/5min × {IP,sub}. `checkIp`/`checkSub`/`extractClientIp`(IPv6→/64)/`__resetForTesting`. Fail-closed at 10000.
 - `src/lib/auth/clientBackup.ts` — `'use client'`. `installBackupInterceptor`(fetch→stash header), `bootRestoreIfNeeded`(POST restore if no `sl_present` + backup), `clearBackup`.
 - `src/components/RecoveryBoot.tsx` — mounts in `app/layout.tsx` everywhere; install at import, boot-restore in effect.
-- `src/lib/gdpr/exportUser.ts` — `buildUserExport`(incl. soft-deleted, opaque JSON; now also exports the account `users` columns email/emailVerified/tier/displayName/claimedAt + the `authSessions`/`oauthAccounts`/`authTokens` arrays — every `password_hash`/`token_hash` REDACTED), `hardDeleteUser`(NO explicit txn — a single atomic `DELETE FROM users` FK-cascades to chat sessions AND auth_sessions/oauth_accounts/auth_tokens; counts first → receipt incl. `deletedAuthSessions`/`deletedOauthAccounts`/`deletedAuthTokens`). `EXPORT_SCHEMA_VERSION=1`, `UserExport`.
+- `src/lib/gdpr/exportUser.ts` — `buildUserExport`(incl. soft-deleted, opaque JSON; account `users` cols + `authSessions`/`oauthAccounts`/`authTokens`/`dailyQuota` + the prepaid-credit billing tables `creditWallet`/`usageLedger`/`creditPurchases`/`creditHolds`/`refundCounters`/`stripeEvents`; `password_hash`/`token_hash` REDACTED, and the billing sections REDACT Stripe ids `external_ref`/event-id/raw-payload + our `cost_micro_usd`; `user.freeFullPieceUsedAt` included, claim-token not), `hardDeleteUser`(single atomic `DELETE FROM users` FK-cascades chat sessions + the auth tables + the 5 users-FK'd billing tables; `stripe_events` has NO users FK → RETAINED; counts first → receipt). `EXPORT_SCHEMA_VERSION=2`, `UserExport`.
 - `src/app/api/auth/restore/route.ts` — POST; same-origin+size→IP-limit→verify→sub-limit→nonce CAS→reissue. Now ALSO refuses a CLAIMED identity: the claim check (`isNull(email/passwordHash/claimedAt)`) is folded INTO the CAS predicate (atomic, no TOCTOU) → 409 `account_claimed`. 204/400/401/409(`invalid_request` replay | `account_claimed`)/410/413/429.
 - `src/app/api/me/export/route.ts` — GET; same-origin, `getExistingRequestUser`, JSON attachment, `no-store`.
 - `src/app/api/me/delete/route.ts` — DELETE `{confirm:'DELETE'}`; `getExistingRequestUser`, `hardDeleteUser`, `clearSessionCookie`+`clearAuthSessionCookies`, `Clear-Site-Data:"storage"` + receipt (incl. account counts) + `clearLocalStorage` body.
@@ -78,7 +78,7 @@ Built ON the anon foundation; signup CLAIMS the current anon `users` row in plac
 - Companions: `docs/reference/env-flags.md` (Accounts section), `docs/subsystems/auth-data-lifecycle.md` (GC + breach/rotation), `docs/guides/durability-runbook.md` (launch gate).
 
 ## When editing X, also update Y
-- New user-data child table → add FK `onDelete:'cascade'` (schema.ts) AND add to `buildUserExport` AND `hardDeleteUser` receipt counts (this is why the three account tables already appear in both).
+- New user-data child table → add FK `onDelete:'cascade'` (schema.ts) AND add to `buildUserExport` (the `foreign_key_list` guard test in `api-me-gdpr.test.ts` FAILS if a users-FK'd table escapes the export) AND `hardDeleteUser` receipt counts.
 - New `UserExport` field → update `select(...)` projection; bump `EXPORT_SCHEMA_VERSION` if wire shape changes. Never add a `deletedAt` filter. NEVER add `password_hash`/`token_hash`.
 - Rename `RECOVERY_HEADER`/`RECOVERY_STORAGE_KEY` → update `clientBackup.ts`, `attachRecovery.ts`, restore route, delete-route `clearLocalStorage`.
 - Change `sl_present` name → update `clientBackup.hasSessionCookie` (hardcoded literal) + `SESSION_PRESENT_COOKIE_NAME`.
