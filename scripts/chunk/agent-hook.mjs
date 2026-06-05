@@ -182,6 +182,15 @@ function isInert(file) {
   return inertGlobs().some((g) => globToRegExp(g).test(file))
 }
 
+// Line-ending + filemode normalization for the working-tree diff. On Windows the
+// gate runs in WSL against the persistent /mnt/c checkout, which Git for Windows
+// laid down with CRLF endings (autocrlf=true). WSL's git has autocrlf unset, so
+// without this it sees EVERY text file as modified (CRLF working tree vs LF blob)
+// and the changed-set becomes the whole repo — the gate would never skip. We make
+// the comparison normalize CRLF the way git-bash does (and ignore filemode), so
+// the diff reflects the turn's real changes. Harmless on macOS/Linux (no CRLF).
+const GIT_DIFF = 'git -c core.autocrlf=true -c core.fileMode=false'
+
 // One shell line producing the union of every path that differs from the CI base
 // (origin/main): committed branch changes, the working tree (staged+unstaged),
 // and untracked files. `__NO_BASE__` is emitted when origin/main can't be
@@ -189,7 +198,8 @@ function isInert(file) {
 const CHANGED_FILES_CMD =
   'base="$(git merge-base HEAD origin/main 2>/dev/null)"; ' +
   'if [ -z "$base" ]; then echo __NO_BASE__; exit 0; fi; ' +
-  '{ git diff --name-only "$base" HEAD; git diff --name-only HEAD; ' +
+  '{ ' + GIT_DIFF + ' diff --name-only "$base" HEAD; ' +
+  GIT_DIFF + ' diff --name-only HEAD; ' +
   'git ls-files --others --exclude-standard; } | sort -u'
 
 /**

@@ -4,7 +4,7 @@ subsystem: ops
 audience: [contributor, ai-agent]
 status: current
 last_verified: 2026-06-04
-verified_against: 11c6ffe
+verified_against: e77f237
 source_paths:
   - .chunk/config.json
   - scripts/chunk/agent-hook.mjs
@@ -86,6 +86,14 @@ branch changes (vs the `origin/main` merge-base), the working tree, and untracke
 files — and skips only when that set is non-empty-but-all-inert, or empty. It is
 **conservative**: any file it can't prove inert, an unresolved `origin/main`
 base, or any failure to compute the diff all fall through to running the gate.
+
+> **Windows/WSL line endings.** The working-tree diff is computed with
+> `git -c core.autocrlf=true -c core.fileMode=false`. On Windows the gate runs in
+> WSL against the `/mnt/c` checkout, which Git for Windows laid down with CRLF
+> endings; WSL's git has `autocrlf` unset and would otherwise report *every* text
+> file as modified (CRLF vs the LF blobs), making the changed-set the whole repo
+> so the gate could never skip. Normalizing the comparison (as git-bash does)
+> makes the diff reflect the turn's real changes. No-op on macOS/Linux.
 
 A path is **inert** when it matches an inert glob **and** is not a TypeScript
 compiler input:
@@ -205,6 +213,7 @@ chunk sidecar snapshot list --org-id "$CIRCLECI_ORG_ID"   # note the new snapsho
 | Stop-gate prints "chunk not installed — skipping" | chunk isn't on PATH (in WSL on Windows). Run `bash scripts/chunk/bootstrap.sh`. |
 | Stop-gate prints "skipping sidecar validation — only inert files changed" | Working as designed — the turn changed nothing that affects typecheck/test (see [diff-skip](#stop-gate-diff-skip)). Force a run with `SL_CHUNK_STOP_GATE_NO_DIFF_SKIP=1`. |
 | Stop-gate skipped a turn that *should* validate | The changed path isn't classified testable. If it's a non-`.ts` file in the test graph, narrow `scripts/**` or set `SL_CHUNK_STOP_GATE_NO_DIFF_SKIP=1`. |
+| Stop-gate *never* skips on Windows — boots a sidecar even on docs-only turns | WSL git seeing the `/mnt/c` checkout's CRLF endings as a whole-repo diff. The diff is normalized with `core.autocrlf=true` to avoid this; if it persists, check `git -c core.autocrlf=true diff --name-only HEAD` in WSL returns only your real changes. |
 | `npm: command not found` during `sidecar setup` | The sidecar is a bare base. Create from the `cimg-node` snapshot first (see above). |
 | Stop-gate hangs / times out | First sidecar boot with no snapshot installs deps from scratch. Create a snapshot, then sidecars boot fast. |
 | Commit-gate slow on Windows | It runs `pnpm typecheck` in WSL over `/mnt/c`. Expected; it only fires on `git commit`. |
