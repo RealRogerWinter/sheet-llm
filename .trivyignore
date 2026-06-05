@@ -1,0 +1,19 @@
+# Trivy ignore file — permanently accepted findings, reviewed 2026-06-04.
+# Re-evaluate whenever the base image (node:22-bookworm-slim) is bumped.
+#
+# NOTE: the CI gate also runs with --ignore-unfixed, so OS CVEs that merely have
+# no Debian fix *yet* are intentionally NOT listed here — they auto-resolve once a
+# fix ships and the gate would otherwise re-flag them. This file is only for
+# findings we are accepting permanently.
+
+# zlib1g 1:1.2.13.dfsg-1 — Debian status: will_not_fix. The integer/heap overflow
+# (CVE-2023-45853) is in MiniZip's zipOpenNewFileInZip4_6, an API this app never
+# calls (persistence is better-sqlite3; zlib is pulled in only as a base-image
+# system library). No upstream Debian fix will be issued.
+CVE-2023-45853
+
+# DS-0002 — "no USER directive in the Dockerfile". Intentional: deploy/docker-
+# entrypoint.sh starts as root ONLY to chown the /data volume, then drops to the
+# non-root 'app' user via gosu before exec'ing Litestream -> node. The effective
+# runtime user is non-root, so a static "add USER" would break the volume chown.
+DS-0002
