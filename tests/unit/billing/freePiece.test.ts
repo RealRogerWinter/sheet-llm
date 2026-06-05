@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { makeTestDb } from '../../factories/db'
 import { users } from '@/lib/db/schema'
-import { consumeFreePiece, isFreePieceEligible } from '@/lib/billing/freePiece'
+import { isFreePieceEligible, releaseFreePiece, reserveFreePiece } from '@/lib/billing/freePiece'
 
 type Db = ReturnType<typeof makeTestDb>
 
@@ -37,21 +37,55 @@ describe('free full piece (one-time, per-verified-account)', () => {
   it('a missing user is NOT eligible', () => {
     expect(isFreePieceEligible('nope', db)).toBe(false)
   })
+})
 
-  it('consume is one-time + idempotent (guard-in-the-write)', () => {
-    makeUser(db, 'v', 1)
-    expect(consumeFreePiece('v', db)).toBe(true) // first call consumes
-    expect(consumeFreePiece('v', db)).toBe(false) // a retry / concurrent call is a no-op
-    expect(isFreePieceEligible('v', db)).toBe(false)
-    const row = db
-      .select({ usedAt: users.freeFullPieceUsedAt })
-      .from(users)
-      .where(eq(users.id, 'v'))
-      .get()
-    expect(row?.usedAt).not.toBeNull()
+describe('free piece pre-dispatch reservation (PR-7b-2c TOCTOU fix)', () => {
+  let db: Db
+  beforeEach(() => {
+    db = makeTestDb()
   })
 
-  it('consume on a missing user changes nothing', () => {
-    expect(consumeFreePiece('ghost', db)).toBe(false)
+  it('reserve atomically claims a VERIFIED, never-used grant (one winner)', () => {
+    makeUser(db, 'v', 1)
+    expect(reserveFreePiece('v', db)).toBe(true) // claims it
+    // A concurrent burst: the SAME guard-in-the-write means everyone else loses.
+    expect(reserveFreePiece('v', db)).toBe(false)
+    expect(isFreePieceEligible('v', db)).toBe(false) // now taken
+    const row = db.select({ u: users.freeFullPieceUsedAt }).from(users).where(eq(users.id, 'v')).get()
+    expect(row?.u).not.toBeNull()
+  })
+
+  it('reserve refuses an UNVERIFIED account (no identity farming) and does NOT mark it', () => {
+    makeUser(db, 'a', 0)
+    expect(reserveFreePiece('a', db)).toBe(false)
+    const row = db.select({ u: users.freeFullPieceUsedAt }).from(users).where(eq(users.id, 'a')).get()
+    expect(row?.u).toBeNull() // untouched — still claimable if they verify later
+  })
+
+  it('reserve refuses an already-used grant and a missing user', () => {
+    makeUser(db, 'u', 1, 123)
+    expect(reserveFreePiece('u', db)).toBe(false)
+    expect(reserveFreePiece('ghost', db)).toBe(false)
+  })
+
+  it('release un-claims a reservation → eligible again (retry after a non-delivery)', () => {
+    makeUser(db, 'v', 1)
+    expect(reserveFreePiece('v', db)).toBe(true)
+    expect(releaseFreePiece('v', db)).toBe(true) // gave it back
+    expect(isFreePieceEligible('v', db)).toBe(true) // re-eligible
+    expect(reserveFreePiece('v', db)).toBe(true) // a retry can claim it again
+  })
+
+  it('release is a no-op (returns false) when nothing is claimed', () => {
+    makeUser(db, 'v', 1) // used_at IS NULL
+    expect(releaseFreePiece('v', db)).toBe(false) // guarded by IS NOT NULL
+    expect(releaseFreePiece('ghost', db)).toBe(false)
+  })
+
+  it('reserve → DELIVERED (kept) is terminal: no release means the grant stays spent', () => {
+    makeUser(db, 'v', 1)
+    expect(reserveFreePiece('v', db)).toBe(true)
+    // (delivery keeps it consumed — the route simply does NOT release.)
+    expect(isFreePieceEligible('v', db)).toBe(false)
   })
 })

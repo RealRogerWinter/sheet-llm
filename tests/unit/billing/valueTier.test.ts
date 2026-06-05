@@ -1,11 +1,17 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   costToCredits,
+  DEFAULT_FREE_PIECE_BUDGET_CREDITS,
+  DEFAULT_MAX_GENERATION_HOLD_CREDITS,
   fallbackCreditsForKind,
+  freePieceBudgetCredits,
+  generationHoldCredits,
   MARKUP_EDIT,
   MARKUP_GENERATE,
   markupForKind,
+  maxGenerationHoldCredits,
+  sectionAbortMarginCredits,
   VALUE_TIERS,
   worstCaseHoldCredits,
 } from '@/lib/billing/valueTier'
@@ -78,5 +84,91 @@ describe('worstCaseHoldCredits (provable upper bound, creditsCharged ≤ hold)',
     // must be under the hold so settle doesn't routinely trip overHold.
     expect(worstCaseHoldCredits(8_000)).toBeGreaterThan(costToCredits(160_000, MARKUP_GENERATE))
     expect(worstCaseHoldCredits(8_000)).toBeGreaterThan(costToCredits(1_000_000, MARKUP_GENERATE))
+  })
+})
+
+describe('maxGenerationHoldCredits (PR-7b-2c cap, operator-tunable)', () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  it('defaults to DEFAULT_MAX_GENERATION_HOLD_CREDITS when unset', () => {
+    expect(maxGenerationHoldCredits()).toBe(DEFAULT_MAX_GENERATION_HOLD_CREDITS)
+    expect(DEFAULT_MAX_GENERATION_HOLD_CREDITS).toBe(1_500)
+  })
+
+  it('honors a valid SL_MAX_GEN_HOLD_CREDITS override', () => {
+    vi.stubEnv('SL_MAX_GEN_HOLD_CREDITS', '3000')
+    expect(maxGenerationHoldCredits()).toBe(3_000)
+  })
+
+  it('falls back to the default on a non-positive / non-integer / garbage value', () => {
+    for (const bad of ['0', '-5', 'abc', '1500.5', '']) {
+      vi.stubEnv('SL_MAX_GEN_HOLD_CREDITS', bad)
+      expect(maxGenerationHoldCredits()).toBe(DEFAULT_MAX_GENERATION_HOLD_CREDITS)
+    }
+  })
+})
+
+describe('generationHoldCredits (fork b: min(available, cap), floored at worst case)', () => {
+  afterEach(() => vi.unstubAllEnvs())
+  const FLOOR = worstCaseHoldCredits(8_000) // 491
+  const CAP = DEFAULT_MAX_GENERATION_HOLD_CREDITS // 1500
+
+  it('returns the AVAILABLE balance when between the floor and the cap', () => {
+    expect(generationHoldCredits(1_000, 8_000)).toBe(1_000)
+    expect(generationHoldCredits(FLOOR, 8_000)).toBe(FLOOR)
+    expect(generationHoldCredits(CAP, 8_000)).toBe(CAP)
+  })
+
+  it('caps at maxGenerationHoldCredits for a rich balance', () => {
+    expect(generationHoldCredits(5_000, 8_000)).toBe(CAP)
+    expect(generationHoldCredits(Number.MAX_SAFE_INTEGER, 8_000)).toBe(CAP)
+  })
+
+  it('never returns below the worst-case floor (the caller gates available >= floor)', () => {
+    expect(generationHoldCredits(0, 8_000)).toBe(FLOOR)
+    expect(generationHoldCredits(300, 8_000)).toBe(FLOOR)
+    expect(generationHoldCredits(Number.NaN, 8_000)).toBe(FLOOR)
+  })
+
+  it('floors the cap at the worst case even when the operator sets a tiny cap', () => {
+    vi.stubEnv('SL_MAX_GEN_HOLD_CREDITS', '100') // below the 491 floor
+    expect(generationHoldCredits(5_000, 8_000)).toBe(FLOOR) // never under the floor
+  })
+
+  it('floors to integer credits for a fractional balance', () => {
+    expect(generationHoldCredits(1_000.9, 8_000)).toBe(1_000)
+  })
+})
+
+describe('sectionAbortMarginCredits (PR-7b-2c sectional abort headroom)', () => {
+  it('bounds one section cost-plus charge: Sonnet 48k in + 8k out → 66 cr', () => {
+    // (48_000×$3 + 8_000×$15) / 1e6 = $0.264 → ×2.5 / 1¢ = 66 credits. Generous over
+    // a real ~16k-input section (extendComposition sends only metadata + 4 trailing bars).
+    expect(sectionAbortMarginCredits(8_000)).toBe(66)
+  })
+
+  it('stays BELOW the hold floor so the abort threshold (hold − margin) is positive', () => {
+    expect(sectionAbortMarginCredits(8_000)).toBeGreaterThan(0)
+    expect(sectionAbortMarginCredits(8_000)).toBeLessThan(worstCaseHoldCredits(8_000))
+  })
+})
+
+describe('freePieceBudgetCredits (PR-7b-2c free-piece per-run cost ceiling)', () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  it('defaults to DEFAULT_FREE_PIECE_BUDGET_CREDITS when unset, leaving room above the margin', () => {
+    expect(freePieceBudgetCredits()).toBe(DEFAULT_FREE_PIECE_BUDGET_CREDITS)
+    expect(DEFAULT_FREE_PIECE_BUDGET_CREDITS).toBe(250)
+    // A typical free piece must clear the abort margin to deliver multiple sections.
+    expect(DEFAULT_FREE_PIECE_BUDGET_CREDITS).toBeGreaterThan(sectionAbortMarginCredits(8_000) * 2)
+  })
+
+  it('honors a valid SL_FREE_PIECE_BUDGET_CREDITS override; falls back on garbage', () => {
+    vi.stubEnv('SL_FREE_PIECE_BUDGET_CREDITS', '120')
+    expect(freePieceBudgetCredits()).toBe(120)
+    for (const bad of ['0', '-1', 'abc', '']) {
+      vi.stubEnv('SL_FREE_PIECE_BUDGET_CREDITS', bad)
+      expect(freePieceBudgetCredits()).toBe(DEFAULT_FREE_PIECE_BUDGET_CREDITS)
+    }
   })
 })

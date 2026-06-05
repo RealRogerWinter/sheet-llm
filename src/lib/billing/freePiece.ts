@@ -1,4 +1,4 @@
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, isNotNull, isNull } from 'drizzle-orm'
 import { getDb } from '@/lib/db'
 import { users } from '@/lib/db/schema'
 
@@ -36,17 +36,40 @@ export function isFreePieceEligible(userId: string, db: Db = getDb()): boolean {
 }
 
 /**
- * Consume the one-time free full piece. Idempotent guard-in-the-write: the
- * `WHERE free_full_piece_used_at IS NULL` clause means only the FIRST call sets
- * it, so a retry / concurrent request can't grant a second free piece. Returns
- * true iff THIS call consumed it. Call only on a successful delivery so a failed
- * generation doesn't burn the grant.
+ * RESERVE the one-time free piece PRE-DISPATCH (PR-7b-2c) — the atomic claim that
+ * closes the TOCTOU window the consume-on-delivery design left open. Folds the
+ * eligibility check INTO the claim: the guard-in-the-write (`email_verified = 1
+ * AND free_full_piece_used_at IS NULL`) means a concurrent from-scratch burst has
+ * exactly ONE winner (returns true); the losers see it taken and fall to the paid
+ * path. Symmetric with the credit hold's `placeHold`. Returns true iff THIS call
+ * claimed the grant — the caller then OWNS it and MUST {@link releaseFreePiece} on
+ * any non-delivery exit (mirrors releaseHold).
  */
-export function consumeFreePiece(userId: string, db: Db = getDb()): boolean {
+export function reserveFreePiece(userId: string, db: Db = getDb()): boolean {
   const res = db
     .update(users)
     .set({ freeFullPieceUsedAt: nowSec() })
-    .where(and(eq(users.id, userId), isNull(users.freeFullPieceUsedAt)))
+    .where(
+      and(eq(users.id, userId), eq(users.emailVerified, 1), isNull(users.freeFullPieceUsedAt)),
+    )
+    .run()
+  return res.changes === 1
+}
+
+/**
+ * RELEASE a reservation that did NOT result in a delivered piece — un-claim it
+ * (`free_full_piece_used_at` back to NULL) so a retry is eligible again. Symmetric
+ * with releaseHold; the credit-hold reaper has no equivalent here, so a process
+ * crash between reserve and release strands the grant as consumed (a low-impact,
+ * one-time-per-verified-account regression vs. the cost-leak this closes). The
+ * `IS NOT NULL` guard makes a redundant call a clean no-op. The atomic reserve
+ * serializes ownership, so only THIS request's claim is ever cleared here.
+ */
+export function releaseFreePiece(userId: string, db: Db = getDb()): boolean {
+  const res = db
+    .update(users)
+    .set({ freeFullPieceUsedAt: null })
+    .where(and(eq(users.id, userId), isNotNull(users.freeFullPieceUsedAt)))
     .run()
   return res.changes === 1
 }
