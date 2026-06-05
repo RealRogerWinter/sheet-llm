@@ -98,6 +98,9 @@ export default function HeaderMenu() {
             aria-label="More"
             style={{ top: pos.top, right: pos.right }}
           >
+            <Link href="/pricing" role="menuitem" className={styles.item} onClick={() => setOpen(false)}>
+              Pricing
+            </Link>
             {legalEnabled && (
               <>
                 <Link href="/terms" role="menuitem" className={styles.item} onClick={() => setOpen(false)}>
