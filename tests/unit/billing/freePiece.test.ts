@@ -3,12 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { makeTestDb } from '../../factories/db'
 import { users } from '@/lib/db/schema'
-import {
-  consumeFreePiece,
-  isFreePieceEligible,
-  releaseFreePiece,
-  reserveFreePiece,
-} from '@/lib/billing/freePiece'
+import { isFreePieceEligible, releaseFreePiece, reserveFreePiece } from '@/lib/billing/freePiece'
 
 type Db = ReturnType<typeof makeTestDb>
 
@@ -41,23 +36,6 @@ describe('free full piece (one-time, per-verified-account)', () => {
 
   it('a missing user is NOT eligible', () => {
     expect(isFreePieceEligible('nope', db)).toBe(false)
-  })
-
-  it('consume is one-time + idempotent (guard-in-the-write)', () => {
-    makeUser(db, 'v', 1)
-    expect(consumeFreePiece('v', db)).toBe(true) // first call consumes
-    expect(consumeFreePiece('v', db)).toBe(false) // a retry / concurrent call is a no-op
-    expect(isFreePieceEligible('v', db)).toBe(false)
-    const row = db
-      .select({ usedAt: users.freeFullPieceUsedAt })
-      .from(users)
-      .where(eq(users.id, 'v'))
-      .get()
-    expect(row?.usedAt).not.toBeNull()
-  })
-
-  it('consume on a missing user changes nothing', () => {
-    expect(consumeFreePiece('ghost', db)).toBe(false)
   })
 })
 

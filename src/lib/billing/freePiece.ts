@@ -36,22 +36,6 @@ export function isFreePieceEligible(userId: string, db: Db = getDb()): boolean {
 }
 
 /**
- * Consume the one-time free full piece. Idempotent guard-in-the-write: the
- * `WHERE free_full_piece_used_at IS NULL` clause means only the FIRST call sets
- * it, so a retry / concurrent request can't grant a second free piece. Returns
- * true iff THIS call consumed it. Call only on a successful delivery so a failed
- * generation doesn't burn the grant.
- */
-export function consumeFreePiece(userId: string, db: Db = getDb()): boolean {
-  const res = db
-    .update(users)
-    .set({ freeFullPieceUsedAt: nowSec() })
-    .where(and(eq(users.id, userId), isNull(users.freeFullPieceUsedAt)))
-    .run()
-  return res.changes === 1
-}
-
-/**
  * RESERVE the one-time free piece PRE-DISPATCH (PR-7b-2c) — the atomic claim that
  * closes the TOCTOU window the consume-on-delivery design left open. Folds the
  * eligibility check INTO the claim: the guard-in-the-write (`email_verified = 1

@@ -10,11 +10,11 @@ import { costToCredits, MARKUP_GENERATE } from '@/lib/billing/valueTier'
  * fire (and only when enforced).
  */
 
-const MARGIN = 102 // sectionAbortMarginCredits(8000)
+const MARGIN = 66 // sectionAbortMarginCredits(8000)
 const BUDGET = 491 // worst-case floor hold
-const THRESHOLD_CREDITS = BUDGET - MARGIN // 389 → abort when meteredCredits >= this
+const THRESHOLD_CREDITS = BUDGET - MARGIN // 425 → abort when meteredCredits >= this
 // Smallest µUSD that costs-plus to exactly THRESHOLD_CREDITS credits.
-const AT_THRESHOLD_MICRO = (THRESHOLD_CREDITS * 10_000) / MARKUP_GENERATE // 1_556_000
+const AT_THRESHOLD_MICRO = (THRESHOLD_CREDITS * 10_000) / MARKUP_GENERATE // 1_700_000
 const BELOW_THRESHOLD_MICRO = AT_THRESHOLD_MICRO - 40_000
 
 const NO_WALL = { enforceWallClock: false, elapsedMs: 0, deadlineMs: 270_000 }

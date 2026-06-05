@@ -112,16 +112,17 @@ const SECTION_INPUT_TOKENS = 12_000
  * is a rare paging-alert backstop, never the model. Never below
  * {@link VALUE_TIERS}.standard.
  *
- * NOTE (LAUNCH GATE — PR-7b-2c): this fixed pre-run hold does NOT fully cover a
- * LARGE sectional, whose per-call input GROWS (the full score is re-sent each
- * section) with no call cap (only maxDuration). Such a piece can settle ABOVE the
- * hold → settleHold caps the debit (overHold; never overdrafts) and we UNDER-EARN;
- * and if it runs past maxDuration before `done` it is killed → the hold is reaped
- * → free (we eat the raw cost). These are LAUNCH GATES, not at-merge issues (the
- * flag is dark): the operator must enable the streaming wall-clock abort so a long
- * stream ends cleanly at `done` (→ settle), AND per-section debiting +
- * abort-before-overspend (red-team #3) must land — tracked as PR-7b-2c. Do NOT
- * flip SL_PAID_GENERATION until both are in place.
+ * NOTE (PR-7b-2c): this is the non-streaming bound, the START GATE, and the hold
+ * FLOOR — not the whole story for a large sectional. A sectional has an UNCAPPED
+ * section count (planToSegments caps only at MAX_TOTAL_BARS=512), and each bounded
+ * section is a ~constant-input call (extendComposition sends the render schema +
+ * metadata + the trailing ~4 bars, NOT the whole score), so the CUMULATIVE cost
+ * grows ~LINEARLY with the section count and can exceed this fixed hold. PR-7b-2c
+ * handles that: the hold is sized to the user's available balance up to a cap
+ * ({@link generationHoldCredits}), and the streamed sectional pump aborts before the
+ * metered cost reaches the hold (or a wall-clock budget), settling the partial — see
+ * `respondWithScoreStream` / `sectionalAbortReason`. settleHold's debit cap remains
+ * the hard overdraft backstop.
  */
 export function worstCaseHoldCredits(maxOutputTokens: number): number {
   const nonStreamingUsd =
@@ -176,6 +177,26 @@ export function maxGenerationHoldCredits(): number {
 }
 
 /**
+ * Default per-run RAW-cost ceiling (in cost-plus credits) for a FREE piece. A free
+ * piece is off the money path (no hold), so the streamed pump uses this as the
+ * abort budget purely to bound what we EAT — and the grant is consumed once a
+ * section is produced, so it's one bounded run per verified account, not
+ * repeatable. ~250cr ≈ a ~16-bar piece (~$0.64 raw) lets a typical free piece
+ * complete while capping a runaway "compose a 500-bar symphony" request.
+ */
+export const DEFAULT_FREE_PIECE_BUDGET_CREDITS = 250
+
+/**
+ * Operator-tunable per-run cost ceiling (cost-plus credits) for a free piece. Reads
+ * `SL_FREE_PIECE_BUDGET_CREDITS` fresh; a missing / non-positive / non-integer value
+ * falls back to {@link DEFAULT_FREE_PIECE_BUDGET_CREDITS}.
+ */
+export function freePieceBudgetCredits(): number {
+  const raw = Number(process.env.SL_FREE_PIECE_BUDGET_CREDITS)
+  return Number.isInteger(raw) && raw > 0 ? raw : DEFAULT_FREE_PIECE_BUDGET_CREDITS
+}
+
+/**
  * The pre-dispatch hold (credits) for a Pro turn under fork (b): the user's
  * AVAILABLE balance, clamped to `[worstCaseHoldCredits, maxGenerationHoldCredits]`.
  *
@@ -193,17 +214,20 @@ export function generationHoldCredits(availableCredits: number, maxOutputTokens:
   return Math.min(Math.max(want, floor), cap)
 }
 
-/** A large growing-section input bound (tokens, billed UNCACHED) — a single
- *  section near the budget can re-send a big score. */
-const SECTION_INPUT_TOKENS_MAX = 96_000
+/** Conservative per-section input bound (tokens, billed UNCACHED) for the abort
+ *  margin. A bounded section call sends the render schema (~13k) + metadata + the
+ *  trailing ~4 bars — `extendComposition` drops the full-score dump (M26-PR-3 input
+ *  cap) — so real per-section input is ~constant ~16k; this 48k is generous headroom
+ *  for grand-staff trailing bars + the opening seed. */
+const SECTION_INPUT_TOKENS_MAX = 48_000
 
 /**
  * Credit headroom the sectional cost-abort keeps BELOW the hold so that stopping
  * AFTER a completed section (the check point) leaves room for that section's
- * charge to stay within the hold — a provable bound on ONE large section's
- * cost-plus charge at the priciest in-scope model. Sized generously; `settleHold`'s
- * cap is the hard backstop if a pathological section overshoots anyway (we then
- * under-earn + page via overHold, never overdraft).
+ * cost-plus charge to stay within the hold — a provable bound on ONE section's
+ * charge at the priciest in-scope model. Sized generously (real sections are
+ * ~constant ~16k input); `settleHold`'s cap is the hard backstop if a section
+ * overshoots anyway (we then under-earn + page via overHold, never overdraft).
  */
 export function sectionAbortMarginCredits(maxOutputTokens: number): number {
   const usd = billableCostUsd(WORST_MODEL, {

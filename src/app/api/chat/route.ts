@@ -57,6 +57,7 @@ import { releaseFreePiece, reserveFreePiece } from '@/lib/billing/freePiece'
 import {
   costToCredits,
   fallbackCreditsForKind,
+  freePieceBudgetCredits,
   generationHoldCredits,
   markupForKind,
   MARKUP_GENERATE,
@@ -549,12 +550,15 @@ async function handleChat(
   // so it can't be farmed). PR-7b-2c CLAIMS the grant here PRE-DISPATCH via the
   // atomic reserveFreePiece (folding the eligibility check INTO the claim) — closing
   // the consume-on-delivery TOCTOU where a concurrent from-scratch burst could each
-  // run a free piece before the first consumed. The claim is symmetric with the
-  // credit hold: this request now OWNS the grant and RELEASES it on any non-delivery
-  // exit (releasePreDispatch here + the two orchestrator responders), keeping it for
-  // a retry; it stays consumed only on a DELIVERED piece. `&&` short-circuits, so
-  // reserveFreePiece runs only for an eligible-shaped request (flag on + verified +
-  // from-scratch) — never on an edit/converse, never when the flag is off.
+  // run a free piece before the first consumed. This request now OWNS the grant. It
+  // is RELEASED only on a non-delivery that incurred NO generation cost — the pre-run
+  // handleChat exits (releasePreDispatch: quota / orchestrator-throw / refusal /
+  // fall-through) and the streaming ZERO-section early failure. Once a section (or a
+  // non-streaming result) is produced the raw cost is sunk, so the grant stays
+  // consumed — the consumption IS the free piece's cost bound (also why a delivered
+  // partial keeps it). `&&` short-circuits, so reserveFreePiece runs only for an
+  // eligible-shaped request (flag on + verified + from-scratch) — never on an
+  // edit/converse, never when the flag is off.
   const freePiece =
     isPaidGenerationEnabled() && authenticated && !orchestratorScore && reserveFreePiece(userId)
   if (freePiece) generationTier = 'pro'
@@ -568,7 +572,15 @@ async function handleChat(
   // wasn't made / already terminal, so it is safe to call on any non-delivery exit.
   let holdId: string | undefined
   let holdCredits = 0
+  // Idempotent within THIS request: in shadow mode an orchestrator throw releases
+  // here (catch) AND then falls through to the legacy release below — and the
+  // free-piece grant is a shared per-USER row, so a second release could clear a
+  // CONCURRENT request's fresh claim. Release at most once. (The hold is per-request,
+  // so its double-release was already a harmless no-op; this hardens the free piece.)
+  let preDispatchReleased = false
   const releasePreDispatch = (): void => {
+    if (preDispatchReleased) return
+    preDispatchReleased = true
     if (holdId) safeReleaseHold(holdId, requestId)
     if (freePiece) safeReleaseFreePiece(userId, requestId)
   }
@@ -750,9 +762,10 @@ async function handleChat(
       return await respondWithScoreStream(userId, chatId, orchestratorOutcome, mode, generationTier, requestId, holdId, freePiece, holdCredits)
     }
     if (!('fellThrough' in orchestratorOutcome)) {
-      // Non-streaming result: respondWithOrchestratorResult OWNS the hold + the
-      // free-piece reservation — it settles/keeps on delivery and releases both on
-      // a validation/persist failure — so we must NOT releasePreDispatch() here.
+      // Non-streaming result: respondWithOrchestratorResult OWNS the hold — it
+      // settles on delivery and releases on a validation/persist failure — so we
+      // must NOT releasePreDispatch() here. The free-piece grant (if any) was
+      // claimed pre-dispatch and is kept consumed by this post-cost responder.
       return await respondWithOrchestratorResult(
         userId,
         chatId,
@@ -761,7 +774,6 @@ async function handleChat(
         generationTier,
         requestId,
         holdId,
-        freePiece,
       )
     }
     // fellThrough — drop through to the legacy path below; the
@@ -1232,15 +1244,21 @@ async function respondWithOrchestratorResult(
   generationTier: GenerationTier,
   requestId?: string,
   holdId?: string,
-  freePiece?: boolean,
+  // NB no `freePiece` param: a free piece is CLAIMED pre-dispatch (reserveFreePiece)
+  // and this responder is reached only AFTER run() incurred cost, so the grant is
+  // simply KEPT consumed whether this delivers or fails — nothing to do here. (The
+  // free-piece release lives only on the pre-cost handleChat exits + the streaming
+  // zero-section path.)
 ) {
+  // NB the hold vs free-piece asymmetry on a post-`run()` failure: the paid HOLD is
+  // RELEASED (we never charge for an undelivered turn), but the free-piece grant is
+  // KEPT consumed — reaching this responder means run() already incurred the LLM
+  // cost, and the grant-consumption IS the free piece's cost bound (releasing it
+  // would let a user repeatedly burn free generation cost on induced failures).
   try {
     validateScore(result.score)
   } catch (e) {
-    // Not delivering a result → release BOTH pre-dispatch reservations (the paid
-    // hold and/or the free-piece claim; nothing to charge / keep for).
     if (holdId && requestId) safeReleaseHold(holdId, requestId)
-    if (freePiece && requestId) safeReleaseFreePiece(userId, requestId)
     if (e instanceof ValidationError) {
       return errorResponse('validation_failed', 422, `Orchestrator emitted an invalid score: ${e.message}`, chatId)
     }
@@ -1253,7 +1271,6 @@ async function respondWithOrchestratorResult(
     await validateAbc(abc)
   } catch (e) {
     if (holdId && requestId) safeReleaseHold(holdId, requestId)
-    if (freePiece && requestId) safeReleaseFreePiece(userId, requestId)
     if (e instanceof ValidationError) {
       return errorResponse('validation_failed', 422, e.message, chatId)
     }
@@ -1366,9 +1383,9 @@ async function respondWithOrchestratorResult(
         })
       }
     }
-    // A free piece (no hold) was reserved pre-dispatch but never delivered →
-    // release the reservation so a retry is eligible again.
-    if (freePiece && requestId) safeReleaseFreePiece(userId, requestId)
+    // The free piece is KEPT consumed here (no release): run() already incurred the
+    // LLM cost, so the grant-consumption is its cost bound (see the asymmetry note
+    // above). The paid hold, by contrast, was refunded just above.
     throw e
   }
 
@@ -1811,12 +1828,15 @@ async function respondWithScoreStream(
   let delivered = false // PR-7b-2c: a `done` frame was written (score persisted)?
   let keepalive: ReturnType<typeof setInterval> | undefined
 
-  // PR-7b-2c abort budgets. The COST abort applies to the PAID path (a placed
-  // hold); the WALL-CLOCK applies to any money-adjacent stream (paid OR a free
-  // piece — both cost us raw spend). The margin keeps a stop-AFTER-a-section's
-  // charge within the hold; settleHold's cap is the hard backstop if a section
-  // overshoots anyway (we under-earn + page via overHold, never overdraft).
-  const budgetCredits = holdId !== undefined ? holdCredits : undefined
+  // PR-7b-2c abort budgets. The COST abort uses the placed hold (paid) OR a fixed
+  // free-piece ceiling (a free piece has no hold, so this bounds what we EAT). The
+  // WALL-CLOCK applies to any money-adjacent stream (paid OR free piece). The margin
+  // keeps a stop-AFTER-a-section's charge within the hold; settleHold's cap is the
+  // hard backstop if a section overshoots anyway (we under-earn + page via overHold,
+  // never overdraft). On the free piece there is no settle, so the cost-abort purely
+  // caps raw spend per run.
+  const budgetCredits =
+    holdId !== undefined ? holdCredits : freePiece ? freePieceBudgetCredits() : undefined
   const abortMargin = sectionAbortMarginCredits(policyFor('pro').maxOutputTokens)
   const enforceWallClock = holdId !== undefined || freePiece === true
   const streamStartedAt = Date.now()
@@ -1939,6 +1959,7 @@ async function respondWithScoreStream(
       // backfill the optimistically-recorded turn at `done`/abort.
       await runWithUsageMeter(requestId, async () => {
         let lastSectionScore: Score | undefined
+        let sectionsGenerated = 0
         try {
           for await (const ev of outcome.events) {
             if (ev.type === 'section') {
@@ -1957,15 +1978,17 @@ async function respondWithScoreStream(
                 scoreJson: ev.score,
               })
               lastSectionScore = ev.score
+              sectionsGenerated++
 
-              // PR-7b-2c cost + wall-clock abort. A large sectional re-sends a
-              // growing score with no call cap, so without this it could settle
-              // ABOVE the hold (overHold under-earn) or run past maxDuration →
-              // reaped → free. recordProviderCall fires DURING the section call
-              // (before the yield), so the meter already includes the section just
-              // delivered — this is the true cost so far. Breaking after a section
-              // yield is cost-safe: the generator is suspended BETWEEN calls, so
-              // the next (un-run) section's call never fires.
+              // PR-7b-2c cost + wall-clock abort. A sectional has an UNCAPPED section
+              // count (only MAX_TOTAL_BARS=512), and each bounded section is a
+              // ~constant-input call, so the CUMULATIVE cost grows ~linearly and
+              // could settle ABOVE the hold (overHold under-earn) or run past
+              // maxDuration → reaped → free. recordProviderCall fires DURING the
+              // section call (before the yield), so the meter already includes the
+              // section just delivered — the true cost so far. Breaking after a
+              // section yield is cost-safe: the generator is suspended BETWEEN calls,
+              // so the next (un-run) section's call never fires.
               const abortReason = sectionalAbortReason({
                 budgetCredits,
                 meteredMicroUsd: meterStreamCost().costMicroUsd,
@@ -1979,11 +2002,14 @@ async function respondWithScoreStream(
                   requestId,
                   chatId,
                   reason: abortReason,
+                  freePiece: freePiece === true,
                   ...(budgetCredits !== undefined ? { budgetCredits } : {}),
                 })
                 const warning =
                   abortReason === 'budget'
-                    ? 'Stopped at the credit budget for this generation — ask me to continue to add more sections.'
+                    ? holdId !== undefined
+                      ? 'Stopped at the credit budget for this generation — ask me to continue to add more sections.'
+                      : 'Your free piece is ready. Top up credits to generate longer pieces.'
                     : 'This piece is taking a while to generate — stopped here. Ask me to continue to add more.'
                 await finishStream(
                   lastSectionScore,
@@ -2012,14 +2038,19 @@ async function respondWithScoreStream(
           })
         } finally {
           // PR-7b-2: release the hold unless it settled above (error / mid-pump
-          // throw → our failure → free). PR-7b-2c: release the free-piece
-          // reservation unless a piece was actually DELIVERED (a delivered partial
-          // KEEPS the grant consumed — which also bounds free-piece cost on the
-          // wall-clock path). No-op once settled/delivered; a process-kill before
-          // this leaves the hold for the reaper. Only one of {holdId, freePiece}
-          // is ever set.
+          // throw → our failure → free). No-op once settled; a process-kill before
+          // this leaves it for the reaper.
           if (holdId && !holdSettled) safeReleaseHold(holdId, requestId)
-          if (freePiece && !delivered) safeReleaseFreePiece(userId, requestId)
+          // PR-7b-2c free-piece consume-on-cost-incurred: release the grant ONLY when
+          // NOTHING was generated (a clean pre-cost failure → retry eligible). Once a
+          // section was produced we incurred raw cost, so KEEP it consumed even on a
+          // later error — the grant is the free piece's cost bound; releasing it would
+          // let an induced mid-run error burn free generation cost repeatedly. A
+          // delivered piece (delivered=true) likewise keeps it. Only one of {holdId,
+          // freePiece} is ever set.
+          if (freePiece && !delivered && sectionsGenerated === 0) {
+            safeReleaseFreePiece(userId, requestId)
+          }
           if (keepalive) clearInterval(keepalive)
           try {
             controller.close()

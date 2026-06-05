@@ -2,8 +2,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   costToCredits,
+  DEFAULT_FREE_PIECE_BUDGET_CREDITS,
   DEFAULT_MAX_GENERATION_HOLD_CREDITS,
   fallbackCreditsForKind,
+  freePieceBudgetCredits,
   generationHoldCredits,
   MARKUP_EDIT,
   MARKUP_GENERATE,
@@ -139,13 +141,34 @@ describe('generationHoldCredits (fork b: min(available, cap), floored at worst c
 })
 
 describe('sectionAbortMarginCredits (PR-7b-2c sectional abort headroom)', () => {
-  it('bounds one large section cost-plus charge: Sonnet 96k in + 8k out → 102 cr', () => {
-    // (96_000×$3 + 8_000×$15) / 1e6 = $0.408 → ×2.5 / 1¢ = 102 credits.
-    expect(sectionAbortMarginCredits(8_000)).toBe(102)
+  it('bounds one section cost-plus charge: Sonnet 48k in + 8k out → 66 cr', () => {
+    // (48_000×$3 + 8_000×$15) / 1e6 = $0.264 → ×2.5 / 1¢ = 66 credits. Generous over
+    // a real ~16k-input section (extendComposition sends only metadata + 4 trailing bars).
+    expect(sectionAbortMarginCredits(8_000)).toBe(66)
   })
 
   it('stays BELOW the hold floor so the abort threshold (hold − margin) is positive', () => {
     expect(sectionAbortMarginCredits(8_000)).toBeGreaterThan(0)
     expect(sectionAbortMarginCredits(8_000)).toBeLessThan(worstCaseHoldCredits(8_000))
+  })
+})
+
+describe('freePieceBudgetCredits (PR-7b-2c free-piece per-run cost ceiling)', () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  it('defaults to DEFAULT_FREE_PIECE_BUDGET_CREDITS when unset, leaving room above the margin', () => {
+    expect(freePieceBudgetCredits()).toBe(DEFAULT_FREE_PIECE_BUDGET_CREDITS)
+    expect(DEFAULT_FREE_PIECE_BUDGET_CREDITS).toBe(250)
+    // A typical free piece must clear the abort margin to deliver multiple sections.
+    expect(DEFAULT_FREE_PIECE_BUDGET_CREDITS).toBeGreaterThan(sectionAbortMarginCredits(8_000) * 2)
+  })
+
+  it('honors a valid SL_FREE_PIECE_BUDGET_CREDITS override; falls back on garbage', () => {
+    vi.stubEnv('SL_FREE_PIECE_BUDGET_CREDITS', '120')
+    expect(freePieceBudgetCredits()).toBe(120)
+    for (const bad of ['0', '-1', 'abc', '']) {
+      vi.stubEnv('SL_FREE_PIECE_BUDGET_CREDITS', bad)
+      expect(freePieceBudgetCredits()).toBe(DEFAULT_FREE_PIECE_BUDGET_CREDITS)
+    }
   })
 })
