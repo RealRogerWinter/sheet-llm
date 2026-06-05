@@ -1,6 +1,11 @@
 import type { Metadata } from 'next'
+import { notFound } from 'next/navigation'
 import LegalContent from '@/components/legal/LegalContent'
 import { PRIVACY_MARKDOWN } from '@/lib/legal/content'
+import { getLegalConfig, renderLegalDoc } from '@/lib/legal/config'
+
+// Read SL_LEGAL_* from the runtime env (not build time — CI has no env).
+export const dynamic = 'force-dynamic'
 
 // Public, indexable legal page (like /help).
 export const metadata: Metadata = {
@@ -10,5 +15,8 @@ export const metadata: Metadata = {
 }
 
 export default function PrivacyPage() {
-  return <LegalContent crumb="Privacy Policy" markdown={PRIVACY_MARKDOWN} />
+  const cfg = getLegalConfig()
+  // Don't surface the document until the operator details are configured.
+  if (!cfg) notFound()
+  return <LegalContent crumb="Privacy Policy" markdown={renderLegalDoc(PRIVACY_MARKDOWN, cfg)} />
 }

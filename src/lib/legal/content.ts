@@ -1,15 +1,23 @@
 // Terms of Service and Privacy Policy source text, rendered as Markdown by
 // the /terms and /privacy pages (see src/components/legal/LegalContent.tsx).
 // These are a solid starting point drafted against Anthropic's API terms,
-// Stripe's website requirements, and GDPR/CCPA — but contain bracketed
-// [PLACEHOLDERS] (legal entity, address, governing law, contact, retention
-// periods) that MUST be filled in and reviewed by a lawyer before launch.
+// Stripe's website requirements, and GDPR/CCPA.
+//
+// The operator-identity values are injected at runtime from the SL_LEGAL_*
+// env vars via renderLegalDoc() in ./config.ts, as the tokens:
+//   {{LEGAL_ENTITY}}  {{BUSINESS_ADDRESS}}  {{JURISDICTION}}
+// The pages 404 (and their UI links hide) until all three env vars are set.
+//
+// The remaining bracketed [PLACEHOLDERS] (contact mailboxes, retention
+// periods, per-vendor transfer mechanisms, R2 region, min age, Art. 27 rep)
+// still MUST be filled in and the whole text reviewed by a lawyer before
+// these documents are relied upon for launch.
 
 export const TERMS_MARKDOWN = `# Terms of Service
 
 _Effective date: 2026-06-05_
 
-These Terms of Service ("Terms") govern your access to and use of sheetllm.com and the sheet-llm web application (the "Service"), operated by [LEGAL ENTITY — placeholder] ("we", "us", or "our"). Please read them carefully. If you do not agree, do not use the Service.
+These Terms of Service ("Terms") govern your access to and use of sheetllm.com and the sheet-llm web application (the "Service"), operated by {{LEGAL_ENTITY}} ("we", "us", or "our"). Please read them carefully. If you do not agree, do not use the Service.
 
 ## 1. Acceptance of These Terms
 
@@ -192,7 +200,7 @@ We may also update these Terms. For material changes, we will give reasonable ad
 
 ## 19. Governing Law and Disputes
 
-These Terms are governed by the laws of [GOVERNING LAW / JURISDICTION — placeholder], without regard to its conflict-of-laws rules, and disputes will be subject to the courts of [GOVERNING LAW / JURISDICTION — placeholder].
+These Terms are governed by the laws of {{JURISDICTION}}, without regard to its conflict-of-laws rules, and disputes will be subject to the courts of {{JURISDICTION}}.
 
 If you are a consumer in the EU or UK (or elsewhere with similar protections), this choice of law and forum does not deprive you of the protection of mandatory consumer-protection rules of the country where you live. You retain the right to bring proceedings in, and to rely on the mandatory law of, your home courts, including under the Brussels Recast Regulation and Rome I where they apply. Nothing in these Terms waives any non-waivable statutory right.
 
@@ -202,7 +210,7 @@ If any provision of these Terms (or its application to any person or circumstanc
 
 ## 21. Contact and Operator Details
 
-The Service is operated by [LEGAL ENTITY — placeholder], [BUSINESS ADDRESS — placeholder].
+The Service is operated by {{LEGAL_ENTITY}}, {{BUSINESS_ADDRESS}}.
 
 For questions, support, or refund requests, contact us at support@sheetllm.com [placeholder]. For privacy questions or to exercise data-protection rights, contact privacy@sheetllm.com [placeholder].
 `
@@ -219,7 +227,7 @@ This policy works alongside our [Terms of Service](/terms), which include our ac
 
 ## Who We Are (Controller)
 
-The Service is operated by a small independent operator, **[LEGAL ENTITY]**, at **[BUSINESS ADDRESS]** ("we", "us", "our"). We are the controller of your personal data.
+The Service is operated by a small independent operator, **{{LEGAL_ENTITY}}**, at **{{BUSINESS_ADDRESS}}** ("we", "us", "our"). We are the controller of your personal data.
 
 - Privacy contact: **privacy@sheetllm.com** _(placeholder)_
 - General/support contact: **support@sheetllm.com** _(placeholder)_
@@ -374,7 +382,7 @@ You can request a copy of the relevant safeguards by contacting **privacy@sheetl
 | Orchestrator turn records (prompts + internal cost) | Retained for a limited period for abuse and cost control: **[RETENTION PERIOD — confirm]** |
 | Per-IP / per-user quota counters and IP-risk signals | Short-term, for rate-limiting and abuse prevention: **[N DAYS — confirm]** |
 | Encrypted backups | Rotate on a backup cycle; erased data ages out of backups within the backup window: **[BACKUP WINDOW — confirm]** |
-| Stripe financial / tax records | **Retained after account deletion** to meet legal and accounting obligations — for the period required by the applicable tax law of **[JURISDICTION]** (typically several years) |
+| Stripe financial / tax records | **Retained after account deletion** to meet legal and accounting obligations — for the period required by the applicable tax law of **{{JURISDICTION}}** (typically several years) |
 
 Each retention period above is set by the criteria stated in the same row (how long the data is needed for that purpose, plus any legal-retention requirement). We must replace every bracketed value with a concrete period before this policy is published.
 
@@ -400,7 +408,7 @@ _(For developers: these controls are backed by the \`/api/me/export\` and \`/api
 
 Email verification may be required before we act on certain requests, to confirm it's really you.
 
-We aim to respond within **one month** (GDPR). You can also **lodge a complaint** with a data-protection supervisory authority — your local authority in your country of residence, or the authority for the operator's place of establishment (to be identified once **[LEGAL ENTITY]** / **[BUSINESS ADDRESS]** is confirmed).
+We aim to respond within **one month** (GDPR). You can also **lodge a complaint** with a data-protection supervisory authority — your local authority in your country of residence, or the authority for the operator's place of establishment (to be identified once **{{LEGAL_ENTITY}}** / **{{BUSINESS_ADDRESS}}** is confirmed).
 
 **If you are in California (CCPA/CPRA):** you have the right to know/access, delete, and correct your personal information, to opt out of the sale or sharing of personal information, and to limit the use of sensitive personal information, and you will not be discriminated against for exercising these rights. **We do not sell or share your personal information**, so no opt-out is needed. The only arguably "sensitive personal information" we process is your **account log-in credentials** (your Argon2id password hash and related session/access tokens), which we use **solely to authenticate you and secure your account** — a permitted business purpose that does not trigger the right to limit use, so there is no "Limit" action to take. The data categories we collect map to: identifiers, internet/network activity, commercial information, and your own content. You can use the same export/delete tools above; we aim to respond within **45 days**.
 
@@ -436,6 +444,6 @@ We may update this Privacy Policy from time to time. For material changes, we wi
 - Privacy questions: **privacy@sheetllm.com** _(placeholder)_
 - General/support: **support@sheetllm.com** _(placeholder)_
 - Terms of Service (including acceptable use and credits/refund terms): [/terms](/terms)
-- Operator: **[LEGAL ENTITY]**, **[BUSINESS ADDRESS]**
-- Governing law / jurisdiction: **[GOVERNING LAW / JURISDICTION]** _(see our Terms of Service)_
+- Operator: **{{LEGAL_ENTITY}}**, **{{BUSINESS_ADDRESS}}**
+- Governing law / jurisdiction: **{{JURISDICTION}}** _(see our Terms of Service)_
 `

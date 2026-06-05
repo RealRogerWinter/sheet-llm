@@ -8,7 +8,7 @@ import { refreshSession, signup } from '@/lib/auth/authClient'
 import { GoogleIcon, GitHubIcon } from '@/components/auth/ProviderIcons'
 import styles from '@/components/auth/AuthPage.module.css'
 
-export default function SignupContent() {
+export default function SignupContent({ legalEnabled = false }: { legalEnabled?: boolean }) {
   const router = useRouter()
   const status = useAuthStore((s) => s.status)
   const providers = useAuthStore((s) => s.oauthProviders)
@@ -108,11 +108,13 @@ export default function SignupContent() {
         <p className={styles.footer}>
           Already have an account? <Link href="/">Log in</Link>
         </p>
-        <p className={styles.footer}>
-          By creating an account, you agree to our{' '}
-          <Link href="/terms">Terms of Service</Link> and{' '}
-          <Link href="/privacy">Privacy Policy</Link>.
-        </p>
+        {legalEnabled && (
+          <p className={styles.footer}>
+            By creating an account, you agree to our{' '}
+            <Link href="/terms">Terms of Service</Link> and{' '}
+            <Link href="/privacy">Privacy Policy</Link>.
+          </p>
+        )}
       </div>
     </main>
   )
