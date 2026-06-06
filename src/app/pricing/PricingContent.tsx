@@ -70,7 +70,7 @@ export default function PricingContent({ packs }: { packs: PricingPack[] }) {
       }
       if (data.ok) {
         setStatus('done')
-        setMessage("You're on the list — we'll email you the moment paid credits go live.")
+        setMessage("You're on the list. We'll email you the moment paid credits go live.")
         return
       }
       if (data.code === 'not_configured') {
@@ -105,7 +105,7 @@ export default function PricingContent({ packs }: { packs: PricingPack[] }) {
         <div className={styles.banner} role="note">
           <span className={styles.bannerDot} aria-hidden="true" />
           <span>
-            <strong>Paid credits are launching soon.</strong> Prices below are final — join the list
+            <strong>Paid credits are launching soon.</strong> Prices below are final. Join the list
             and we&rsquo;ll email you the moment checkout opens.
           </span>
         </div>
@@ -115,8 +115,8 @@ export default function PricingContent({ packs }: { packs: PricingPack[] }) {
           <h1 className={styles.h1}>Compose more, pay only for what you use</h1>
           <p className={styles.lede}>
             sheet-llm turns plain-language requests into real, editable sheet music with Claude. Try
-            it free, then buy <strong>credits</strong> when you&rsquo;re ready for full-length pieces —
-            simple pay-as-you-go packs, no subscription, and credits never expire.
+            it free, then buy <strong>credits</strong> when you&rsquo;re ready for full-length pieces.
+            Simple pay-as-you-go packs, no subscription. Credits never expire.
           </p>
           <div className={styles.heroActions}>
             <a href="#packs" className={styles.primaryBtn}>
@@ -173,7 +173,7 @@ export default function PricingContent({ packs }: { packs: PricingPack[] }) {
           <h2 className={styles.sectionTitle}>Credit packs</h2>
           <p className={styles.sectionLede}>
             One-time purchase, no subscription. <strong>1 credit = 1¢ of value</strong>, so every
-            dollar is 100 credits — bigger packs add a bonus on top. Credits never expire.
+            dollar is 100 credits. Bigger packs add a bonus on top. Credits never expire.
           </p>
 
           <div className={styles.packs}>
@@ -211,7 +211,7 @@ export default function PricingContent({ packs }: { packs: PricingPack[] }) {
           </div>
           <p className={styles.fineprint}>
             Secure checkout via Stripe at launch. Prices in USD, tax added where applicable. Credits
-            are a service entitlement — they never expire and have no cash value.
+            are a service entitlement. They never expire and have no cash value.
           </p>
         </section>
 
@@ -219,7 +219,7 @@ export default function PricingContent({ packs }: { packs: PricingPack[] }) {
         <section id="how" className={styles.how}>
           <h2 className={styles.sectionTitle}>How credits are used</h2>
           <p className={styles.sectionLede}>
-            Every request you send is one <strong>turn</strong> — sheet-llm reads your score and
+            Every request you send is one <strong>turn</strong>: sheet-llm reads your score and
             prompt, calls Claude, and writes the music back. You&rsquo;re charged in credits for the
             turns that change your score; reading, playback, and export are always free.
           </p>
@@ -228,7 +228,7 @@ export default function PricingContent({ packs }: { packs: PricingPack[] }) {
             <div className={styles.howCard}>
               <h3 className={styles.howTitle}>What a turn costs</h3>
               <p>
-                Credits scale with the real work a turn does — how much music is in your score, how
+                Credits scale with the real work a turn does: how much music is in your score, how
                 long your request is, how much Claude writes back, and which model runs it. Small
                 edits cost little; composing a long piece from scratch costs more.
               </p>
@@ -237,15 +237,15 @@ export default function PricingContent({ packs }: { packs: PricingPack[] }) {
               <h3 className={styles.howTitle}>Fair on edits</h3>
               <p>
                 Generating brand-new music carries a higher rate than tweaking what&rsquo;s already
-                there, so iterating — &ldquo;make bar 4 louder&rdquo;, &ldquo;swap that chord&rdquo;
-                — stays cheap. You always see your balance update after each turn.
+                there, so iterating (&ldquo;make bar 4 louder&rdquo;, &ldquo;swap that chord&rdquo;)
+                stays cheap. You always see your balance update after each turn.
               </p>
             </div>
             <div className={styles.howCard}>
-              <h3 className={styles.howTitle}>Transparent metering</h3>
+              <h3 className={styles.howTitle}>Metered by the token</h3>
               <p>
                 We meter the exact tokens each turn sends to and receives from Claude, then convert
-                that to credits. No hidden minimums or subscriptions — when you stop composing, you
+                that to credits. No hidden minimums or subscriptions. When you stop composing, you
                 stop spending.
               </p>
             </div>
@@ -284,8 +284,9 @@ export default function PricingContent({ packs }: { packs: PricingPack[] }) {
               </tbody>
             </table>
             <p className={styles.tableNote}>
-              Estimates, not fixed prices — you&rsquo;re billed for the actual tokens each turn uses.
-              A $5 Starter pack covers roughly 20+ standard generations or a handful of full pieces.
+              These are estimates, not fixed prices. You&rsquo;re billed for the actual tokens each
+              turn uses. A $5 Starter pack covers 20+ standard generations or a handful of full
+              pieces.
             </p>
           </div>
 
@@ -303,7 +304,7 @@ export default function PricingContent({ packs }: { packs: PricingPack[] }) {
           <h2 className={styles.sectionTitle}>Get notified at launch</h2>
           <p className={styles.sectionLede}>
             Checkout isn&rsquo;t open yet. Leave your email and we&rsquo;ll let you know the moment
-            you can buy credits — no spam, just the one heads-up.
+            you can buy credits. No spam, just the one heads-up.
           </p>
           {status === 'done' ? (
             <p className={styles.status} role="status">
@@ -359,7 +360,7 @@ export default function PricingContent({ packs }: { packs: PricingPack[] }) {
           <div className={styles.faqItem}>
             <h3 className={styles.faqQ}>What&rsquo;s one credit?</h3>
             <p className={styles.faqA}>
-              One credit is one cent of value — so a $5 pack is 500 credits. What a turn costs in
+              One credit is one cent of value, so a $5 pack is 500 credits. What a turn costs in
               credits depends on the work it does (see{' '}
               <a href="#how" className={styles.inlineLink}>
                 how credits are used
@@ -371,7 +372,7 @@ export default function PricingContent({ packs }: { packs: PricingPack[] }) {
             <h3 className={styles.faqQ}>Can I keep using sheet-llm for free?</h3>
             <p className={styles.faqA}>
               Yes. The free tier stays available with a daily request limit and shorter generations.
-              Credits unlock no-limit, full-length composing when you want it.
+              Credits buy no-limit, full-length composing whenever you want it.
             </p>
           </div>
         </section>
