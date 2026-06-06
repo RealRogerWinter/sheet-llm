@@ -24,6 +24,10 @@
     'Times New Roman', serif;
   --font-label: var(--font-geist-mono), ui-monospace, 'SFMono-Regular', monospace;
 
+  /* Sharp "engraved" radii, intentionally tighter than the app's --radius: 6px. */
+  --ms-radius: 2px;
+  --ms-radius-lg: 4px;
+
   /* Manuscript palette (light) — warm cream paper, ink rules, vermilion rubric. */
   --ms-paper: color-mix(in oklab, var(--paper) 87%, #f0e7d3);
   --ms-panel: color-mix(in oklab, var(--paper) 76%, #e9dcc0);
@@ -33,7 +37,7 @@
   --ms-edge-strong: color-mix(in oklab, var(--ink) 34%, transparent);
   --ms-rubric: #b23a2e;
   --ms-rubric-ink: #fdf4e6;
-  --ms-rubric-soft: color-mix(in oklab, #b23a2e 12%, transparent);
+  --ms-rubric-soft: color-mix(in oklab, var(--ms-rubric) 12%, transparent);
   --ms-btn: var(--ink);
   --ms-btn-ink: var(--ms-paper);
   --ms-shadow: 0 1px 2px color-mix(in oklab, var(--ink) 10%, transparent),
@@ -49,7 +53,7 @@
   --ms-edge-strong: color-mix(in oklab, var(--ink) 40%, transparent);
   --ms-rubric: #e07a5f;
   --ms-rubric-ink: #17100a;
-  --ms-rubric-soft: color-mix(in oklab, #e07a5f 16%, transparent);
+  --ms-rubric-soft: color-mix(in oklab, var(--ms-rubric) 16%, transparent);
   --ms-shadow: 0 1px 2px color-mix(in oklab, #000 40%, transparent),
     0 16px 34px -18px color-mix(in oklab, #000 70%, transparent);
 }
@@ -173,7 +177,7 @@
   color: var(--ink);
   background: var(--ms-rubric-soft);
   border: 1px solid color-mix(in oklab, var(--ms-rubric) 34%, transparent);
-  border-radius: 2px;
+  border-radius: var(--ms-radius);
 }
 
 .bannerMark {
@@ -261,7 +265,7 @@
   font-weight: 500;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  border-radius: 2px;
+  border-radius: var(--ms-radius);
   cursor: pointer;
   transition: transform 0.18s ease, background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
 }
@@ -301,7 +305,7 @@
 .sectionRuleLine {
   flex: 1;
   height: 1px;
-  background: linear-gradient(to var(--dir, right), transparent, var(--ms-edge) 40%, var(--ms-edge));
+  background: linear-gradient(to right, transparent, var(--ms-edge) 40%, var(--ms-edge));
 }
 
 .sectionRuleLine:last-child {
@@ -361,7 +365,7 @@
   padding: var(--space-md);
   background: var(--ms-card);
   border: 1px solid var(--ms-edge);
-  border-radius: 4px;
+  border-radius: var(--ms-radius-lg);
 }
 
 .planFeatured {
@@ -403,7 +407,7 @@
   letter-spacing: 0.12em;
   color: var(--ms-rubric-ink);
   background: var(--ms-rubric);
-  border-radius: 2px;
+  border-radius: var(--ms-radius);
 }
 
 .planHead {
@@ -491,7 +495,7 @@
   text-transform: uppercase;
   color: var(--ink);
   border: 1px solid var(--ms-edge-strong);
-  border-radius: 2px;
+  border-radius: var(--ms-radius);
   transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
 }
 
@@ -532,7 +536,7 @@
   padding: var(--space-md) var(--gap-4) var(--gap-5);
   background: var(--ms-card);
   border: 1px solid var(--ms-edge);
-  border-radius: 4px;
+  border-radius: var(--ms-radius-lg);
   overflow: hidden;
   transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
 }
@@ -624,7 +628,7 @@
   text-transform: uppercase;
   color: var(--ms-btn-ink);
   background: var(--ms-btn);
-  border-radius: 0 2px 2px 0;
+  border-radius: 0 var(--ms-radius) var(--ms-radius) 0;
 }
 
 .packName {
@@ -695,7 +699,7 @@
   text-transform: uppercase;
   color: var(--ink);
   border: 1px solid var(--ms-edge-strong);
-  border-radius: 2px;
+  border-radius: var(--ms-radius);
   transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
 }
 
@@ -766,7 +770,7 @@
   padding: var(--space-md) var(--gap-4) var(--gap-4);
   background: var(--ms-card);
   border: 1px solid var(--ms-edge);
-  border-radius: 4px;
+  border-radius: var(--ms-radius-lg);
   font-size: 13.5px;
   line-height: 1.6;
   color: color-mix(in oklab, var(--ink) 72%, var(--graphite));
@@ -901,7 +905,7 @@
   text-align: center;
   background: var(--ms-panel);
   border-block: 1px solid var(--ms-edge-strong);
-  border-radius: 4px;
+  border-radius: var(--ms-radius-lg);
   position: relative;
   overflow: hidden;
 }
@@ -970,7 +974,7 @@
 .input {
   flex: 1 1 16rem;
   padding: 0.75rem 0.9rem;
-  border-radius: 2px;
+  border-radius: var(--ms-radius);
   border: 1px solid var(--ms-edge-strong);
   background: var(--ms-paper);
   color: var(--ink);
@@ -995,7 +999,7 @@
   font-weight: 500;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  border-radius: 2px;
+  border-radius: var(--ms-radius);
   border: 1px solid var(--ms-btn);
   background: var(--ms-btn);
   color: var(--ms-btn-ink);

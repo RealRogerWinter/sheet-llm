@@ -174,7 +174,7 @@ export default function PricingContent({
           <div className={styles.planGrid}>
             <article className={styles.planCard}>
               <header className={styles.planHead}>
-                <h2 className={styles.planName}>Free</h2>
+                <h3 className={styles.planName}>Free</h3>
                 <p className={styles.planPrice}>
                   <span className={styles.planAmount}>$0</span>
                 </p>
@@ -194,7 +194,7 @@ export default function PricingContent({
             <article className={`${styles.planCard} ${styles.planFeatured}`}>
               <span className={styles.planBadge}>With credits</span>
               <header className={styles.planHead}>
-                <h2 className={styles.planName}>Pro</h2>
+                <h3 className={styles.planName}>Pro</h3>
                 <p className={styles.planPrice}>
                   <span className={styles.planAmountSm}>Pay&nbsp;as&nbsp;you&nbsp;go</span>
                 </p>
@@ -239,7 +239,7 @@ export default function PricingContent({
                   </span>
 
                   {isPopular && (
-                    <span className={styles.seal} aria-hidden="true">
+                    <span className={styles.seal}>
                       <span className={styles.sealInner}>Most popular</span>
                     </span>
                   )}
