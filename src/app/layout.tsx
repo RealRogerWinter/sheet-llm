@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Fraunces } from "next/font/google";
 import RecoveryBoot from "@/components/RecoveryBoot";
 import TurnstileGate from "@/components/TurnstileGate";
 import "./globals.css";
@@ -14,6 +14,20 @@ const geistSans = Geist({
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
+});
+
+// Display face for the "engraved edition" identity, shared site-wide. Originally
+// scoped to /pricing; promoted here so the brand wordmark, headings, and other
+// display moments stay consistent on every route. Variable old-style serif with
+// optical sizing (opsz) plus the SOFT/WONK axes for a hand-cut character; italic
+// is loaded because musical terms (dynamics, tempo) are conventionally
+// italicised. Body and UI text stay on Geist; Geist Mono carries technical text.
+const fraunces = Fraunces({
+  variable: "--font-fraunces",
+  subsets: ["latin"],
+  display: "swap",
+  style: ["normal", "italic"],
+  axes: ["opsz", "SOFT", "WONK"],
 });
 
 export const metadata: Metadata = {
@@ -49,7 +63,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable}`}
+      className={`${geistSans.variable} ${geistMono.variable} ${fraunces.variable}`}
       suppressHydrationWarning
     >
       <head>

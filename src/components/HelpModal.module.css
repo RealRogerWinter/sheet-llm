@@ -15,8 +15,8 @@
   max-height: calc(100dvh - 48px);
   display: flex;
   flex-direction: column;
-  background: var(--paper);
-  border: 1px solid var(--rule);
+  background: var(--ms-paper);
+  border: 1px solid var(--ms-edge);
   border-radius: var(--radius);
   overflow: hidden;
 }
@@ -26,12 +26,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid var(--ms-edge);
 }
 
 .title {
-  font-size: 15px;
-  font-weight: 600;
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 560;
+  letter-spacing: -0.01em;
   margin: 0;
 }
 
@@ -90,9 +92,9 @@
   justify-content: center;
   font-size: 12px;
   font-weight: 600;
-  color: var(--ink);
-  background: var(--paper-warm);
-  border: 1px solid var(--rule);
+  color: var(--ms-rubric);
+  background: var(--ms-rubric-soft);
+  border: 1px solid color-mix(in oklab, var(--ms-rubric) 30%, var(--ms-edge));
   border-radius: 50%;
 }
 
@@ -106,7 +108,7 @@
   color: var(--graphite);
   margin: 0;
   padding-top: 10px;
-  border-top: 1px solid var(--rule);
+  border-top: 1px solid var(--ms-edge);
 }
 
 .footer {
@@ -115,7 +117,7 @@
   align-items: center;
   gap: 8px;
   padding: 12px 16px;
-  border-top: 1px solid var(--rule);
+  border-top: 1px solid var(--ms-edge);
 }
 
 .secondary,
@@ -125,8 +127,8 @@
   font-size: 13px;
   padding: 6px 14px;
   border-radius: var(--radius);
-  border: 1px solid var(--rule);
-  background: var(--paper);
+  border: 1px solid var(--ms-edge);
+  background: var(--ms-card);
   color: var(--graphite);
 }
 

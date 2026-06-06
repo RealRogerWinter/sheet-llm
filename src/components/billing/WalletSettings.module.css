@@ -67,9 +67,9 @@
   flex-direction: column;
   gap: var(--gap-2, 8px);
   padding: var(--gap-4, 16px);
-  border: 1px solid var(--rule, #d4d4d2);
+  border: 1px solid var(--ms-edge);
   border-radius: 12px;
-  background: var(--paper-warm, #f4f4f2);
+  background: var(--ms-panel);
 }
 
 .balanceMain {
@@ -96,7 +96,7 @@
   padding: 0;
   border: none;
   background: none;
-  color: var(--playing, #1e40af);
+  color: var(--ms-rubric);
   font: inherit;
   font-size: 0.8rem;
   cursor: pointer;
@@ -124,9 +124,9 @@
   flex-direction: column;
   gap: 2px;
   padding: var(--gap-3, 12px);
-  border: 1px solid var(--rule, #d4d4d2);
+  border: 1px solid var(--ms-edge);
   border-radius: 10px;
-  background: var(--paper, #fff);
+  background: var(--ms-card);
   color: var(--ink, #0a0a0a);
   text-align: left;
   cursor: pointer;
@@ -134,7 +134,7 @@
 }
 
 .pack:hover:not(:disabled) {
-  border-color: var(--playing, #1e40af);
+  border-color: var(--ms-rubric);
   background: var(--hover, #0a0a0a08);
 }
 
@@ -169,7 +169,7 @@
 .packBusy {
   margin-top: 2px;
   font-size: 0.75rem;
-  color: var(--playing, #1e40af);
+  color: var(--ms-rubric);
 }
 
 .fineprint {
@@ -189,7 +189,7 @@
   list-style: none;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--rule, #d4d4d2);
+  border: 1px solid var(--ms-edge);
   border-radius: 10px;
   overflow: hidden;
 }
@@ -200,7 +200,7 @@
   justify-content: space-between;
   gap: var(--gap-3, 12px);
   padding: var(--gap-3, 12px) var(--gap-4, 16px);
-  border-top: 1px solid var(--rule, #d4d4d2);
+  border-top: 1px solid var(--ms-edge);
 }
 
 .historyRow:first-child {

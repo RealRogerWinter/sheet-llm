@@ -10,6 +10,7 @@ import ThemeToggle from './ThemeToggle'
 import UsageCounter from './UsageCounter'
 import AuthNavButton from './auth/AuthNavButton'
 import HeaderMenu from './HeaderMenu'
+import Wordmark from './brand/Wordmark'
 import styles from './AppHeader.module.css'
 
 export default function AppHeader() {
@@ -33,7 +34,9 @@ export default function AppHeader() {
   return (
     <header ref={ref} className={styles.header}>
       <SessionsButton />
-      <h1 className={styles.brand}>sheet-llm</h1>
+      <h1 className={styles.brand}>
+        <Wordmark size="md" />
+      </h1>
       <div className={styles.right}>
         <ImportScoreButton />
         <NewMenu />

@@ -1,19 +1,18 @@
 'use client'
 
-import Link from 'next/link'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { HELP_SECTIONS } from '@/lib/help/content'
+import EditionTopbar from '@/components/shell/EditionTopbar'
+import Colophon from '@/components/shell/Colophon'
+import StaffWash from '@/components/shell/StaffWash'
 import styles from './HelpContent.module.css'
 
 export default function HelpContent() {
   return (
     <div className={styles.page}>
-      <header className={styles.topbar}>
-        <Link href="/" className={styles.brand}>sheet-llm</Link>
-        <span className={styles.crumb}>User guide</span>
-        <Link href="/" className={styles.back}>← Back to the editor</Link>
-      </header>
+      <StaffWash />
+      <EditionTopbar runhead="User guide" />
 
       <div className={styles.layout}>
         <nav className={styles.nav} aria-label="User guide sections">
@@ -39,6 +38,8 @@ export default function HelpContent() {
               </div>
             </section>
           ))}
+
+          <Colophon />
         </main>
       </div>
     </div>

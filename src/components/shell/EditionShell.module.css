@@ -1,0 +1,133 @@
+/* Shared "engraved edition" page chrome — the running-head topbar, the closing
+ * colophon, and the full-bleed staff wash. Mirrors the /pricing treatment so
+ * every content/auth page wears the same masthead. Built entirely on the global
+ * --ms-* edition tokens (see globals.css), so light/dark just work. */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-header);
+  display: flex;
+  align-items: center;
+  gap: var(--gap-4);
+  padding: var(--gap-3) var(--space-md);
+  background: color-mix(in oklab, var(--ms-paper) 86%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--ms-edge);
+}
+
+.brand {
+  flex: 0 0 auto;
+}
+
+.runhead {
+  margin-inline: auto;
+  font-family: var(--font-label);
+  font-size: 11px;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--graphite);
+}
+
+.back {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-label);
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--graphite);
+  transition: color 0.18s ease;
+}
+
+.back:hover {
+  color: var(--ms-rubric);
+}
+
+/* With a runhead present, its symmetric auto margins already push the brand and
+ * back to the two edges, so the back link drops its own auto margin. */
+.runhead ~ .back {
+  margin-left: 0;
+}
+
+/* ── Colophon (closing barline) ──────────────────────────────────────────── */
+.colophon {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--gap-4);
+  padding-top: var(--gap-7);
+  margin-top: var(--gap-6);
+  border-top: 1px solid var(--ms-edge);
+  text-align: center;
+}
+
+.coda {
+  width: 64px;
+  height: auto;
+  color: var(--ms-edge-strong);
+}
+
+.colophonText {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-label);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--graphite);
+}
+
+.colophonBrand {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 15px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink);
+}
+
+.colophonDot {
+  color: var(--ms-rubric);
+}
+
+/* ── Full-bleed staff-line wash ──────────────────────────────────────────────
+ * Faint five-line staves over the whole page, fixed so they read as the paper
+ * itself. Masked to fade at top/bottom. Decorative; pointer-events: none. */
+.staffWash {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    var(--ms-stave) 0,
+    var(--ms-stave) 1px,
+    transparent 1px,
+    transparent 7px,
+    var(--ms-stave) 7px,
+    var(--ms-stave) 8px,
+    transparent 8px,
+    transparent 14px,
+    var(--ms-stave) 14px,
+    var(--ms-stave) 15px,
+    transparent 15px,
+    transparent 21px,
+    var(--ms-stave) 21px,
+    var(--ms-stave) 22px,
+    transparent 22px,
+    transparent 28px,
+    var(--ms-stave) 28px,
+    var(--ms-stave) 29px,
+    transparent 29px,
+    transparent 60px
+  );
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 6%, #000 94%, transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 6%, #000 94%, transparent);
+}

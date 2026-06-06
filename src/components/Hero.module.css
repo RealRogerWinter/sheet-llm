@@ -16,6 +16,13 @@
   min-height: calc(100dvh - var(--app-header-height)); /* viewport minus header */
   padding: var(--gap-7) var(--gap-5);
   padding-bottom: calc(var(--gap-7) + var(--transport-height, 0px));
+  /* Center the score/prompt in the VISIBLE region — between the docked sidebar
+   * and the docked chat panel. The panel is excluded on the right via its grid
+   * track, but the sidebar is a fixed overlay that does NOT shrink this column,
+   * so add its published width to the left padding. The empty hero and the
+   * with-score editor then share one centering axis; collapses to 0 when the
+   * sidebar is undocked or on narrow viewports. */
+  padding-left: calc(var(--gap-5) + var(--sidebar-offset, 0px));
   gap: var(--gap-7);
 }
 

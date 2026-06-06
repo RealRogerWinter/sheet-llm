@@ -1,26 +1,31 @@
 .page {
   max-width: 640px;
   margin: 0 auto;
-  padding: 48px 24px;
-  font-family: inherit;
+  padding: var(--gap-6) var(--gap-5) var(--gap-7);
   color: var(--ink);
 }
 
 .heading {
-  font-size: 24px;
-  font-weight: 600;
+  font-family: var(--font-display);
+  font-optical-sizing: auto;
+  font-size: clamp(1.9rem, 1.5rem + 1.4vw, 2.5rem);
+  font-weight: 560;
+  letter-spacing: -0.015em;
   margin: 0 0 24px 0;
 }
 
 .subheading {
-  font-size: 16px;
-  font-weight: 600;
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  font-weight: 560;
+  letter-spacing: -0.01em;
   margin: 0 0 8px 0;
 }
 
 .section {
-  border: 1px solid var(--rule);
-  border-radius: 8px;
+  border: 1px solid var(--ms-edge);
+  border-radius: var(--ms-radius-lg);
+  background: var(--ms-card);
   padding: 20px;
   margin-bottom: 24px;
 }
@@ -28,52 +33,63 @@
 .lede {
   font-size: 14px;
   line-height: 1.5;
-  opacity: 0.8;
+  color: var(--graphite);
   margin: 0 0 12px 0;
 }
 
+/* Primary (non-destructive) action — the rubric accent, like the auth CTAs. */
 .primaryButton {
   display: inline-block;
-  background: var(--accent, #4a7bff);
-  color: white;
+  background: var(--accent);
+  color: var(--ms-rubric-ink);
   text-decoration: none;
-  padding: 8px 16px;
-  border-radius: 6px;
+  padding: 9px 16px;
+  border-radius: var(--ms-radius);
   font-size: 14px;
   font-weight: 500;
+  transition: opacity 120ms;
 }
 
 .primaryButton:hover {
-  filter: brightness(1.05);
+  opacity: 0.9;
 }
 
 .confirmInput {
   display: block;
   width: 100%;
-  max-width: 200px;
+  max-width: 220px;
   margin: 12px 0;
   padding: 8px 12px;
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  background: var(--paper);
+  border: 1px solid var(--ms-edge);
+  border-radius: var(--ms-radius);
+  background: var(--ms-paper);
   color: var(--ink);
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-label);
   font-size: 14px;
 }
 
+.confirmInput:focus {
+  outline: none;
+  border-color: var(--ms-edge-strong);
+}
+
+/* Destructive action. --signal in both themes; the text is --paper so it stays
+ * legible (white on dark-red in light, dark on light-red in dark) — the previous
+ * hardcoded #b34040 never adapted to dark mode. */
 .dangerButton {
-  background: #b34040;
-  color: white;
+  background: var(--signal);
+  color: var(--paper);
   border: none;
-  padding: 8px 16px;
-  border-radius: 6px;
+  padding: 9px 16px;
+  border-radius: var(--ms-radius);
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
+  transition: opacity 120ms;
 }
 
 .dangerButton:hover:not(:disabled) {
-  background: #c95050;
+  opacity: 0.88;
 }
 
 .dangerButton:disabled {
@@ -83,7 +99,7 @@
 
 .error {
   margin-top: 12px;
-  color: #b34040;
+  color: var(--signal);
   font-size: 13px;
 }
 
@@ -99,5 +115,11 @@
 }
 
 .link {
-  color: var(--accent, #4a7bff);
+  color: var(--ms-rubric);
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+
+.link:hover {
+  text-decoration: underline;
 }
