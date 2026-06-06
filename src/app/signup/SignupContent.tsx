@@ -6,6 +6,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useAuthStore } from '@/lib/auth/authStore'
 import { refreshSession, signup } from '@/lib/auth/authClient'
 import { GoogleIcon, GitHubIcon } from '@/components/auth/ProviderIcons'
+import Wordmark from '@/components/brand/Wordmark'
 import styles from '@/components/auth/AuthPage.module.css'
 
 export default function SignupContent({ legalEnabled = false }: { legalEnabled?: boolean }) {
@@ -43,9 +44,7 @@ export default function SignupContent({ legalEnabled = false }: { legalEnabled?:
   return (
     <main className={styles.page}>
       <div className={styles.card}>
-        <Link href="/" className={styles.brand}>
-          sheet-llm
-        </Link>
+        <Wordmark href="/" size="md" className={styles.brand} />
         <h1 className={styles.title}>Create your account</h1>
         <p className={styles.subtitle}>
           Your current work in this browser carries over to your new account.

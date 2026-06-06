@@ -22,7 +22,7 @@
    * SVG uses currentColor, so changing --score-ink restains the whole
    * engraving. In light mode the score matches the page; in dark mode
    * it becomes a slightly-warmer card so the boundary is visible. */
-  --score-paper: #ffffff;
+  --score-paper: var(--ms-paper);
   --score-ink: #0a0a0a;
   --score-border: transparent;
 
@@ -138,6 +138,52 @@
   --z-resume-toast: 850;
   --z-ghost-overlay: 900;
   --z-modal: 1000;
+
+  /* ── Edition layer — shared "engraved music edition" identity ──────────────
+   * Promoted from the /pricing page (the original home of this look) so every
+   * surface can share ONE vocabulary: warm manuscript paper, faint staff rules,
+   * a single rubric-red spot accent, and the Fraunces display face. Light values
+   * live here; the few that need a different dark value are overridden in
+   * [data-theme='dark']. Surfaces opt IN (e.g. background: var(--ms-paper)); the
+   * editor uses these sparingly, content/marketing pages fully. --ms-btn /
+   * --ms-btn-ink / (-display/-label/-radius) intentionally hold across themes.
+   * NOTE: /pricing currently re-declares an identical scoped copy on .page; that
+   * redundancy is deliberate (keeps the gold-standard page byte-stable) and gets
+   * deduped in the design-consistency sweep. */
+  --font-display: var(--font-fraunces), 'Iowan Old Style', 'Hoefler Text', Georgia,
+    'Times New Roman', serif;
+  --font-label: var(--font-geist-mono), ui-monospace, 'SFMono-Regular', monospace;
+
+  --ms-radius: 2px;
+  --ms-radius-lg: 4px;
+
+  --ms-paper: color-mix(in oklab, var(--paper) 87%, #f0e7d3);
+  --ms-panel: color-mix(in oklab, var(--paper) 76%, #e9dcc0);
+  --ms-card: color-mix(in oklab, var(--paper) 96%, #f0e7d3);
+  --ms-stave: color-mix(in oklab, var(--ink) 7%, transparent);
+  --ms-edge: color-mix(in oklab, var(--ink) 16%, transparent);
+  --ms-edge-strong: color-mix(in oklab, var(--ink) 34%, transparent);
+  --ms-rubric: #b23a2e;
+  --ms-rubric-ink: #fdf4e6;
+  --ms-rubric-soft: color-mix(in oklab, var(--ms-rubric) 12%, transparent);
+  --ms-btn: var(--ink);
+  --ms-btn-ink: var(--ms-paper);
+  --ms-shadow: 0 1px 2px color-mix(in oklab, var(--ink) 10%, transparent),
+    0 14px 30px -18px color-mix(in oklab, var(--ink) 36%, transparent);
+
+  /* Generic surface/control vocabulary used by auth, settings, and the
+   * orchestrator modals. Mapped onto the warm edition palette so those
+   * components read as "edition" in light too (the dark block remaps the same
+   * names). --accent is the rubric red; primary buttons set --ms-rubric-ink
+   * text so the rust/coral fill stays legible in both themes. */
+  --surface: var(--ms-card);
+  --surface-hover: var(--ms-panel);
+  --text: var(--ink);
+  --text-muted: var(--graphite);
+  --border: var(--ms-edge);
+  --bg: var(--ms-paper);
+  --accent: var(--ms-rubric);
+  --accent-hover: color-mix(in oklab, var(--ms-rubric) 82%, #000);
 }
 
 [data-theme='dark'] {
@@ -176,18 +222,33 @@
    * byte-identical (light still uses each declaration's own fallback). --accent
    * is intentionally left to its #3b5bdb fallback — a brand blue that reads on
    * both themes and keeps white button text legible. */
-  --surface: var(--paper);
-  --surface-hover: var(--paper-warm);
+  --surface: var(--ms-card);
+  --surface-hover: var(--ms-panel);
   --text: var(--ink);
   --text-muted: var(--graphite);
-  --border: var(--rule);
-  --bg: var(--paper-warm);
+  --border: var(--ms-edge);
+  --bg: var(--ms-paper);
+  --accent: var(--ms-rubric);
+  --accent-hover: color-mix(in oklab, var(--ms-rubric) 80%, #000);
   --danger-text: var(--signal);
   --danger-bg: color-mix(in oklab, var(--signal) 14%, var(--paper));
   --danger-border: color-mix(in oklab, var(--signal) 38%, var(--paper));
   --ok-text: #4ade80;
   --ok-bg: #102a1a;
   --ok-border: #1f5132;
+
+  /* Edition layer — dark overrides (mirror /pricing's dark .page exactly). */
+  --ms-paper: var(--paper);
+  --ms-panel: var(--paper-warm);
+  --ms-card: color-mix(in oklab, var(--paper) 70%, var(--paper-warm));
+  --ms-stave: color-mix(in oklab, var(--ink) 11%, transparent);
+  --ms-edge: color-mix(in oklab, var(--ink) 18%, transparent);
+  --ms-edge-strong: color-mix(in oklab, var(--ink) 40%, transparent);
+  --ms-rubric: #e07a5f;
+  --ms-rubric-ink: #17100a;
+  --ms-rubric-soft: color-mix(in oklab, var(--ms-rubric) 16%, transparent);
+  --ms-shadow: 0 1px 2px color-mix(in oklab, #000 40%, transparent),
+    0 16px 34px -18px color-mix(in oklab, #000 70%, transparent);
 }
 
 * {
@@ -199,7 +260,7 @@
 html,
 body {
   height: 100%;
-  background: var(--paper);
+  background: var(--ms-paper);
   color: var(--ink);
 }
 

@@ -7,16 +7,16 @@
 }
 
 .chip {
-  border: 1px solid var(--rule);
+  border: 1px solid var(--ms-edge);
   border-radius: 999px;
   padding: 6px 14px;
   font-size: 13px;
   color: var(--graphite);
-  background: var(--paper);
-  transition: border-color 120ms, color 120ms;
+  background: var(--ms-card);
+  transition: border-color 120ms, color 120ms, background-color 120ms;
 }
 
 .chip:hover {
-  border-color: var(--ink);
+  border-color: var(--ms-rubric);
   color: var(--ink);
 }

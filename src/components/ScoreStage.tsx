@@ -64,7 +64,7 @@ export default function ScoreStage({ abc, pending, lastPrompt }: ScoreStageProps
 
   return (
     <div
-      className={`${styles.stage} ${showLegacyDim ? styles.pending : ''} ${showComposingOverlay ? styles.editingComposing : ''}`}
+      className={`${styles.stage} ${showBlank ? styles.stageBare : ''} ${showLegacyDim ? styles.pending : ''} ${showComposingOverlay ? styles.editingComposing : ''}`}
       role="region"
       aria-label="Sheet music score"
       aria-live="polite"

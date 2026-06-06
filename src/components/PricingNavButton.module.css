@@ -5,12 +5,12 @@
   align-items: center;
   gap: 6px;
   padding: 6px 12px;
-  border: 1px solid color-mix(in oklab, var(--playing) 45%, var(--rule));
+  border: 1px solid color-mix(in oklab, var(--ms-rubric) 42%, var(--ms-edge));
   border-radius: var(--radius);
   font-size: 13px;
   font-weight: 600;
-  color: var(--playing);
-  background: color-mix(in oklab, var(--playing) 8%, var(--paper));
+  color: var(--ms-rubric);
+  background: var(--ms-rubric-soft);
   transition:
     color 120ms,
     border-color 120ms,
@@ -18,9 +18,9 @@
 }
 
 .button:hover {
-  color: #fff;
-  border-color: var(--playing);
-  background: var(--playing);
+  color: var(--ms-rubric-ink);
+  border-color: var(--ms-rubric);
+  background: var(--ms-rubric);
 }
 
 .icon {

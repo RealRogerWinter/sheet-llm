@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useState, type FormEvent } from 'react'
+import EditionTopbar from '@/components/shell/EditionTopbar'
 import styles from './ProWaitlist.module.css'
 
 // mailto fallback when the instance hasn't configured SL_PRO_WAITLIST_NOTIFY.
@@ -50,8 +51,10 @@ export default function ProWaitlistContent() {
   }
 
   return (
-    <main className={styles.page}>
-      <h1 className={styles.title}>Pro is coming soon</h1>
+    <>
+      <EditionTopbar runhead="Pro" back={false} />
+      <main className={styles.page}>
+        <h1 className={styles.title}>Pro is coming soon</h1>
       <p className={styles.lede}>
         sheet-llm Pro removes the daily request limit and unlocks larger generations. It&rsquo;s not
         quite ready yet — leave your email and we&rsquo;ll let you know the moment it launches.
@@ -87,6 +90,7 @@ export default function ProWaitlistContent() {
       <Link className={styles.back} href="/">
         ← Back to the editor
       </Link>
-    </main>
+      </main>
+    </>
   )
 }

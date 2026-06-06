@@ -45,3 +45,11 @@
   -webkit-user-select: none;
   user-select: none;
 }
+
+/* Engrave the score title in the edition display serif (Fraunces). abcjs renders
+   the title as SVG <text class="abcjs-title">; a scoped !important overrides its
+   presentation font so the title reads like a published edition. Notation glyphs
+   use the music font and are unaffected. */
+[data-testid='score-stage'] svg .abcjs-title {
+  font-family: var(--font-display) !important;
+}

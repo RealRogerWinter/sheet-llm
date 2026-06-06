@@ -11,10 +11,10 @@
 .form {
   display: flex;
   gap: var(--gap-2);
-  border: 1px solid var(--rule);
+  border: 1px solid var(--ms-edge);
   border-radius: var(--radius);
   padding: var(--gap-2);
-  background: var(--paper);
+  background: var(--ms-card);
   transition: border-color 120ms;
 }
 
@@ -51,8 +51,9 @@
 }
 
 .blankLink:hover {
-  color: var(--ink);
+  color: var(--ms-rubric);
   text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .sendButton {
@@ -131,9 +132,20 @@
 
 .headline {
   text-align: center;
-  font-size: var(--text-2xl); /* fluid 22 → 28 */
-  font-weight: 400;
-  color: var(--graphite);
-  margin-bottom: var(--gap-3);
-  letter-spacing: -0.01em;
+  font-family: var(--font-display);
+  font-optical-sizing: auto;
+  font-size: clamp(1.7rem, 1.2rem + 2vw, 2.6rem);
+  font-weight: 500;
+  line-height: 1.08;
+  color: var(--ink);
+  margin-bottom: var(--gap-4);
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+
+/* A single italic-rubric emphasis, echoing the /pricing headline treatment. */
+.headline em {
+  font-style: italic;
+  font-weight: 480;
+  color: var(--ms-rubric);
 }

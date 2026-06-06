@@ -4,9 +4,9 @@
 .card {
   margin-top: var(--gap-2, 8px);
   padding: var(--gap-4, 16px);
-  border: 1px solid var(--rule, #d4d4d2);
+  border: 1px solid var(--ms-edge);
   border-radius: 12px;
-  background: var(--paper-warm, #f4f4f2);
+  background: var(--ms-panel);
   color: var(--ink, #0a0a0a);
   max-width: 34rem;
 }
@@ -32,8 +32,8 @@
   justify-content: center;
   padding: 0.5rem 0.9rem;
   border-radius: 8px;
-  border: 1px solid var(--rule, #d4d4d2);
-  background: var(--paper, #fff);
+  border: 1px solid var(--ms-edge);
+  background: var(--ms-card);
   color: var(--ink, #0a0a0a);
   font: inherit;
   font-size: 0.875rem;
@@ -44,12 +44,12 @@
   background: var(--hover, #0a0a0a08);
 }
 .primary {
-  background: var(--playing, #1e40af);
-  border-color: var(--playing, #1e40af);
-  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--ms-rubric-ink);
 }
 .primary:hover {
-  background: color-mix(in oklab, var(--playing, #1e40af) 88%, #000);
+  background: var(--accent-hover);
 }
 .reset {
   margin: var(--gap-3, 12px) 0 0;

@@ -8,6 +8,15 @@
   padding: var(--gap-4);
 }
 
+/* Empty / pre-score state: drop the card so the blank staff (or the composing
+ * animation) sits directly on the manuscript paper, like the hero. */
+.stageBare {
+  background: transparent;
+  border-color: transparent;
+  padding: 0;
+  min-height: 0;
+}
+
 /* Legacy dim — only fires when the new reveal animation is disabled.
  * Hero pending state now hands the wait to ComposingStaff instead. */
 .stage.pending {

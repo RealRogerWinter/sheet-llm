@@ -7,7 +7,7 @@
   position: sticky;
   top: 0;
   z-index: var(--z-header);
-  background: var(--paper);
+  background: var(--ms-paper);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -17,13 +17,14 @@
   flex-wrap: wrap;
   gap: var(--gap-2);
   padding: var(--gap-4) var(--gap-5);
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid var(--ms-edge);
 }
 
 .brand {
-  font-size: var(--text-xl); /* fluid 18 → 24 */
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  /* Semantic wrapper only — the Wordmark owns the type + rubric clef. */
+  display: inline-flex;
+  align-items: center;
+  margin: 0;
 }
 
 .right {

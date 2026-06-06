@@ -7,8 +7,10 @@
 
 .subheading {
   margin: 0;
-  font-size: 1.05rem;
-  font-weight: 600;
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 560;
+  letter-spacing: -0.01em;
 }
 
 .formTitle {
@@ -97,7 +99,7 @@
   border-radius: 8px;
   border: 1px solid var(--accent, #3b5bdb);
   background: var(--accent, #3b5bdb);
-  color: #fff;
+  color: var(--ms-rubric-ink);
   cursor: pointer;
   align-self: flex-start;
 }

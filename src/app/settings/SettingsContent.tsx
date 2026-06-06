@@ -7,6 +7,7 @@ import { refreshSession } from '@/lib/auth/authClient'
 import { errorMessageFromResponse } from '@/lib/auth/authMessages'
 import AccountSettings from '@/components/auth/AccountSettings'
 import WalletSettings from '@/components/billing/WalletSettings'
+import EditionTopbar from '@/components/shell/EditionTopbar'
 import styles from './SettingsContent.module.css'
 
 interface DeleteReceipt {
@@ -84,7 +85,9 @@ export default function SettingsContent({ legalEnabled = false }: { legalEnabled
 
   if (receipt) {
     return (
-      <main className={styles.page}>
+      <>
+        <EditionTopbar runhead="Settings" />
+        <main className={styles.page}>
         <h1 className={styles.heading}>Account deleted</h1>
         <p className={styles.lede}>
           Your account and all associated data were permanently removed at{' '}
@@ -109,18 +112,16 @@ export default function SettingsContent({ legalEnabled = false }: { legalEnabled
             Continue as a new visitor →
           </Link>
         </p>
-      </main>
+        </main>
+      </>
     )
   }
 
   return (
-    <main className={styles.page}>
-      <p className={styles.lede}>
-        <Link href="/" className={styles.link}>
-          ← Back to sheet-llm
-        </Link>
-      </p>
-      <h1 className={styles.heading}>Settings</h1>
+    <>
+      <EditionTopbar runhead="Settings" />
+      <main className={styles.page}>
+        <h1 className={styles.heading}>Settings</h1>
 
       <AccountSettings />
 
@@ -197,6 +198,7 @@ export default function SettingsContent({ legalEnabled = false }: { legalEnabled
         </a>
         .
       </p>
-    </main>
+      </main>
+    </>
   )
 }

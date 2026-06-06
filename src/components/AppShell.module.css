@@ -23,4 +23,7 @@
     'header header'
     'main panel';
   min-height: 100dvh;
+  /* Warm manuscript "desk" the score (white --score-paper) floats on; ties the
+   * editor to the engraved-edition identity without tinting the score itself. */
+  background: var(--ms-paper);
 }

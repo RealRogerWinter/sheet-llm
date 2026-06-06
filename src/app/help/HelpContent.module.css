@@ -1,57 +1,28 @@
 .page {
+  position: relative;
+  isolation: isolate;
   min-height: 100%;
   color: var(--ink);
-  background: var(--paper);
-}
-
-.topbar {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  gap: var(--gap-4);
-  padding: var(--gap-3) var(--gap-5);
-  background: var(--paper);
-  border-bottom: 1px solid var(--rule);
-}
-
-.brand {
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--ink);
-}
-
-.crumb {
-  font-size: 13px;
-  color: var(--graphite);
-}
-
-.back {
-  margin-left: auto;
-  font-size: 13px;
-  color: var(--graphite);
-}
-
-.back:hover {
-  color: var(--ink);
+  background: var(--ms-paper);
 }
 
 .layout {
+  position: relative;
+  z-index: 1;
   display: flex;
   gap: var(--gap-6);
   max-width: 1000px;
   margin: 0 auto;
-  padding: var(--gap-6) var(--gap-5) var(--gap-8);
+  padding: var(--gap-6) var(--gap-5) var(--gap-7);
   align-items: flex-start;
 }
 
 .nav {
   position: sticky;
-  top: 72px;
+  top: 60px;
   flex: 0 0 200px;
-  font-size: 13px;
+  font-family: var(--font-label);
+  font-size: 12px;
 }
 
 .nav ul {
@@ -65,13 +36,15 @@
 
 .nav a {
   display: block;
-  padding: 4px 8px;
-  border-radius: var(--radius);
+  padding: 5px 8px;
+  border-radius: var(--ms-radius);
+  letter-spacing: 0.02em;
   color: var(--graphite);
+  transition: color 120ms, background 120ms;
 }
 
 .nav a:hover {
-  color: var(--ink);
+  color: var(--ms-rubric);
   background: var(--hover);
 }
 
@@ -82,23 +55,26 @@
 }
 
 .h1 {
-  font-size: 28px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  margin: 0 0 4px;
+  font-family: var(--font-display);
+  font-optical-sizing: auto;
+  font-size: clamp(2rem, 1.6rem + 1.6vw, 2.8rem);
+  font-weight: 560;
+  letter-spacing: -0.015em;
+  line-height: 1.06;
+  margin: 0 0 6px;
 }
 
 .lede {
-  font-size: 15px;
+  font-size: var(--text-md);
   color: var(--graphite);
   margin: 0 0 var(--gap-6);
 }
 
 .section {
-  scroll-margin-top: 72px;
+  scroll-margin-top: 60px;
   padding-bottom: var(--gap-6);
   margin-bottom: var(--gap-6);
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid var(--ms-edge);
 }
 
 .section:last-child {
@@ -106,11 +82,11 @@
   margin-bottom: 0;
 }
 
-/* Markdown typography, tuned for a reading page (larger than the chat
- * panel's compact rendering). Tokens come from globals.css. */
+/* Markdown typography, tuned for a reading page. Fraunces headings on the
+ * manuscript paper; tokens come from globals.css. */
 .markdown {
   font-size: 15px;
-  line-height: 1.6;
+  line-height: 1.65;
 }
 
 .markdown > :first-child {
@@ -118,15 +94,17 @@
 }
 
 .markdown h2 {
-  font-size: 22px;
-  font-weight: 600;
+  font-family: var(--font-display);
+  font-size: clamp(1.3rem, 1.1rem + 0.8vw, 1.7rem);
+  font-weight: 540;
   letter-spacing: -0.01em;
   margin: 0 0 12px;
 }
 
 .markdown h3 {
-  font-size: 16px;
-  font-weight: 600;
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 560;
   margin: 22px 0 8px;
 }
 
@@ -149,16 +127,17 @@
 }
 
 .markdown code {
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-label);
   font-size: 13px;
   padding: 1px 5px;
-  background: var(--paper-warm);
-  border-radius: 4px;
+  background: var(--ms-panel);
+  border-radius: var(--ms-radius);
 }
 
 .markdown a {
-  color: var(--ink);
+  color: var(--ms-rubric);
   text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .markdown table {
@@ -171,13 +150,13 @@
 .markdown th,
 .markdown td {
   padding: 6px 10px;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--ms-edge);
   text-align: left;
   vertical-align: top;
 }
 
 .markdown th {
-  background: var(--paper-warm);
+  background: var(--ms-panel);
   font-weight: 600;
 }
 
@@ -188,7 +167,7 @@
 .markdown blockquote {
   margin: 8px 0;
   padding-left: 12px;
-  border-left: 2px solid var(--rule);
+  border-left: 2px solid var(--ms-edge);
   color: var(--graphite);
 }
 
@@ -202,7 +181,7 @@
     position: static;
     flex-basis: auto;
     width: 100%;
-    border-bottom: 1px solid var(--rule);
+    border-bottom: 1px solid var(--ms-edge);
     padding-bottom: var(--gap-3);
   }
 

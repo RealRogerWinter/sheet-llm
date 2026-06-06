@@ -1,22 +1,11 @@
 import type { Metadata } from 'next'
-import { Fraunces } from 'next/font/google'
 import { CREDIT_PACKS } from '@/lib/billing/packs'
 import PricingContent, { type PricingPack } from './PricingContent'
 
-// Display face for the "engraved edition" pricing page. Fraunces is a variable
-// old-style serif with optical sizing (opsz) — big headlines get high contrast,
-// small caption text stays sturdy — plus the SOFT/WONK axes that give it a
-// hand-cut, engraved character fitting a music edition. Loaded here (server) and
-// passed to the client component as a CSS-variable class so it scopes to this
-// route only; body/UI text keeps the app's Geist for cohesion. style includes
-// italic because musical terms (dynamics, tempo) are conventionally italicised.
-const fraunces = Fraunces({
-  subsets: ['latin'],
-  variable: '--font-fraunces',
-  display: 'swap',
-  style: ['normal', 'italic'],
-  axes: ['opsz', 'SOFT', 'WONK'],
-})
+// The display face (Fraunces) is now loaded globally in app/layout.tsx and
+// exposed site-wide as --font-fraunces, so this page no longer loads its own
+// copy — the scoped --font-display in Pricing.module.css resolves against the
+// global variable, keeping the page byte-identical with one fewer font load.
 
 // Unlike /pro and /signup (transient, noindex), this is a real marketing page —
 // let it be indexed. It surfaces the credit-pack catalog and the Pro tier with
@@ -49,5 +38,5 @@ const PACKS: PricingPack[] = CREDIT_PACKS.map((p) => ({
 }))
 
 export default function PricingPage() {
-  return <PricingContent packs={PACKS} fontClass={fraunces.variable} />
+  return <PricingContent packs={PACKS} />
 }

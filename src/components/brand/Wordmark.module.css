@@ -1,0 +1,43 @@
+/* The brand wordmark — clef + name in the display serif. Mirrors the /pricing
+ * brand treatment so the mark reads identically on every surface. */
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42em;
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: 0.005em;
+  line-height: 1;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+/* The clef carries the one spot of brand colour. Sized in em so it tracks the
+ * wordmark's font-size; width:auto preserves the tall 24×40 aspect ratio. */
+.clef {
+  flex: 0 0 auto;
+  width: auto;
+  height: 1.18em;
+  color: var(--ms-rubric);
+  /* Optical nudge: drop the clef so its body sits on the text baseline. */
+  transform: translateY(0.06em);
+}
+
+.name {
+  display: inline-block;
+}
+
+.sm {
+  font-size: 1rem;
+}
+.md {
+  font-size: 1.2rem;
+}
+.lg {
+  font-size: clamp(1.25rem, 1.05rem + 0.9vw, 1.6rem);
+}
+
+a.brand:hover .name {
+  color: color-mix(in oklab, var(--ink) 78%, var(--ms-rubric));
+  transition: color 0.18s ease;
+}

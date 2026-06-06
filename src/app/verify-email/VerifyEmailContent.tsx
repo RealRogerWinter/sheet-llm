@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { refreshSession, verifyEmail } from '@/lib/auth/authClient'
+import Wordmark from '@/components/brand/Wordmark'
 import styles from '@/components/auth/AuthPage.module.css'
 
 type Phase = 'verifying' | 'ok' | 'error'
@@ -43,9 +44,7 @@ export default function VerifyEmailContent() {
   return (
     <main className={styles.page}>
       <div className={styles.card}>
-        <Link href="/" className={styles.brand}>
-          sheet-llm
-        </Link>
+        <Wordmark href="/" size="md" className={styles.brand} />
         {phase === 'verifying' && (
           <>
             <h1 className={styles.title}>Verifying…</h1>

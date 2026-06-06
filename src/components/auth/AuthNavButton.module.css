@@ -31,7 +31,7 @@
 .primary {
   background: var(--accent, #3b5bdb);
   border-color: var(--accent, #3b5bdb);
-  color: #fff;
+  color: var(--ms-rubric-ink);
 }
 
 .primary:hover {

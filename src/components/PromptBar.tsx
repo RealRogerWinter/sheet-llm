@@ -89,7 +89,9 @@ export default function PromptBar() {
   return (
     <div className={styles.bar}>
       {!abc && (
-        <p className={styles.headline}>What should we compose today?</p>
+        <p className={styles.headline}>
+          What should we <em>compose</em> today?
+        </p>
       )}
 
       <form onSubmit={onSubmit} className={styles.form}>
