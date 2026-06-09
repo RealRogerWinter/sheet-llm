@@ -60,3 +60,6 @@ next-env.d.ts
 
 # Claude Code local working dirs (agent worktrees, transcripts, caches).
 .claude/
+
+# SHE-15 model-matrix eval run outputs (generated per run; commit the final report deliberately if desired).
+/evals/results/
