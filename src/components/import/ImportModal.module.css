@@ -5,7 +5,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: var(--z-overlay);
+  /* --z-modal (1000), not --z-overlay (50): launched from the mobile nav menu
+   * (and reachable while the chat panel overlay at --z-panel 81 is open), this
+   * dialog must sit above the panel layer. Mirrors AuthModal / ReplacementConfirmModal. */
+  z-index: var(--z-modal);
   padding: 24px;
 }
 

@@ -20,3 +20,20 @@
   display: inline-flex;
   align-items: center;
 }
+
+/* Icon-only below lg (mirrors AppHeader's responsive split; 1023.98 mirrors
+ * BREAKPOINTS.lg). The aria-label already carries the accessible name, and the
+ * button keeps a 44px touch target on coarse pointers once it's icon-only. */
+@media (max-width: 1023.98px) {
+  .label {
+    display: none;
+  }
+}
+
+@media (pointer: coarse) and (max-width: 1023.98px) {
+  .button {
+    min-width: var(--touch-target);
+    min-height: var(--touch-target);
+    justify-content: center;
+  }
+}

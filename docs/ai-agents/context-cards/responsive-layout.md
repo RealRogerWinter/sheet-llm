@@ -15,6 +15,12 @@ source_paths:
   - src/components/AppShell.module.css
   - src/components/HomeClient.tsx
   - src/components/AppHeader.tsx
+  - src/components/AppHeader.module.css
+  - src/components/MobileNav.tsx
+  - src/components/MobileNav.module.css
+  - src/components/SessionsButton.tsx
+  - src/components/SessionsButton.module.css
+  - src/lib/legal/useLegalEnabled.ts
   - src/components/ChatHistoryPanel.tsx
   - src/components/ChatHistoryPanel.module.css
   - src/components/ChatPanelFab.tsx
@@ -65,6 +71,38 @@ SessionSidebar / HomeClient) to clear the docked chrome.
 reflows beside them instead of being overlaid. Only one occupies the track at a
 time (ChatHistoryPanel yields when `pendingProposal.presentation==='diff-panel'`).
 Drawer/sheet modes stay fixed overlays.
+
+## Header consolidation below `lg` (`MobileNav`, SHE-10)
+
+The `AppHeader` toolbar (`SessionsButton`, `Wordmark`, then `ImportScoreButton`,
+`NewMenu`, `UsageCounter`, `HelpButton`, `PricingNavButton`, `ThemeToggle`,
+`AuthNavButton`, `HeaderMenu`) wrapped to 2–3 rows on phones. Below **`lg`
+(1024px)** it now collapses to one compact row — `Sessions` (icon-only) ·
+`Wordmark` · `UsageCounter` · a single **`MobileNav`** "⋮" button — and every
+secondary control folds into that one portaled dropdown.
+
+- **Split is pure CSS**, not JS `matchMedia`: `AppHeader.module.css` wraps the
+  desktop-only and mobile-only subtrees in `.desktopOnly` / `.mobileOnly`, both
+  `display: contents` so the **desktop toolbar lays out byte-for-byte as before**
+  (the wrappers add no box), toggled to `display: none` at the `1023.98/1024`
+  mirror of `BREAKPOINTS.lg`. CSS `@media` applies pre-first-paint, so there is
+  **no hydration flash** and the `ResizeObserver` → `--app-header-height` measures
+  only the visible layout (a `display:none` subtree contributes 0 to `offsetHeight`).
+- **`lg`, not `md`**, on purpose: `SessionsButton` and `SessionSidebar` already
+  switch drawer↔dock at 1024, so one breakpoint governs the whole left-nav+header.
+- **`MobileNav` is a dropdown, not a sheet** (`role="menu"`, `--z-popover` 110 —
+  above panels, below modals). A sheet would over-serve nav and collide with the
+  SHE-11 chat sheet's body-scroll-lock. Each item **mirrors its desktop control's
+  gate reading the SAME store** (New's confirm + `!hasContent`/`pending` disables,
+  Import's `pending`, Auth's loading/disabled/anon/authed, legal `/api/legal`
+  gate) and **closes the menu before acting**; it owns its own `ImportModal` /
+  `HelpModal`. Roving focus (↑/↓/Home/End), 44px targets, focus-visible outlines,
+  focus restored to the trigger on close.
+- **Single-instance stateful pieces**: `UsageCounter` renders once in the
+  always-visible slot (no double `/api/usage`); the legal gate is a
+  module-memoized `useLegalEnabled()` shared by `HeaderMenu` + `MobileNav` (one
+  `/api/legal`). `ImportModal`/`HelpModal` moved from `--z-overlay`(50) to
+  `--z-modal`(1000) so they sit above the chat panel when launched from the menu.
 
 ## Opening the conversation on touch (`ChatPanelFab` + sheet drag, SHE-11)
 

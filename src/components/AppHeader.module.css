@@ -11,13 +11,48 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  /* Wrap on narrow viewports so the 7 nav buttons never overflow the width
-   * (the ResizeObserver in AppHeader republishes the taller height so Hero's
-   * top offset tracks it). */
+  /* flex-wrap is kept as a safety net. Below `lg` the secondary toolbar
+   * collapses into MobileNav (one ☰ button), so the header holds a single row
+   * and no longer wraps; at/above `lg` the full toolbar still wraps if a very
+   * narrow desktop window can't fit it. The ResizeObserver in AppHeader
+   * republishes the real height either way so Hero's top offset tracks it. */
   flex-wrap: wrap;
   gap: var(--gap-2);
   padding: var(--gap-4) var(--gap-5);
   border-bottom: 1px solid var(--ms-edge);
+}
+
+/* ── Responsive split at lg (1024px) ──────────────────────────────────────
+ * `display: contents` so the wrappers add NO box on desktop — the toolbar is
+ * laid out exactly as before this change (byte-for-byte visual parity). Below
+ * lg the hidden subtree is `display: none`, so it contributes nothing to the
+ * header's measured offsetHeight (--app-header-height stays correct). The
+ * 1023.98 / 1024 literals mirror BREAKPOINTS.lg in src/lib/ui/breakpoints.ts. */
+.desktopOnly {
+  display: contents;
+}
+
+.mobileOnly {
+  display: contents;
+}
+
+@media (max-width: 1023.98px) {
+  .desktopOnly {
+    display: none;
+  }
+
+  /* Tighter rhythm on phones/tablets — a single compact row reclaims the
+   * vertical weight the old wrapping toolbar cost. */
+  .header {
+    flex-wrap: nowrap;
+    padding: var(--gap-3) var(--gap-4);
+  }
+}
+
+@media (min-width: 1024px) {
+  .mobileOnly {
+    display: none;
+  }
 }
 
 .brand {

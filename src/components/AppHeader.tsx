@@ -10,6 +10,7 @@ import ThemeToggle from './ThemeToggle'
 import UsageCounter from './UsageCounter'
 import AuthNavButton from './auth/AuthNavButton'
 import HeaderMenu from './HeaderMenu'
+import MobileNav from './MobileNav'
 import Wordmark from './brand/Wordmark'
 import styles from './AppHeader.module.css'
 
@@ -31,6 +32,19 @@ export default function AppHeader() {
     return () => ro.disconnect()
   }, [])
 
+  // Responsive split at `lg` (1024px) — the breakpoint SessionsButton and
+  // SessionSidebar already use for drawer↔dock, so ONE breakpoint governs the
+  // whole left-nav + header system. The split is pure CSS (`.desktopOnly` /
+  // `.mobileOnly` in the module): below lg the secondary toolbar collapses into
+  // the single MobileNav "☰" menu. CSS `@media` (not JS matchMedia) means the
+  // correct layout paints on the first frame — no hydration flash. The wrappers
+  // use `display: contents` on desktop so the toolbar is laid out exactly as
+  // before (no extra flex box), and `display: none` below lg so the hidden
+  // subtree contributes nothing to the header's measured offsetHeight.
+  //
+  // UsageCounter stays a SINGLE instance in the always-visible slot (shown on
+  // both layouts) so its /api/usage fetch never double-fires; MobileNav and
+  // HeaderMenu share one memoized /api/legal fetch for the same reason.
   return (
     <header ref={ref} className={styles.header}>
       <SessionsButton />
@@ -38,14 +52,21 @@ export default function AppHeader() {
         <Wordmark size="md" />
       </h1>
       <div className={styles.right}>
-        <ImportScoreButton />
-        <NewMenu />
+        <span className={styles.desktopOnly}>
+          <ImportScoreButton />
+          <NewMenu />
+        </span>
         <UsageCounter />
-        <HelpButton />
-        <PricingNavButton />
-        <ThemeToggle />
-        <AuthNavButton />
-        <HeaderMenu />
+        <span className={styles.desktopOnly}>
+          <HelpButton />
+          <PricingNavButton />
+          <ThemeToggle />
+          <AuthNavButton />
+          <HeaderMenu />
+        </span>
+        <span className={styles.mobileOnly}>
+          <MobileNav />
+        </span>
       </div>
     </header>
   )
