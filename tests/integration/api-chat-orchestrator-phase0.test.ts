@@ -35,6 +35,8 @@ vi.mock('@/lib/orchestrator', async () => {
 })
 
 const { POST } = await import('@/app/api/chat/route')
+const { orchestratorTurns, sessions } = await import('@/lib/db/schema')
+const { eq } = await import('drizzle-orm')
 
 function req(body: unknown) {
   return new Request('http://localhost:3000/api/chat', {
@@ -45,7 +47,7 @@ function req(body: unknown) {
 }
 
 describe('/api/chat orchestrator integration (Phase 0)', () => {
-  installTestDb()
+  const { getDb } = installTestDb()
   beforeEach(() => {
     vi.unstubAllEnvs()
     vi.stubEnv('ORCHESTRATOR_LOG_SILENT', '1')
@@ -116,6 +118,70 @@ describe('/api/chat orchestrator integration (Phase 0)', () => {
     expect(data.introText).toBe('orchestrator did the work')
     // Legacy LLM was NOT consulted on the orchestrator path.
     expect(completeMock).not.toHaveBeenCalled()
+  })
+
+  it('SHE-18 PR1: back-fills orchestrator_turns.after_score_version_id end-to-end', async () => {
+    // Simulate what the REAL run() leaves behind: a turn row keyed by the
+    // request id with after_score_version_id = NULL (the score version does
+    // not exist yet at recordTurn time). We do NOT seed after_score_version_id
+    // — the production responder must set it via linkTurnScoreVersion.
+    const orchestratorScore: Score = {
+      title: 'Linked',
+      key: 'D',
+      meter: '4/4',
+      measures: [{ events: [{ pitches: [{ step: 'D', octave: 4 }], duration: 'whole' }] }],
+    }
+    orchestratorRunMock.mockImplementation(
+      async (input: { requestId: string; chatId?: string }) => {
+        getDb()
+          .insert(orchestratorTurns)
+          .values({
+            id: crypto.randomUUID(),
+            sessionId: input.chatId!,
+            requestId: input.requestId,
+            createdAt: 1000,
+            latencyMs: 1,
+            finalStatus: 'ok',
+            // after_score_version_id intentionally omitted -> NULL
+          })
+          .run()
+        return {
+          score: orchestratorScore,
+          introText: 'linked',
+          classification: {
+            kind: 'edit_score_level',
+            scope: 'snippet',
+            complexity: 'simple',
+            confidence: 1,
+          },
+          model: null,
+          latencyMs: 1,
+          toolUseId: 'toolu_linked',
+        }
+      },
+    )
+
+    const res = await POST(req({ message: 'compose in D' }))
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    const chatId: string = data.chatId
+
+    // The session head now points at the freshly-minted score version.
+    const head = getDb()
+      .select({ h: sessions.headVersionId })
+      .from(sessions)
+      .where(eq(sessions.id, chatId))
+      .get()!.h
+    expect(head).toBeTruthy()
+
+    // The turn that run() wrote is now linked to that exact version — proving
+    // the responder back-filled it (it was NULL when the mock inserted it).
+    const turn = getDb()
+      .select({ after: orchestratorTurns.afterScoreVersionId })
+      .from(orchestratorTurns)
+      .where(eq(orchestratorTurns.sessionId, chatId))
+      .get()!
+    expect(turn.after).toBe(head)
   })
 
   it('translates an orchestrator refusal into a 422 with structured reason', async () => {

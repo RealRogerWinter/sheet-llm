@@ -35,6 +35,7 @@ import { summarizeScore } from '@/lib/shared/scoreSummary'
 import { run as runOrchestrator } from '@/lib/orchestrator'
 import { getOrchestratorMode } from '@/lib/orchestrator/flags'
 import {
+  linkTurnScoreVersion,
   logShadowDivergence,
   readTurnCostByRequestId,
   updateTurnUsageByRequestId,
@@ -1034,7 +1035,15 @@ async function handleChat(
 
   // User turn already persisted upstream; append the assistant turn
   // (its score_versions row + head pointer bump happen inside).
-  await appendMessages(userId, chatId, [persistedAssistantTurn])
+  const { newScoreVersionId: legacyScoreVersionId } = await appendMessages(
+    userId,
+    chatId,
+    [persistedAssistantTurn],
+  )
+  // SHE-18 PR1 — link the legacy fall-through turn to its emitted score.
+  if (requestId && legacyScoreVersionId) {
+    await linkTurnScoreVersion(requestId, legacyScoreVersionId, chatId)
+  }
 
   // Shadow-mode divergence log. The legacy path is the source of
   // truth for the response; this records what the orchestrator would
@@ -1477,6 +1486,13 @@ async function respondWithOrchestratorResult(
   // non-delivery path above released the reservation instead. (The grant is only
   // ever set for a from-scratch request, so it never burns on an edit/converse.)
 
+  // SHE-18 PR1 — back-fill the turn → emitted-score link now that the score
+  // version exists (run() recorded the turn with after_score_version_id=NULL,
+  // since the version is minted only here in the responder). Best-effort.
+  if (requestId && newScoreVersionId) {
+    await linkTurnScoreVersion(requestId, newScoreVersionId, chatId)
+  }
+
   const keyConfigured = !!process.env.ANTHROPIC_API_KEY
   const debug: ChatDebugPayload = {
     classification: {
@@ -1891,7 +1907,7 @@ async function respondWithScoreStream(
     const abc = scoreToAbc(score)
     await validateAbc(abc)
     const id = toolUseId ?? synthToolUseId()
-    await appendMessages(userId, chatId, [
+    const { newScoreVersionId } = await appendMessages(userId, chatId, [
       {
         role: 'assistant',
         content: [
@@ -1905,6 +1921,10 @@ async function respondWithScoreStream(
         ],
       },
     ])
+    // SHE-18 PR1 — link the streamed turn to the score version it emitted.
+    if (newScoreVersionId) {
+      await linkTurnScoreVersion(requestId, newScoreVersionId, chatId)
+    }
     const headVersionId = await readHeadVersionId(chatId)
     return { abc, toolUseId: id, ...(headVersionId !== undefined ? { headVersionId } : {}) }
   }

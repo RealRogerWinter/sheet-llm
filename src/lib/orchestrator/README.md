@@ -294,8 +294,13 @@ and `0005_replacement_gate.sql`):
   `final_status` (`ok` | `refused` | `fell_through` | `error`)
 - `confidence` (classifier or dispatcher score)
 - `error` (string error class + message), `applied_ops_count`
-- `before_score_version_id`, `after_score_version_id` — FK to
-  `score_versions` (no JSON duplication; rehydrate via join)
+- `after_score_version_id` — FK to `score_versions` for the score the turn
+  emitted (no JSON duplication; rehydrate via join). Back-filled by the
+  responder after `appendMessages` mints the version (SHE-18 PR1), since
+  `recordTurn` runs inside `run()` before the version exists.
+- `before_score_version_id` — reserved FK; NOT yet populated (the diff's
+  "before" is currently captured only as the `measure_count_before` /
+  metadata-change columns and rehydrated heuristically by `replay`)
 - `compose_patch_dispatch` — broadened in PR-3 to record the dispatcher's
   picked tool name (`extend_composition`, `insert_measures`, etc.) for
   rows that fired through the new path
