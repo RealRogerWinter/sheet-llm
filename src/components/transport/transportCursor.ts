@@ -24,20 +24,29 @@ export function clearHighlight() {
 export function handleEvent(ev: NoteTimingEvent | null) {
   clearHighlight()
   if (!ev) return
-  let firstPlaying: HTMLElement | undefined
+  // abcjs aggregates every glyph sounding at this beat — across all
+  // staves/voices, ordered top-to-bottom — into ev.elements. The last valid
+  // glyph is therefore the lowest staff: on a grand staff that's the bass note,
+  // which follow-score previously left off-screen because it only scrolled the
+  // first (treble) glyph (SHE-7). Track the bottom-most glyph instead.
+  let bottomPlaying: HTMLElement | undefined
   if (ev.elements) {
     for (const group of ev.elements) {
       for (const el of group) {
         if (el && el.classList) {
           el.classList.add('abcjs-note-playing')
-          if (!firstPlaying) firstPlaying = el
+          bottomPlaying = el
         }
       }
     }
   }
   const state = useChatStore.getState()
-  if (state.followPlayback && firstPlaying) {
-    firstPlaying.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' })
+  if (state.followPlayback && bottomPlaying) {
+    // Revealing the lowest glyph with block:'nearest' brings the bass into view
+    // while keeping the staves above it visible whenever the grand staff fits;
+    // when it can't, the bass (the staff the user couldn't see) wins. One
+    // scrollIntoView per beat avoids competing smooth-scroll animations.
+    bottomPlaying.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' })
   }
   const startChar = ev.startCharArray?.[0]
   if (startChar === undefined || !state.editMap) return

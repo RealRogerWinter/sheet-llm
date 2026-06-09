@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { clearHighlight, handleEvent, handleFinished } from '@/components/transport/transportCursor'
 import { useChatStore } from '@/lib/chat/state'
 
@@ -62,6 +62,61 @@ describe('transportCursor', () => {
     expect(el.classList.contains('abcjs-note-playing')).toBe(false)
     expect(useChatStore.getState().isPlaying).toBe(false)
     expect(useChatStore.getState().playbackPosition).toBeUndefined()
+  })
+
+  it('handleEvent with followPlayback reveals the bottom-most (bass) glyph, not just the first', () => {
+    // abcjs aggregates all simultaneous glyphs across staves into one timing
+    // event, voices ordered top-to-bottom: elements[0] is the treble note,
+    // the bass note comes in a later group. SHE-7: follow-score only scrolled
+    // the first/treble element, so the bass staff below it was never revealed.
+    const treble = document.createElement('div')
+    const bass = document.createElement('div')
+    treble.classList.add('abcjs-note')
+    bass.classList.add('abcjs-note')
+    document.body.append(treble, bass)
+    const trebleSpy = vi.fn()
+    const bassSpy = vi.fn()
+    treble.scrollIntoView = trebleSpy as never
+    bass.scrollIntoView = bassSpy as never
+    useChatStore.setState({ followPlayback: true } as never)
+
+    handleEvent({ elements: [[treble], [bass]], startCharArray: [], type: 'event' })
+
+    // The bottom-most (bass) glyph is revealed; one scroll per beat (not the
+    // treble too) avoids competing smooth-scroll animations.
+    expect(bassSpy).toHaveBeenCalled()
+    expect(trebleSpy).not.toHaveBeenCalled()
+  })
+
+  it('handleEvent with followPlayback scrolls the single glyph when there is only one staff', () => {
+    const only = document.createElement('div')
+    only.classList.add('abcjs-note')
+    document.body.append(only)
+    const spy = vi.fn()
+    only.scrollIntoView = spy as never
+    useChatStore.setState({ followPlayback: true } as never)
+
+    handleEvent({ elements: [[only]], startCharArray: [], type: 'event' })
+
+    expect(spy).toHaveBeenCalled()
+  })
+
+  it('handleEvent does not scroll when followPlayback is off', () => {
+    const treble = document.createElement('div')
+    const bass = document.createElement('div')
+    treble.classList.add('abcjs-note')
+    bass.classList.add('abcjs-note')
+    document.body.append(treble, bass)
+    const trebleSpy = vi.fn()
+    const bassSpy = vi.fn()
+    treble.scrollIntoView = trebleSpy as never
+    bass.scrollIntoView = bassSpy as never
+    useChatStore.setState({ followPlayback: false } as never)
+
+    handleEvent({ elements: [[treble], [bass]], startCharArray: [], type: 'event' })
+
+    expect(trebleSpy).not.toHaveBeenCalled()
+    expect(bassSpy).not.toHaveBeenCalled()
   })
 
   it('handleEvent(null) is a no-op that just clears highlight', () => {
