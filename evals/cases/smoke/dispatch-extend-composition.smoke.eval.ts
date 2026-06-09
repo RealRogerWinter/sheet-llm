@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { run as runOrchestrator } from '@/lib/orchestrator'
+import { toTierPolicy } from '@/lib/orchestrator/generationTier'
 import type { Score } from '@/lib/music/types'
 
 /**
@@ -113,6 +114,7 @@ describe.skipIf(!RUN)('smoke D: orchestrator.run dispatches a structural tool on
       userText: 'add 4 more bars',
       editedScore: TRIPLET_DEMO_4_BARS,
       history: [],
+      tierPolicy: toTierPolicy('free'),
     })
 
     // Sanity: orchestrator returned something with a score (not a

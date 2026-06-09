@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { Score } from '@/lib/music/types'
+import { toTierPolicy } from '@/lib/orchestrator/generationTier'
 
 // PR-13 — SL_BOUNDED_GEN=0 is the emergency off-switch for the free-tier bounded
 // handler; it reverts free users to the legacy path WITHOUT opening the paywall.
@@ -73,6 +74,7 @@ const input = (tier: 'free' | 'pro') => ({
   editedScore: undefined,
   history: [],
   generationTier: tier,
+  tierPolicy: toTierPolicy(tier),
 })
 
 describe('PR-13 — SL_BOUNDED_GEN=0 must not open the unbounded sectional path for free', () => {

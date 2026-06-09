@@ -3,6 +3,8 @@ import {
   resolveGenerationTier,
   isTierOverrideAllowed,
   isAdvancedComposerEnabled,
+  policyFor,
+  toTierPolicy,
 } from '@/lib/orchestrator/generationTier'
 
 // PR-0 (paywall integrity): `debug.generationTier` is a CLIENT-SUPPLIED field
@@ -120,5 +122,45 @@ describe('isAdvancedComposerEnabled (PR-8 — Opus routing operator flag)', () =
       vi.stubEnv('SL_ADVANCED_COMPOSER', v)
       expect(isAdvancedComposerEnabled()).toBe(false)
     }
+  })
+})
+
+// SHE-8 — `toTierPolicy` is the SaaS adapter the route injects into the
+// orchestrator (which no longer imports `policyFor`). These pin the mapping so a
+// future free-tier restriction added to `POLICY` can't silently fail to reach
+// the kernel: every cap is asserted to derive from `policyFor`, and the free
+// tier must stay fail-closed (bounded + no sectional/whole-score).
+describe('toTierPolicy (SHE-8 injected-policy adapter)', () => {
+  it('maps free to a fully capped, bounded policy derived from policyFor', () => {
+    const free = policyFor('free')
+    expect(toTierPolicy('free')).toEqual({
+      allowSectional: free.allowSectional,
+      allowWholeScore: free.allowWholeScore,
+      maxBars: free.maxBars,
+      emitCeiling: free.maxOutputTokens,
+      useBoundedFallback: true,
+    })
+    // Concrete fail-closed guarantee for the free tier.
+    expect(toTierPolicy('free')).toMatchObject({
+      allowSectional: false,
+      allowWholeScore: false,
+      useBoundedFallback: true,
+    })
+  })
+
+  it('maps pro to the full pipeline (no bounded fallback) derived from policyFor', () => {
+    const pro = policyFor('pro')
+    expect(toTierPolicy('pro')).toEqual({
+      allowSectional: pro.allowSectional,
+      allowWholeScore: pro.allowWholeScore,
+      maxBars: pro.maxBars,
+      emitCeiling: pro.maxOutputTokens,
+      useBoundedFallback: false,
+    })
+    expect(toTierPolicy('pro')).toMatchObject({
+      allowSectional: true,
+      allowWholeScore: true,
+      useBoundedFallback: false,
+    })
   })
 })

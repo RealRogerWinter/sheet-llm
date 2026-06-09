@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { Score } from '@/lib/music/types'
+import { toTierPolicy } from '@/lib/orchestrator/generationTier'
 
 const runGenerateBoundedMock = vi.fn()
 vi.mock('@/lib/orchestrator/handlers/generateBounded', () => ({
@@ -56,7 +57,7 @@ describe('M26 — bounded-generation choke point routing', () => {
       userText: 'write me a 16-bar sonata',
       editedScore: undefined,
       history: [],
-      generationTier: 'free',
+      tierPolicy: toTierPolicy('free'),
     })
     expect(runGenerateBoundedMock).toHaveBeenCalledTimes(1)
     expect(classifyMock).not.toHaveBeenCalled()
@@ -65,9 +66,11 @@ describe('M26 — bounded-generation choke point routing', () => {
     expect(runGenerateBoundedMock.mock.calls[0][0].maxOutputTokens).toBe(2600)
   })
 
-  it('default tier (generationTier unset) is free — still routes to bounded', async () => {
+  it('no injected tierPolicy → uncapped OSS default: the choke point is skipped (route.ts injects the fail-closed policy)', async () => {
+    classifyMock.mockResolvedValue(REFUSE)
     await run({ requestId: 'r2', chatId: 'c2', userText: 'a scale', editedScore: undefined, history: [] })
-    expect(runGenerateBoundedMock).toHaveBeenCalledTimes(1)
+    expect(runGenerateBoundedMock).not.toHaveBeenCalled()
+    expect(classifyMock).toHaveBeenCalledTimes(1)
   })
 
   it('a vague prompt (would be <0.6 confidence) is still capped for free — the confidence-floor escape is closed', async () => {
@@ -77,7 +80,7 @@ describe('M26 — bounded-generation choke point routing', () => {
       userText: 'make it jazzier somehow',
       editedScore: undefined,
       history: [],
-      generationTier: 'free',
+      tierPolicy: toTierPolicy('free'),
     })
     expect(runGenerateBoundedMock).toHaveBeenCalledTimes(1)
     expect(classifyMock).not.toHaveBeenCalled()
@@ -91,7 +94,7 @@ describe('M26 — bounded-generation choke point routing', () => {
       userText: 'a scale',
       editedScore: undefined,
       history: [{ role: 'user', content: [{ type: 'text', text: 'a scale' }] }],
-      generationTier: 'pro',
+      tierPolicy: toTierPolicy('pro'),
     })
     expect(runGenerateBoundedMock).not.toHaveBeenCalled()
     expect(classifyMock).toHaveBeenCalledTimes(1)
@@ -106,7 +109,7 @@ describe('M26 — bounded-generation choke point routing', () => {
       userText: 'a scale',
       editedScore: undefined,
       history: [{ role: 'user', content: [{ type: 'text', text: 'a scale' }] }],
-      generationTier: 'free',
+      tierPolicy: toTierPolicy('free'),
     })
     expect(runGenerateBoundedMock).not.toHaveBeenCalled()
     expect(classifyMock).toHaveBeenCalledTimes(1)
@@ -121,7 +124,7 @@ describe('M26 — bounded-generation choke point routing', () => {
       userText: 'raise the third note',
       editedScore: SCORE,
       history: [],
-      generationTier: 'free',
+      tierPolicy: toTierPolicy('free'),
     })
     expect(runGenerateBoundedMock).not.toHaveBeenCalled()
   })

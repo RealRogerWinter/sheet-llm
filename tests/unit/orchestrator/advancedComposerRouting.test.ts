@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { Score } from '@/lib/music/types'
+import { toTierPolicy } from '@/lib/orchestrator/generationTier'
 
 // PR-8 — an Advanced (Opus) from-scratch generation BYPASSES the sectional
 // stream (which is deliberately Sonnet-tuned) and takes a single Opus pass via
@@ -71,6 +72,8 @@ const baseInput = (advancedComposer?: boolean) => ({
   editedScore: undefined,
   history: [],
   generationTier: 'pro' as const,
+  // SHE-8: pin routing on the injected pro policy (generationTier is telemetry-only now).
+  tierPolicy: toTierPolicy('pro'),
   ...(advancedComposer !== undefined ? { advancedComposer } : {}),
 })
 

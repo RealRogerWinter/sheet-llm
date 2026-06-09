@@ -61,6 +61,47 @@ export interface Classification {
 
 export type OrchestratorFinalStatus = 'ok' | 'refused' | 'fell_through' | 'error'
 
+/**
+ * The resolved scope + ceiling budget for a single orchestrator run, INJECTED
+ * by the caller. SHE-8 keystone: the kernel no longer imports the SaaS paywall
+ * (`generationTier` / `policyFor`) — it only honors what it is handed.
+ *
+ *  - `allowSectional`     — may a fresh from-scratch gen use the unbounded
+ *                           multi-call sectional pump (vs. one capped pass)?
+ *  - `allowWholeScore`    — may a wholesale `regenerate_all` rewrite run?
+ *  - `maxBars`            — per-call clamp on the EDIT-path extend / insert
+ *                           growth only. It does NOT resize the bounded
+ *                           fresh-gen handler, which enforces its own fixed bar
+ *                           limit governed by `emitCeiling` (`toTierPolicy`
+ *                           keeps the two consistent: free → maxBars 4).
+ *  - `emitCeiling`        — `max_tokens` kill-switch read ONLY when the bounded
+ *                           handler runs (i.e. when `useBoundedFallback`); inert
+ *                           on the sectional / whole-score paths, which pin their
+ *                           own ≥8000 ceiling.
+ *  - `useBoundedFallback` — route a fresh from-scratch gen through the bounded
+ *                           single-call handler (the SaaS free tier) instead of
+ *                           classify / dispatch.
+ *
+ * The SaaS route resolves entitlement and injects a capped policy, fail-closed
+ * (`toTierPolicy` in `generationTier.ts`, kept in lockstep with `policyFor`'s
+ * `POLICY` map by `generationTier.test.ts`). An OSS / headless caller passes the
+ * exported `UNCAPPED_TIER_POLICY` (or injects nothing, which resolves to it) —
+ * no restrictions, never bounded.
+ *
+ * SECURITY NOTE: an absent policy is uncapped (fail-OPEN) — correct for the
+ * SaaS-free kernel (an OSS engine has no paywall to enforce). The HOSTED paywall
+ * is fail-closed at the route boundary, which always injects the capped policy;
+ * `route.ts` is the only production caller of `run()`. Distinct from the
+ * provider model-size `Tier` in `providers/*`.
+ */
+export interface TierPolicy {
+  allowSectional: boolean
+  allowWholeScore: boolean
+  maxBars: number
+  emitCeiling: number
+  useBoundedFallback: boolean
+}
+
 export interface OrchestratorInput {
   requestId: string
   /**
@@ -101,6 +142,15 @@ export interface OrchestratorInput {
    * model-size `Tier` in `providers/*`.
    */
   generationTier?: import('./generationTier').GenerationTier
+  /**
+   * SHE-8 — the resolved scope + ceiling budget for this run, injected by the
+   * caller. The orchestrator reads ONLY this for paywall/scope decisions (it no
+   * longer imports `policyFor`). The SaaS route maps the resolved tier to a
+   * capped policy and always injects it (fail-closed); when absent the run is
+   * uncapped (`UNCAPPED_TIER_POLICY`) — the OSS / headless default. Optional for
+   * back-compat with test fixtures.
+   */
+  tierPolicy?: TierPolicy
   /**
    * PR-8 Advanced Composer — the RESOLVED Opus-routing entitlement for this
    * turn. When true, the heavy single-pass compositional call (generateComplex /

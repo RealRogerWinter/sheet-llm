@@ -22,7 +22,6 @@ import {
   isReplacementGateEnabled,
   isSectionalGenEnabled,
 } from './flags'
-import { policyFor } from './generationTier'
 import { detectReplacement, type DispatchToolName } from './replacementDetect'
 import { computeAffectedEventIds, scoreDiff } from '@/lib/music/scoreDiff'
 import { ensureEventIds } from '@/lib/music/eventIds'
@@ -43,8 +42,30 @@ import type {
   OrchestratorResult,
   OrchestratorRunOutcome,
   TaskKind,
+  TierPolicy,
 } from './types'
 import { isOrchestratorConverseStream, isOrchestratorScoreStream } from './types'
+
+/**
+ * SHE-8 — the kernel's default scope budget when no `tierPolicy` is injected:
+ * fully UNCAPPED and never bounded. This is the OSS / headless posture (an
+ * absent policy means "no restrictions"). The hosted paywall is NOT enforced by
+ * this default — `route.ts` always injects a resolved, fail-closed policy
+ * (`toTierPolicy`), so a SaaS request never relies on it.
+ */
+export const UNCAPPED_TIER_POLICY: TierPolicy = {
+  allowSectional: true,
+  allowWholeScore: true,
+  maxBars: Number.MAX_SAFE_INTEGER,
+  emitCeiling: 8_000,
+  useBoundedFallback: false,
+}
+
+/** The scope budget governing this run: the injected policy, or the uncapped
+ *  OSS default. Centralized so every decision site resolves it identically. */
+function effectiveTierPolicy(input: OrchestratorInput): TierPolicy {
+  return input.tierPolicy ?? UNCAPPED_TIER_POLICY
+}
 
 const CONFIDENCE_FLOOR = 0.6
 /** Rough wall-clock estimates for deadline guards. PR B will
@@ -281,7 +302,7 @@ async function dispatch(
       // so the default path is unchanged.
       if (
         isSectionalGenEnabled() &&
-        policyFor(input.generationTier ?? 'free').allowSectional &&
+        effectiveTierPolicy(input).allowSectional &&
         !input.editedScore &&
         !input.advancedComposer
       ) {
@@ -378,7 +399,7 @@ async function runDispatchedHandler(
   // Pro-only, and structural growth (extend / insert) is clamped to the tier's
   // bar budget below. This enforces the policy flags that were defined but
   // previously unread, so a free-tier refine can't run an unbounded generation.
-  const policy = policyFor(input.generationTier ?? 'free')
+  const policy = effectiveTierPolicy(input)
   if (!policy.allowWholeScore && decision.tool === 'regenerate_all') {
     await recordTurnT(input, {
       requestId: input.requestId,
@@ -743,14 +764,14 @@ async function runInner(input: OrchestratorInput): Promise<OrchestratorRunOutcom
   // confidence floor — so a gate in any single dispatch arm would leak. This
   // one pre-dispatch seam catches every fresh-generation path. Edits
   // (editedScore present) skip it and keep their own handlers.
-  const genPolicy = policyFor(input.generationTier ?? 'free')
-  if (genPolicy.tier === 'free' && !input.editedScore && isBoundedGenEnabled()) {
+  const genPolicy = effectiveTierPolicy(input)
+  if (genPolicy.useBoundedFallback && !input.editedScore && isBoundedGenEnabled()) {
     try {
       const bounded = await runGenerateBounded({
         classification: { kind: 'generate_complex', scope: 'short', complexity: 'simple', confidence: 1 },
         chatId: input.chatId ?? 'anonymous',
         userText: input.userText,
-        maxOutputTokens: genPolicy.maxOutputTokens,
+        maxOutputTokens: genPolicy.emitCeiling,
         ...(input.modelOverride !== undefined ? { modelOverride: input.modelOverride } : {}),
         ...(input.apiKeyOverride !== undefined ? { apiKeyOverride: input.apiKeyOverride } : {}),
       })
