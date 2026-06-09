@@ -21,10 +21,21 @@ describe('billing/pricing', () => {
     }
   })
 
-  it('derives cache rates from base input (read 0.1x, write 1.25x)', () => {
-    for (const p of Object.values(PRICING)) {
-      expect(p.cachedInputPerM).toBeCloseTo(p.inputPerM * 0.1)
-      expect(p.cacheWrite5mPerM).toBeCloseTo(p.inputPerM * 1.25)
+  it('derives Anthropic cache rates from base input (read 0.1x, write 1.25x)', () => {
+    for (const [id, p] of Object.entries(PRICING)) {
+      if (!id.startsWith('claude-')) continue // provider-specific; Groq below
+      expect(p.cachedInputPerM, id).toBeCloseTo(p.inputPerM * 0.1)
+      expect(p.cacheWrite5mPerM, id).toBeCloseTo(p.inputPerM * 1.25)
+    }
+  })
+
+  it('non-Anthropic (Groq) rows have no cache-write premium and cached <= input', () => {
+    // Groq levies no cache-WRITE premium (write == base input) and never bills
+    // cached input above the base rate (published discount, or == input fallback).
+    for (const [id, p] of Object.entries(PRICING)) {
+      if (id.startsWith('claude-')) continue
+      expect(p.cacheWrite5mPerM, id).toBeCloseTo(p.inputPerM)
+      expect(p.cachedInputPerM, `${id} cached <= input`).toBeLessThanOrEqual(p.inputPerM)
     }
   })
 

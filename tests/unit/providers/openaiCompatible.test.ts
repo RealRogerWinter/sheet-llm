@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { z } from 'zod'
 import { OpenAICompatibleProvider } from '@/lib/providers/openaiCompatible'
-import { ProviderSchemaError } from '@/lib/providers/types'
+import { ProviderSchemaError, ProviderRefusalError, OutputTruncatedError } from '@/lib/providers/types'
 import { RateLimitedError, UpstreamError } from '@/lib/llm/errors'
+import { runWithUsageMeter, currentMeterTotals } from '@/lib/billing/usageMeter'
 
 const SimpleSchema = z.object({ x: z.string(), y: z.number() })
 
@@ -21,7 +22,7 @@ function makeProvider() {
   })
 }
 
-function chatCompletionsResponse(args: unknown, opts: { id?: string; content?: string; usage?: unknown; model?: string } = {}) {
+function chatCompletionsResponse(args: unknown, opts: { id?: string; content?: string; usage?: unknown; model?: string; finishReason?: string } = {}) {
   return {
     ok: true,
     status: 200,
@@ -30,6 +31,7 @@ function chatCompletionsResponse(args: unknown, opts: { id?: string; content?: s
       model: opts.model ?? 'openai/gpt-oss-20b',
       choices: [
         {
+          finish_reason: opts.finishReason,
           message: {
             role: 'assistant',
             content: opts.content ?? null,
@@ -243,5 +245,146 @@ describe('OpenAICompatibleProvider', () => {
     )
     const body = JSON.parse(fetchMock.mock.calls[0][1].body)
     expect(body.format).toEqual({ type: 'object' })
+  })
+
+  it('throws OutputTruncatedError (carrying maxTokens) when finish_reason is "length"', async () => {
+    // Truncated tool args + finish_reason 'length' must surface as a typed
+    // truncation, NOT a schema failure (which would read as model unreliability).
+    fetchMock.mockResolvedValue(
+      chatCompletionsResponse('{"x":"a"', {
+        finishReason: 'length',
+        usage: { prompt_tokens: 100, completion_tokens: 300 },
+      }),
+    )
+    const provider = makeProvider()
+    const err = await provider
+      .toolCall(
+        { name: 'test_tool', inputSchema: SimpleSchema, inputSchemaJson: {} },
+        { systemPrompt: 'sys', userText: 'usr', toolChoice: 'required', maxTokens: 300 },
+      )
+      .then(() => null, (e: unknown) => e)
+    expect(err).toBeInstanceOf(OutputTruncatedError)
+    expect((err as OutputTruncatedError).maxTokens).toBe(300)
+  })
+
+  it('throws ProviderRefusalError on a structured refusal', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        model: 'openai/gpt-oss-20b',
+        choices: [
+          {
+            finish_reason: 'stop',
+            message: { role: 'assistant', content: null, refusal: 'I cannot help with that.' },
+          },
+        ],
+        usage: { prompt_tokens: 50, completion_tokens: 10 },
+      }),
+      text: async () => '',
+    } as unknown as Response)
+    const provider = makeProvider()
+    await expect(
+      provider.toolCall(
+        { name: 'test_tool', inputSchema: SimpleSchema, inputSchemaJson: {} },
+        { systemPrompt: 'sys', userText: 'usr', toolChoice: 'required' },
+      ),
+    ).rejects.toThrow(ProviderRefusalError)
+  })
+
+  it('meters usage into the ambient request meter and surfaces stopReason', async () => {
+    fetchMock.mockResolvedValue(
+      chatCompletionsResponse(
+        { x: 'a', y: 1 },
+        {
+          finishReason: 'tool_calls',
+          usage: { prompt_tokens: 100, completion_tokens: 30, prompt_tokens_details: { cached_tokens: 0 } },
+        },
+      ),
+    )
+    const provider = makeProvider()
+    let totals: ReturnType<typeof currentMeterTotals>
+    const r = await runWithUsageMeter('req-test', async () => {
+      const res = await provider.toolCall(
+        { name: 'test_tool', inputSchema: SimpleSchema, inputSchemaJson: {} },
+        { systemPrompt: 'sys', userText: 'usr', toolChoice: 'required', modelOverride: 'openai/gpt-oss-20b' },
+      )
+      totals = currentMeterTotals()
+      return res
+    })
+    expect(r.stopReason).toBe('tool_calls')
+    expect(totals?.callCount).toBe(1)
+    expect(totals?.outputTokens).toBe(30)
+    expect(totals?.costUsd).toBeGreaterThan(0)
+  })
+
+  it('returns a complete, valid tool call even when finish_reason is "length"', async () => {
+    // A length cap with COMPLETE, valid args is a success — a verbose-but-correct
+    // model must not be falsely scored as truncated/unreliable.
+    fetchMock.mockResolvedValue(
+      chatCompletionsResponse({ x: 'hello', y: 7 }, { finishReason: 'length' }),
+    )
+    const provider = makeProvider()
+    const r = await provider.toolCall(
+      { name: 'test_tool', inputSchema: SimpleSchema, inputSchemaJson: {} },
+      { systemPrompt: 'sys', userText: 'usr', toolChoice: 'required', maxTokens: 300 },
+    )
+    expect(r.input).toEqual({ x: 'hello', y: 7 })
+    expect(r.stopReason).toBe('length')
+  })
+
+  it('classifies a length cut with NO tool_call as OutputTruncatedError', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        model: 'openai/gpt-oss-20b',
+        choices: [{ finish_reason: 'length', message: { role: 'assistant', content: 'partial…', tool_calls: undefined } }],
+        usage: { prompt_tokens: 100, completion_tokens: 300 },
+      }),
+      text: async () => '',
+    } as unknown as Response)
+    const provider = makeProvider()
+    await expect(
+      provider.toolCall(
+        { name: 'test_tool', inputSchema: SimpleSchema, inputSchemaJson: {} },
+        { systemPrompt: 'sys', userText: 'usr', toolChoice: 'required', maxTokens: 300 },
+      ),
+    ).rejects.toThrow(OutputTruncatedError)
+  })
+
+  it('reclassifies a zod failure under a length cut as truncation (dropped field)', async () => {
+    // Parseable JSON missing a required field, WITH finish_reason 'length' → the
+    // cut dropped `y`; surface truncation, not a schema failure.
+    fetchMock.mockResolvedValue(
+      chatCompletionsResponse({ x: 'a' }, { finishReason: 'length' }),
+    )
+    const provider = makeProvider()
+    await expect(
+      provider.toolCall(
+        { name: 'test_tool', inputSchema: SimpleSchema, inputSchemaJson: {} },
+        { systemPrompt: 'sys', userText: 'usr', toolChoice: 'required' },
+      ),
+    ).rejects.toThrow(OutputTruncatedError)
+  })
+
+  it('treats a structured refusal as a refusal even under a length cut (precedence)', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        model: 'openai/gpt-oss-20b',
+        choices: [{ finish_reason: 'length', message: { role: 'assistant', content: null, refusal: 'No.' } }],
+        usage: { prompt_tokens: 50, completion_tokens: 300 },
+      }),
+      text: async () => '',
+    } as unknown as Response)
+    const provider = makeProvider()
+    await expect(
+      provider.toolCall(
+        { name: 'test_tool', inputSchema: SimpleSchema, inputSchemaJson: {} },
+        { systemPrompt: 'sys', userText: 'usr', toolChoice: 'required' },
+      ),
+    ).rejects.toThrow(ProviderRefusalError)
   })
 })

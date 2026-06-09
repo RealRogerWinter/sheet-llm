@@ -6,9 +6,16 @@ import type {
   ProviderName,
   ProviderTool,
   ProviderToolResult,
+  ProviderUsage,
 } from './types'
-import { ProviderSchemaError } from './types'
+import { OutputTruncatedError, ProviderRefusalError, ProviderSchemaError } from './types'
 import { flattenSystemPrompt } from './systemBlocks'
+import { recordProviderCall } from '@/lib/billing/usageMeter'
+
+/** Default per-call output ceiling when a caller doesn't set `maxTokens`.
+ *  Lower than Anthropic's 8000 — a Groq emit large enough to exceed this is
+ *  truncated (finish_reason 'length') and surfaced as OutputTruncatedError. */
+const DEFAULT_MAX_TOKENS = 2_000
 
 export interface OpenAICompatibleConfig {
   name: ProviderName
@@ -31,9 +38,11 @@ interface OpenAIChatCompletionResponse {
   id?: string
   model?: string
   choices?: Array<{
+    finish_reason?: string
     message?: {
       role?: string
       content?: string | null
+      refusal?: string | null
       tool_calls?: Array<{
         id?: string
         type?: string
@@ -78,7 +87,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     const body: Record<string, unknown> = {
       model,
       messages,
-      max_tokens: options.maxTokens ?? 2_000,
+      max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
       ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
       tools: [
         {
@@ -124,13 +133,42 @@ export class OpenAICompatibleProvider implements LLMProvider {
     }
 
     const data = (await response.json()) as OpenAIChatCompletionResponse
-    const message = data.choices?.[0]?.message
+    const choice = data.choices?.[0]
+    const message = choice?.message
     if (!message) {
       throw new UpstreamError(`${this.name}: no message in response`, 500)
     }
 
+    // Normalised usage, hoisted so the truncation / refusal paths can meter the
+    // tokens the provider already billed before we throw.
+    const usage = data.usage
+      ? {
+          inputTokens: data.usage.prompt_tokens,
+          cachedInputTokens: data.usage.prompt_tokens_details?.cached_tokens,
+          outputTokens: data.usage.completion_tokens,
+        }
+      : undefined
+    const effectiveModel = data.model ?? model
+
+    // Structured refusal (OpenAI / gpt-oss `message.refusal`) is an explicit
+    // model decision — classify it first, distinct from truncation/schema.
+    if (typeof message.refusal === 'string' && message.refusal.length > 0) {
+      recordProviderCall(effectiveModel, usage)
+      throw new ProviderRefusalError(`${this.name}: model refused the request`, message.refusal)
+    }
+
+    // `finish_reason: 'length'` means the response was cut at max_tokens. That
+    // only makes the call a FAILURE if the tool arguments are actually unusable
+    // (missing / un-parseable / schema-invalid). A complete, valid tool call is
+    // returned as success even under a length cap — so a verbose-but-correct
+    // model is not falsely scored as truncated. When a length cut DOES leave the
+    // output unusable we throw OutputTruncatedError (recoverable, kept off the
+    // degradation ladder) instead of a misleading schema error.
+    const truncated = choice?.finish_reason === 'length'
+
     const toolCall = message.tool_calls?.[0]
     if (!toolCall || toolCall.function?.name !== tool.name) {
+      if (truncated) this.throwTruncated(tool.name, options, usage, effectiveModel)
       throw new ProviderSchemaError(
         toolCall
           ? `${this.name}: model called wrong tool "${toolCall.function?.name}" instead of "${tool.name}"`
@@ -143,6 +181,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     try {
       parsed = JSON.parse(args)
     } catch (e) {
+      if (truncated) this.throwTruncated(tool.name, options, usage, effectiveModel)
       throw new ProviderSchemaError(
         `${this.name}: tool arguments for "${tool.name}" are not valid JSON: ${
           e instanceof Error ? e.message : 'parse error'
@@ -152,28 +191,46 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
     const validated = tool.inputSchema.safeParse(parsed)
     if (!validated.success) {
+      if (truncated) this.throwTruncated(tool.name, options, usage, effectiveModel)
       throw new ProviderSchemaError(
         `${this.name}: tool input for "${tool.name}" failed schema validation: ${validated.error.issues.map((i) => i.message).join('; ')}`,
       )
     }
 
-    const usage = data.usage
+    recordProviderCall(effectiveModel, usage)
     return {
       input: validated.data,
       toolUseId: toolCall.id ?? `${this.name}_${crypto.randomUUID().replace(/-/g, '').slice(0, 22)}`,
-      model: data.model ?? model,
+      model: effectiveModel,
+      stopReason: choice?.finish_reason,
       introText:
         typeof message.content === 'string' && message.content.length > 0
           ? message.content
           : undefined,
-      usage: usage
-        ? {
-            inputTokens: usage.prompt_tokens,
-            cachedInputTokens: usage.prompt_tokens_details?.cached_tokens,
-            outputTokens: usage.completion_tokens,
-          }
-        : undefined,
+      usage,
     }
+  }
+
+  /**
+   * Meter the (already-billed) tokens and throw a typed truncation error.
+   * `never`-returning so call sites read as a guard. Reports the EFFECTIVE
+   * ceiling so the lower Groq default (vs Anthropic's 8000) is visible in
+   * truncation diagnostics.
+   */
+  private throwTruncated(
+    toolName: string,
+    options: ProviderCallOptions,
+    usage: ProviderUsage | undefined,
+    effectiveModel: string,
+  ): never {
+    recordProviderCall(effectiveModel, usage)
+    throw new OutputTruncatedError(
+      `${this.name}: "${toolName}" hit the max_tokens ceiling (${options.maxTokens ?? DEFAULT_MAX_TOKENS}) before the tool call completed`,
+      {
+        ...(options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
+        ...(usage?.outputTokens !== undefined ? { outputTokens: usage.outputTokens } : {}),
+      },
+    )
   }
 
   private resolveApiKey(): string | undefined {
