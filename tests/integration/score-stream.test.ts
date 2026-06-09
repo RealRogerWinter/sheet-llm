@@ -17,6 +17,8 @@ vi.mock('@anthropic-ai/sdk', () => {
 })
 
 const { POST } = await import('@/app/api/chat/route')
+const { orchestratorTurns } = await import('@/lib/db/schema')
+const { isNotNull } = await import('drizzle-orm')
 
 const wholeBar = () => ({ events: [{ pitches: [{ step: 'C', octave: 4 }], duration: 'whole' }] })
 const SEED_SCORE = { key: 'C', meter: '4/4', measures: Array.from({ length: 8 }, wholeBar) }
@@ -82,7 +84,7 @@ function parseSse(text: string): Array<{ event: string; data: Record<string, unk
 }
 
 describe('/api/chat sectional score streaming (M25-PR-4)', () => {
-  installTestDb()
+  const { getDb } = installTestDb()
   beforeEach(() => {
     anthropicCreateMock.mockReset()
     vi.unstubAllEnvs()
@@ -124,5 +126,39 @@ describe('/api/chat sectional score streaming (M25-PR-4)', () => {
     expect(typeof done!.data.abc).toBe('string')
     expect(done!.data.headVersionId).toBeTruthy()
     expect(done!.data.toolUseId).toBeTruthy()
+  })
+
+  it('SHE-18 PR1: links the streamed turn to the persisted score version', async () => {
+    // Same real streaming flow, but with the turn log ENABLED (the suite
+    // default silences it, which skips the DB write). run() writes a real
+    // orchestrator_turns row; the streaming persist() must back-fill its
+    // after_score_version_id to the assembled score's version.
+    vi.stubEnv('ORCHESTRATOR_LOG_SILENT', '')
+    anthropicCreateMock
+      .mockResolvedValueOnce(classifierResp())
+      .mockResolvedValueOnce(toolResp('emit_score_plan', PLAN_INPUT))
+      .mockResolvedValueOnce(toolResp('render_score', SEED_SCORE))
+      .mockResolvedValueOnce(
+        toolResp('emit_appended_bars', { measures: Array.from({ length: 4 }, wholeBar) }),
+      )
+
+    const res = await POST(makeRequest({ message: 'a 12-bar piece in two sections' }))
+    expect(res.status).toBe(200)
+    const frames = parseSse(await res.text())
+    const done = frames.find((f) => f.event === 'done')
+    expect(done).toBeDefined()
+    const headVersionId = done!.data.headVersionId as string
+    expect(headVersionId).toBeTruthy()
+
+    // The DB is fresh per test (installTestDb), so the only linked turn is
+    // this request's. It points at the persisted head version — proving the
+    // streamed responder back-filled a real (non-seeded) turn row.
+    const linked = getDb()
+      .select({ after: orchestratorTurns.afterScoreVersionId })
+      .from(orchestratorTurns)
+      .where(isNotNull(orchestratorTurns.afterScoreVersionId))
+      .all()
+    expect(linked.length).toBeGreaterThanOrEqual(1)
+    expect(linked.some((r) => r.after === headVersionId)).toBe(true)
   })
 })

@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { sql } from 'drizzle-orm'
-import { logTurn, logShadowDivergence, recordTurn } from '@/lib/orchestrator/observability'
-import { orchestratorTurns, sessions, users } from '@/lib/db/schema'
+import {
+  logTurn,
+  logShadowDivergence,
+  recordTurn,
+  linkTurnScoreVersion,
+} from '@/lib/orchestrator/observability'
+import { eq } from 'drizzle-orm'
+import { orchestratorTurns, scoreVersions, sessions, users } from '@/lib/db/schema'
 import { setDbForTesting } from '@/lib/db'
 import { makeTestDb } from '../../factories/db'
 import type { Score } from '@/lib/music/types'
@@ -409,5 +415,117 @@ describe('recordTurn — DB persistence', () => {
     } finally {
       db.insert = realInsert
     }
+  })
+})
+
+describe('linkTurnScoreVersion — backfill after_score_version_id (SHE-18 PR1)', () => {
+  let db: ReturnType<typeof makeTestDb>
+
+  beforeEach(() => {
+    db = makeTestDb()
+    db.insert(users).values({ id: 'u1', createdAt: 0, lastSeenAt: 0 }).run()
+    db.insert(sessions)
+      .values({ id: 'session-1', userId: 'u1', createdAt: 0, updatedAt: 0, lastMessageAt: 0 })
+      .run()
+    setDbForTesting(db)
+  })
+  afterEach(() => {
+    setDbForTesting(undefined)
+  })
+
+  function seedTurn(id: string, requestId: string, createdAtMs: number): void {
+    db.insert(orchestratorTurns)
+      .values({
+        id,
+        sessionId: 'session-1',
+        requestId,
+        createdAt: createdAtMs,
+        latencyMs: 1,
+        finalStatus: 'ok',
+      })
+      .run()
+  }
+
+  function seedVersion(id: string): string {
+    db.insert(scoreVersions)
+      .values({
+        id,
+        sessionId: 'session-1',
+        scoreJson: '{}',
+        scoreHash: id,
+        source: 'llm',
+        createdAt: 0,
+        schemaVersion: 1,
+      })
+      .run()
+    return id
+  }
+
+  function afterOf(turnId: string): string | null {
+    return (
+      db
+        .select({ a: orchestratorTurns.afterScoreVersionId })
+        .from(orchestratorTurns)
+        .where(eq(orchestratorTurns.id, turnId))
+        .get()?.a ?? null
+    )
+  }
+
+  it('sets after_score_version_id on the turn matching the request id', async () => {
+    seedTurn('t1', 'req-1', 1000)
+    const v = seedVersion('v1')
+    await linkTurnScoreVersion('req-1', v, 'session-1')
+    expect(afterOf('t1')).toBe('v1')
+  })
+
+  it('targets the MOST RECENT unlinked turn when a request wrote several', async () => {
+    // Defensive: should a request ever record more than one turn, the
+    // result-bearing one is the latest. Older turns stay unlinked.
+    seedTurn('t-early', 'req-2', 1000)
+    seedTurn('t-late', 'req-2', 2000)
+    const v = seedVersion('v2')
+    await linkTurnScoreVersion('req-2', v, 'session-1')
+    expect(afterOf('t-late')).toBe('v2')
+    expect(afterOf('t-early')).toBeNull()
+  })
+
+  it('does not clobber a turn that is already linked', async () => {
+    seedTurn('t3', 'req-3', 1000)
+    const v1 = seedVersion('v3a')
+    const v2 = seedVersion('v3b')
+    await linkTurnScoreVersion('req-3', v1, 'session-1')
+    await linkTurnScoreVersion('req-3', v2, 'session-1') // second emit, same request
+    // The already-linked latest turn is left alone (IS NULL guard); no
+    // unlinked turn remains to take v2, so it's a no-op.
+    expect(afterOf('t3')).toBe('v3a')
+  })
+
+  it('is a best-effort no-op when no turn matches the request id', async () => {
+    const v = seedVersion('v4')
+    await expect(linkTurnScoreVersion('no-such-req', v, 'session-1')).resolves.toBeUndefined()
+  })
+
+  it('will not link a turn in a DIFFERENT session even if the request id matches', async () => {
+    // Defense-in-depth: request ids are server-minted UUIDs (collision-free
+    // across sessions), but the explicit session predicate guarantees we
+    // never write a version onto another session's turn.
+    db.insert(users).values({ id: 'u2', createdAt: 0, lastSeenAt: 0 }).run()
+    db.insert(sessions)
+      .values({ id: 'session-2', userId: 'u2', createdAt: 0, updatedAt: 0, lastMessageAt: 0 })
+      .run()
+    db.insert(orchestratorTurns)
+      .values({
+        id: 't-other',
+        sessionId: 'session-2',
+        requestId: 'shared-req',
+        createdAt: 1000,
+        latencyMs: 1,
+        finalStatus: 'ok',
+      })
+      .run()
+    const v = seedVersion('v5')
+    // Link is scoped to session-1, but the only matching turn is in session-2.
+    await linkTurnScoreVersion('shared-req', v, 'session-1')
+    expect(afterOf('t-other')).toBeNull()
   })
 })

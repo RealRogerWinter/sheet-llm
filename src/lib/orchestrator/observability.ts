@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, isNull, sql } from 'drizzle-orm'
 import { getDb } from '@/lib/db'
 import { orchestratorTurns } from '@/lib/db/schema'
 import type { Score } from '@/lib/music/types'
@@ -339,6 +339,64 @@ export function readTurnCostByRequestId(
       error: e instanceof Error ? e.message : String(e),
     })
     return undefined
+  }
+}
+
+/**
+ * SHE-18 PR1 — link an orchestrator turn to the score version it emitted,
+ * keyed by request id.
+ *
+ * `recordTurn` runs INSIDE `run()`, but the `score_versions` row for the
+ * emitted score isn't minted until `appendMessages` in the responder, AFTER
+ * `run()` returns — so the turn is always written with
+ * `after_score_version_id = NULL` and the id can only be back-filled here.
+ * The responder is the first place both the request id (which keyed the
+ * turn) and the freshly-minted version id are in scope.
+ *
+ * Scoped to (sessionId, requestId): in practice a request writes exactly one
+ * turn row (the cost backfill is an UPDATE of that same row, not a second
+ * INSERT), so this resolves to that row. The `sessionId` predicate makes the
+ * partition explicit rather than relying on the request-id→session invariant,
+ * and we still take the MOST RECENT still-unlinked turn defensively, should a
+ * request ever record more than one. The `IS NULL` guard makes a second emit
+ * under the same request id a no-op on the already-linked turn rather than
+ * clobbering it. Best-effort: a telemetry write must never break delivery, so
+ * DB errors are swallowed (mirrors `recordTurn`).
+ */
+export async function linkTurnScoreVersion(
+  requestId: string,
+  afterScoreVersionId: string,
+  sessionId: string,
+  db: ReturnType<typeof getDb> = getDb(),
+): Promise<void> {
+  try {
+    // better-sqlite3 is synchronous; resolve the target id first (most-recent
+    // unlinked turn for this session+request), then update by primary key so
+    // we touch exactly one row. createdAt is ms-resolution; the secondary
+    // desc(id) pins the tiebreak when two turns share a millisecond.
+    const target = db
+      .select({ id: orchestratorTurns.id })
+      .from(orchestratorTurns)
+      .where(
+        and(
+          eq(orchestratorTurns.sessionId, sessionId),
+          eq(orchestratorTurns.requestId, requestId),
+          isNull(orchestratorTurns.afterScoreVersionId),
+        ),
+      )
+      .orderBy(desc(orchestratorTurns.createdAt), desc(orchestratorTurns.id))
+      .limit(1)
+      .get()
+    if (!target) return
+    db.update(orchestratorTurns)
+      .set({ afterScoreVersionId })
+      .where(eq(orchestratorTurns.id, target.id))
+      .run()
+  } catch (e) {
+    console.warn('[orchestrator] link turn score version failed', {
+      requestId,
+      error: e instanceof Error ? e.message : String(e),
+    })
   }
 }
 
