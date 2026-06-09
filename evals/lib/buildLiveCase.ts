@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { appendFileSync } from 'node:fs'
+import { computeKeyStatus } from '@/lib/orchestrator/keyStatus'
 import type { Score } from '@/lib/music/types'
 import type { OrchestratorResult, OrchestratorRunOutcome } from '@/lib/orchestrator/types'
 import { runLiveCase, summarizeLiveResults, type LiveCaseResult } from './liveRunner'
@@ -75,9 +77,14 @@ export interface LiveCaseSpec {
 /** Reason a live case skipped (logged once at suite registration). */
 type SkipReason = 'no_run_flag' | 'no_api_key' | 'expensive_off' | null
 
-function skipReason(spec: LiveCaseSpec): SkipReason {
+export function skipReason(spec: LiveCaseSpec): SkipReason {
   if (process.env.RUN_LIVE_EVALS !== '1') return 'no_run_flag'
-  if (!process.env.ANTHROPIC_API_KEY) return 'no_api_key'
+  // The dispatcher + handlers run on the MEDIUM tier; require THAT tier's
+  // routed provider to be configured (Anthropic by default, or Groq when
+  // PROVIDER_MEDIUM=groq + GROQ_API_KEY). Lets the SHE-15 matrix driver run a
+  // Groq-only sweep without an Anthropic key, while the default Anthropic flow
+  // stays gated on ANTHROPIC_API_KEY exactly as before.
+  if (!computeKeyStatus().medium) return 'no_api_key'
   if (spec.expensive && process.env.RUN_LIVE_FULL !== '1') return 'expensive_off'
   return null
 }
@@ -126,6 +133,10 @@ export function buildLiveCase(spec: LiveCaseSpec): void {
         id: spec.id,
         userText: spec.userText,
         initialScore: spec.initialScore,
+        // SHE-15 matrix driver pins one model across all tiers via this env.
+        ...(process.env.SL_EVAL_MODEL_OVERRIDE
+          ? { modelOverride: process.env.SL_EVAL_MODEL_OVERRIDE }
+          : {}),
       })
       cases.push(runner)
     }, 120_000)
@@ -228,6 +239,33 @@ export function buildLiveCase(spec: LiveCaseSpec): void {
         const r = cases[cases.length - 1]
         const s = statuses[statuses.length - 1] ?? '?'
         console.warn(`[eval row] ${fmtRow(spec, r, s)}`)
+      }
+
+      // SHE-15: machine-readable per-case result sink for the model-matrix
+      // driver. Independent of the console flags above; append one JSON line.
+      const sink = process.env.SL_EVAL_RESULTS_FILE
+      if (cases.length > 0 && sink) {
+        const r = cases[cases.length - 1]
+        const s = statuses[statuses.length - 1] ?? '?'
+        try {
+          appendFileSync(
+            sink,
+            JSON.stringify({
+              caseId: spec.id,
+              model: r.model ?? null,
+              status: s,
+              pass: s === 'PASS',
+              inputTokens: r.inputTokens,
+              outputTokens: r.outputTokens,
+              cachedInputTokens: r.cachedInputTokens,
+              estimatedCostUsd: r.estimatedCostUsd,
+              latencyMs: r.latencyMs,
+              attempts: r.attempts,
+            }) + '\n',
+          )
+        } catch {
+          // Never let telemetry I/O fail a case.
+        }
       }
     })
   })
