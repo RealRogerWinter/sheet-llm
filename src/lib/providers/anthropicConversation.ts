@@ -35,6 +35,10 @@ function userBlockToAnthropic(
   // tool_result. Key order matches the app's construction sites exactly:
   //   no error  -> { type, tool_use_id, content }
   //   with error -> { type, tool_use_id, is_error, content }
+  // Invariant: across this app `is_error` is only ever `true` or absent —
+  // no site emits `is_error: false`. A future false-producer would
+  // reconstruct in the error-branch order and so MUST be added to the
+  // golden corpus (conversation.test.ts) to stay byte-faithful.
   if (block.isError !== undefined) {
     return {
       type: 'tool_result',
@@ -87,11 +91,13 @@ function userBlockFromAnthropic(
   if (block.type === 'tool_result') {
     if (typeof block.content !== 'string') {
       // The app only ever produces string tool_result content. An array of
-      // sub-blocks would silently lose data through this adapter, so fail
-      // loudly instead — extend the IR (NeutralToolResultBlock.content) if
-      // this ever fires. See conversation.ts module note.
+      // sub-blocks (or an absent content field) would lose data through this
+      // adapter, so fail loudly instead — extend the IR
+      // (NeutralToolResultBlock.content) if this ever fires. See
+      // conversation.ts module note.
+      const shape = block.content === undefined ? 'absent' : 'array'
       throw new Error(
-        'fromAnthropicMessages: non-string tool_result content is not supported by the neutral IR',
+        `fromAnthropicMessages: non-string tool_result content (${shape}) is not supported by the neutral IR`,
       )
     }
     const out: NeutralUserBlock = {
@@ -135,9 +141,20 @@ function assistantBlockFromAnthropic(
 export function fromAnthropicMessages(
   history: ReadonlyArray<ChatMessage>,
 ): NeutralMessage[] {
-  return history.map((msg): NeutralMessage =>
-    msg.role === 'user'
+  return history.map((msg): NeutralMessage => {
+    // Guard corrupt/foreign rows with a clear error instead of a raw
+    // TypeError from `.map` on a non-array, or a silent mis-classification
+    // of an unknown role. (Stored history is hydrated from content_json.)
+    if (msg.role !== 'user' && msg.role !== 'assistant') {
+      throw new Error(
+        `fromAnthropicMessages: unsupported message role "${(msg as { role: string }).role}"`,
+      )
+    }
+    if (!Array.isArray(msg.content)) {
+      throw new Error('fromAnthropicMessages: message content is not an array')
+    }
+    return msg.role === 'user'
       ? { role: 'user', content: msg.content.map(userBlockFromAnthropic) }
-      : { role: 'assistant', content: msg.content.map(assistantBlockFromAnthropic) },
-  )
+      : { role: 'assistant', content: msg.content.map(assistantBlockFromAnthropic) }
+  })
 }

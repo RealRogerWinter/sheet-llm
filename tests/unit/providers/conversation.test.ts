@@ -16,8 +16,14 @@ import type { NeutralMessage } from '@/lib/providers/conversation'
  *  - assistant tool_use only .... same, no intro
  *  - refinement tool_result ..... route.ts buildUserTurnForRefinement (no is_error)
  *  - retry tool_result .......... llm/messages.ts buildRetryUserTurn / scoreRetry (is_error: true)
+ *  - seed turns ................. chat/fork, chat/revert, import routes mint a
+ *                                 bare [text] user turn + a [text, tool_use]
+ *                                 assistant turn — same shapes as the first two
+ *                                 entries; the fork-seed entry below pins them.
  *
- * If a new history shape appears in the app, add it here.
+ * If a new history shape (or a field-order change at any of those sites)
+ * appears in the app, add/adjust an entry here — PR2 routes the live
+ * Anthropic call through this adapter, so this corpus is the inventory.
  */
 const GOLDEN_CORPUS: ChatMessage[] = [
   { role: 'user', content: [{ type: 'text', text: 'Write a C major scale, one octave.' }] },
@@ -65,6 +71,20 @@ const GOLDEN_CORPUS: ChatMessage[] = [
         is_error: true,
         content:
           'Score failed validation: measure 0 duration mismatch. Call render_score again with the fix; keep everything else unchanged.',
+      },
+    ],
+  },
+  // Fork/revert/import seed turn (chat/fork/route.ts, chat/revert/route.ts,
+  // import/route.ts): a synthetic-id assistant turn carrying the seeded score.
+  {
+    role: 'assistant',
+    content: [
+      { type: 'text', text: 'Forked from a prior session.' },
+      {
+        type: 'tool_use',
+        id: 'toolu_fork_seed01',
+        name: 'render_score',
+        input: { title: 'Forked Score', key: 'D', measures: [{ index: 0 }] },
       },
     ],
   },
@@ -151,5 +171,24 @@ describe('neutral conversation IR <-> Anthropic adapter', () => {
       { role: 'user', content: [{ type: 'image', source: {} }] },
     ] as unknown as ChatMessage[]
     expect(() => fromAnthropicMessages(weird)).toThrow(/unsupported user content block type/)
+  })
+
+  it('throws a clear error (not a raw TypeError) on non-array content', () => {
+    const corrupt = [{ role: 'user', content: 'oops' }] as unknown as ChatMessage[]
+    expect(() => fromAnthropicMessages(corrupt)).toThrow(/content is not an array/)
+  })
+
+  it('throws on an unknown message role rather than mis-classifying it', () => {
+    const corrupt = [
+      { role: 'system', content: [{ type: 'text', text: 'x' }] },
+    ] as unknown as ChatMessage[]
+    expect(() => fromAnthropicMessages(corrupt)).toThrow(/unsupported message role/)
+  })
+
+  it('reports absent tool_result content distinctly from an array', () => {
+    const absent = [
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_x' }] },
+    ] as unknown as ChatMessage[]
+    expect(() => fromAnthropicMessages(absent)).toThrow(/tool_result content \(absent\)/)
   })
 })
