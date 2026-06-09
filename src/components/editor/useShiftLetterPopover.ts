@@ -47,7 +47,13 @@ export function useShiftLetterPopover(
   { enabled = true }: UseShiftLetterPopoverOptions = {},
 ) {
   const openRef = useRef(open)
-  openRef.current = open
+  // Keep the ref pointing at the latest `open` WITHOUT re-attaching the document
+  // listener on every render (see the capture-phase note above). Writing the ref
+  // in an effect — not the render body — satisfies react-hooks/refs while
+  // preserving the "latest open, listener attached once" behavior.
+  useEffect(() => {
+    openRef.current = open
+  })
 
   useEffect(() => {
     if (!enabled) return
