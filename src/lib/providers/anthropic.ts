@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { ChatMessage } from '@/lib/llm/wrapper'
-import { RateLimitedError, UpstreamError } from '@/lib/llm/errors'
+import { RateLimitedError, UpstreamError, ProviderNotConfiguredError } from '@/lib/llm/errors'
 import { toAnthropicMessages } from './anthropicConversation'
 import type {
   LLMProvider,
@@ -119,7 +119,7 @@ export class AnthropicProvider implements LLMProvider {
     }
     const apiKey = process.env.ANTHROPIC_API_KEY
     if (!apiKey) {
-      throw new UpstreamError('ANTHROPIC_API_KEY is not set', 500)
+      throw new ProviderNotConfiguredError('Anthropic', 'ANTHROPIC_API_KEY')
     }
     if (!this._client || this._cachedKey !== apiKey) {
       this._client = new Anthropic({ apiKey, maxRetries: 2 })

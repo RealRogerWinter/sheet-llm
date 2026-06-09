@@ -9,7 +9,7 @@ import {
 } from '@/lib/llm/systemPrompt'
 import type { SystemBlock } from '@/lib/providers/types'
 import { callWithScoreRetry } from './scoreRetry'
-import { BOUNDED_EMIT_CEILING } from '../generationTier'
+import { resolveBoundedEmitCeiling } from '../generationTier'
 
 /**
  * The free-tier bounded generation handler (M26). A fresh from-scratch
@@ -77,7 +77,7 @@ export async function runGenerateBounded(
     {
       systemPrompt: BOUNDED_SYSTEM_BLOCKS,
       userText: `${input.userText}\n\nEmit at most 4 bars (grand staff = both staves sharing those 4 measures, bar-aligned).`,
-      maxTokens: input.maxOutputTokens ?? BOUNDED_EMIT_CEILING, // <-- the kill-switch
+      maxTokens: input.maxOutputTokens ?? resolveBoundedEmitCeiling(), // <-- the kill-switch
       maxRetries: 1, // a tight ceiling can't be satisfied by re-sending the same size
       effort: 'low',
       thinking: 'disabled',

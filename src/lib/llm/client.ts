@@ -3,7 +3,7 @@ import type { LLMClient, LLMCompleteRequest, LLMResponse } from './wrapper'
 import type { Score } from '@/lib/music/types'
 import { renderScoreTool, RENDER_SCORE_TOOL_NAME } from './renderScoreTool'
 import { SYSTEM_PROMPT } from './systemPrompt'
-import { RateLimitedError, UpstreamError } from './errors'
+import { RateLimitedError, UpstreamError, ProviderNotConfiguredError } from './errors'
 
 const MODEL = 'claude-sonnet-4-6'
 const MAX_TOKENS = 8_000 // M25-PR-6: render_score emit floor (see tokenBudget.test.ts); was 2000 — the legacy fall-through path truncated big pieces
@@ -14,7 +14,7 @@ let _cachedKey: string | undefined
 function getAnthropic(): Anthropic {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) {
-    throw new UpstreamError('ANTHROPIC_API_KEY is not set', 500)
+    throw new ProviderNotConfiguredError('Anthropic', 'ANTHROPIC_API_KEY')
   }
   if (!_anthropic || _cachedKey !== apiKey) {
     _anthropic = new Anthropic({ apiKey, maxRetries: 3 })

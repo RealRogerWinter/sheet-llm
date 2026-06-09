@@ -4,7 +4,7 @@ subsystem: cross-cutting
 audience: [contributor, ai-agent]
 status: current
 last_verified: 2026-06-09
-verified_against: 406fcb1
+verified_against: 77d336d
 source_paths:
   - src/lib/orchestrator/flags.ts
   - src/lib/orchestrator/generationTier.ts
@@ -110,6 +110,8 @@ each **verified against `flags.ts` at this commit**.
 | `SL_BYOK_ALLOWED` | unset (off) | bool (`1`/`true`) | **SHE-8** opt-in that lets the **client-supplied** `debug.apiKey` (BYOK, plumbed as `apiKeyOverride`) and `debug.modelOverride` be honored when `NODE_ENV=production`. **Fail-closed: leave unset on the shared hosted demo** — honoring a client key unconditionally is a key-laundering / billing-evasion primitive. Enable ONLY on a single-tenant self-hosted/desktop instance (the OSS/desktop signal until an edition primitive exists). Auto-honored when `NODE_ENV` is `development`/`test`. A BYOK request is forced OFF the credit money path (no `placeHold`/settle) and onto a separate per-IP limiter. `generationTier.ts:isByokKeyAccepted`, `api/chat/route.ts` |
 | `SL_BYOK_IP_RATE_LIMIT` | unset → `30` | int (>0) | **SHE-8** per-IP request cap (5-min sliding window) for accepted BYOK requests, SEPARATE from `SL_REQUEST_IP_RATE_LIMIT` (BYOK is off our token-spend path but still hits shared infra). Only applies when a BYOK key is accepted; a single-tenant self-host can raise it, or set `0`/`off` to disable the cap outright. `orchestrator/byokRateLimit.ts:checkByokIp` |
 | `SL_BOUNDED_GEN` | **on** | explicit-false | **M26** free-tier bounded handler. `0`/`false` reverts free users to the legacy/sectional path WITHOUT opening the paywall (independent rollback of the new code path). `flags.ts:isBoundedGenEnabled` |
+| `SL_BOUNDED_EMIT_CEILING` | unset → `2600` | int (>0) | **SHE-8** free-tier bounded `max_tokens` kill-switch, env-overridable (read fresh). A self-host/desktop BYOK operator (own key, own cost) can raise it without a code change. Feeds `policyFor('free').maxOutputTokens` → the injected `TierPolicy.emitCeiling`. `generationTier.ts:resolveBoundedEmitCeiling` |
+| `SL_BOUNDED_MAX_BARS` | unset → `4` | int (>0) | **SHE-8** free-tier bounded max bars per call, env-overridable (read fresh). Feeds `policyFor('free').maxBars` → `TierPolicy.maxBars` (the edit-path extend/insert clamp). `generationTier.ts:resolveBoundedMaxBars` |
 | `SL_STREAM_ABORT` | off | bool | **M26** opt-in secondary streaming kill-switch (output-token + wall-clock abort wired into `textStream` via `providers/streamGuard.ts`). Off by default — the bounded `render_score` path is non-streaming and bounded by `max_tokens` alone. `flags.ts:isStreamAbortEnabled` |
 | `ORCHESTRATOR_BUDGET_INPUT_TOKENS` | `200000` | positive int | Per-session input-token cap; usage `>=` cap blocks further turns. Non-finite / `<=0` falls back to default. `budget.ts:20` |
 | `ORCHESTRATOR_BUDGET_OUTPUT_TOKENS` | `50000` | positive int | Per-session output-token cap. Same fallback rule. `budget.ts:21` |

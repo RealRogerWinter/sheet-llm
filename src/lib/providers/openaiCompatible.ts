@@ -1,4 +1,4 @@
-import { RateLimitedError, UpstreamError } from '@/lib/llm/errors'
+import { RateLimitedError, UpstreamError, ProviderNotConfiguredError } from '@/lib/llm/errors'
 import type {
   LLMProvider,
   ProviderCallOptions,
@@ -450,7 +450,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     if (!this.config.apiKeyEnv) return undefined // keyless (Ollama)
     const v = process.env[this.config.apiKeyEnv]
     if (!v) {
-      throw new UpstreamError(`${this.config.apiKeyEnv} is not set`, 500)
+      throw new ProviderNotConfiguredError(this.config.name, this.config.apiKeyEnv)
     }
     return v
   }
