@@ -1,4 +1,4 @@
-import { getMeasureCount, getStaffCount, getVoiceCount } from './scoreAccessors'
+import { getMeasureCount, getStaffCount, getVoiceCount, getVoiceMeasures } from './scoreAccessors'
 import type { Event, Measure, Score } from './types'
 
 /**
@@ -46,6 +46,18 @@ export interface ScoreDiffResult {
    * piece score near zero.
    */
   retainedEventRatio: number | null
+  /**
+   * SHE-6 — true when ANY staff/voice (primary + secondStaff + every
+   * extraVoices entry) has a measure-content or measure-count change
+   * between before and after. Unlike `retainedEventRatio` (which is
+   * deliberately primary-staff/voice-0 only, so the preservation /
+   * wholesale-rewrite gates keep their tuned thresholds), this signal
+   * sees the bass clef and extra voices. The orchestrator's ghost-preview
+   * noDiff gate consumes it so a bass-only edit is not mistaken for a
+   * no-change turn and suppressed. Null when either side is missing —
+   * "did anything change?" needs two operands.
+   */
+  hasAnyVoiceChange: boolean | null
 }
 
 /**
@@ -86,6 +98,8 @@ export function scoreDiff(before: Score | undefined, after: Score | undefined): 
     retainedEventRatio = retained / measureCountBefore
   }
 
+  const hasAnyVoiceChange = bothPresent ? anyVoiceChanged(before, after) : null
+
   return {
     measureCountBefore,
     measureCountAfter,
@@ -95,7 +109,36 @@ export function scoreDiff(before: Score | undefined, after: Score | undefined): 
     meterChanged,
     titleChanged,
     retainedEventRatio,
+    hasAnyVoiceChange,
   }
+}
+
+/**
+ * SHE-6 — true when any (staff, voice) pair differs between before and
+ * after, by either measure count or per-measure content hash. Mirrors
+ * the multi-staff walk in `ensureEventIds` / `computeAffectedEventIds`
+ * (getStaffCount → getVoiceCount → getVoiceMeasures) so the bass clef
+ * (`secondStaff`) and SATB `extraVoices` are no longer blind spots.
+ *
+ * Independent of `retainedEventRatio` (primary-staff/voice-0 only) on
+ * purpose — see ScoreDiffResult.hasAnyVoiceChange.
+ */
+function anyVoiceChanged(before: Score, after: Score): boolean {
+  const staffCount = Math.max(getStaffCount(before), getStaffCount(after))
+  for (let s = 0; s < staffCount; s++) {
+    const voiceCount = Math.max(getVoiceCount(before, s), getVoiceCount(after, s))
+    for (let v = 0; v < voiceCount; v++) {
+      const beforeMeasures = getVoiceMeasures(before, s, v)
+      const afterMeasures = getVoiceMeasures(after, s, v)
+      if (beforeMeasures.length !== afterMeasures.length) return true
+      for (let m = 0; m < beforeMeasures.length; m++) {
+        if (hashMeasure(beforeMeasures[m]) !== hashMeasure(afterMeasures[m])) {
+          return true
+        }
+      }
+    }
+  }
+  return false
 }
 
 function sumVoiceCounts(score: Score): number {
@@ -259,11 +302,16 @@ function fnv1a(s: string): string {
  * intentionally id-free for retention purposes) — id-matching would
  * over-report on a no-op rewrite.
  *
- * Treats:
+ * SHE-6 — the walk iterates EVERY (staff, voice) pair (primary +
+ * `secondStaff` + each `extraVoices` entry), mirroring `ensureEventIds`,
+ * so a bass-clef-only edit highlights the bass notes and a treble note
+ * is never falsely highlighted for a bass change.
+ *
+ * Treats (per voice):
  *   - Modified event at index i → emit afterMeasure.events[i].id
  *   - Inserted event past beforeMeasure.events.length → emit its id
- *   - Inserted measure past beforeScore.measures.length → emit every
- *     event id in that measure
+ *   - Inserted measure past the voice's beforeMeasures.length → emit
+ *     every event id in that measure
  *   - Deleted events → no contribution (no after-side id to highlight)
  *
  * Events without an `id` field are silently skipped (no stable handle
@@ -272,26 +320,34 @@ function fnv1a(s: string): string {
  */
 export function computeAffectedEventIds(before: Score, after: Score): string[] {
   const affected: string[] = []
-  const overlap = Math.min(before.measures.length, after.measures.length)
-  for (let m = 0; m < overlap; m++) {
-    const beforeMeasure = before.measures[m]
-    const afterMeasure = after.measures[m]
-    if (hashMeasure(beforeMeasure) === hashMeasure(afterMeasure)) continue
-    const evOverlap = Math.min(beforeMeasure.events.length, afterMeasure.events.length)
-    for (let e = 0; e < evOverlap; e++) {
-      if (canonEvent(beforeMeasure.events[e]) !== canonEvent(afterMeasure.events[e])) {
-        const id = afterMeasure.events[e].id
-        if (id) affected.push(id)
+  const staffCount = Math.max(getStaffCount(before), getStaffCount(after))
+  for (let s = 0; s < staffCount; s++) {
+    const voiceCount = Math.max(getVoiceCount(before, s), getVoiceCount(after, s))
+    for (let v = 0; v < voiceCount; v++) {
+      const beforeMeasures = getVoiceMeasures(before, s, v)
+      const afterMeasures = getVoiceMeasures(after, s, v)
+      const overlap = Math.min(beforeMeasures.length, afterMeasures.length)
+      for (let m = 0; m < overlap; m++) {
+        const beforeMeasure = beforeMeasures[m]
+        const afterMeasure = afterMeasures[m]
+        if (hashMeasure(beforeMeasure) === hashMeasure(afterMeasure)) continue
+        const evOverlap = Math.min(beforeMeasure.events.length, afterMeasure.events.length)
+        for (let e = 0; e < evOverlap; e++) {
+          if (canonEvent(beforeMeasure.events[e]) !== canonEvent(afterMeasure.events[e])) {
+            const id = afterMeasure.events[e].id
+            if (id) affected.push(id)
+          }
+        }
+        for (let e = evOverlap; e < afterMeasure.events.length; e++) {
+          const id = afterMeasure.events[e].id
+          if (id) affected.push(id)
+        }
       }
-    }
-    for (let e = evOverlap; e < afterMeasure.events.length; e++) {
-      const id = afterMeasure.events[e].id
-      if (id) affected.push(id)
-    }
-  }
-  for (let m = overlap; m < after.measures.length; m++) {
-    for (const ev of after.measures[m].events) {
-      if (ev.id) affected.push(ev.id)
+      for (let m = overlap; m < afterMeasures.length; m++) {
+        for (const ev of afterMeasures[m].events) {
+          if (ev.id) affected.push(ev.id)
+        }
+      }
     }
   }
   return affected

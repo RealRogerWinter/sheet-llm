@@ -169,7 +169,13 @@ function maybeAttachGhostProposal(
   if (result.replacement) return
   if (result.requiresConfirmation === true) return
   const diff = scoreDiff(input.editedScore, result.score)
+  // SHE-6 — `retainedEventRatio` is primary-staff/voice-0 only, so a
+  // bass-clef (`secondStaff`) or extra-voice-only edit leaves it at 1
+  // and would be wrongly treated as no-change. `hasAnyVoiceChange`
+  // walks every staff/voice, so gate on it: any voice changed ⇒ not a
+  // no-op, even when the primary-staff retention says nothing moved.
   const noDiff =
+    diff.hasAnyVoiceChange === false &&
     diff.retainedEventRatio === 1 &&
     diff.measureCountBefore === diff.measureCountAfter &&
     diff.keyChanged === false &&
