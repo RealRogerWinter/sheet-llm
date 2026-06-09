@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Link from 'next/link'
+import { useLegalEnabled } from '@/lib/legal/useLegalEnabled'
 import styles from './HeaderMenu.module.css'
 
 const GITHUB_URL = 'https://github.com/RealRogerWinter/sheet-llm'
@@ -21,25 +22,12 @@ const GITHUB_URL = 'https://github.com/RealRogerWinter/sheet-llm'
  */
 export default function HeaderMenu() {
   const [open, setOpen] = useState(false)
-  const [legalEnabled, setLegalEnabled] = useState(false)
+  // Shared module-memoized fetch (one /api/legal request even though MobileNav
+  // consumes the same hook and both menus are mounted, one CSS-hidden per breakpoint).
+  const legalEnabled = useLegalEnabled()
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null)
   const buttonRef = useRef<HTMLButtonElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
-
-  useEffect(() => {
-    let active = true
-    fetch('/api/legal')
-      .then((r) => (r.ok ? r.json() : { enabled: false }))
-      .then((d) => {
-        if (active) setLegalEnabled(Boolean(d?.enabled))
-      })
-      .catch(() => {
-        /* leave links hidden on error */
-      })
-    return () => {
-      active = false
-    }
-  }, [])
 
   function toggle() {
     setOpen((wasOpen) => {

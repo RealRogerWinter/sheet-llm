@@ -1,0 +1,152 @@
+.root {
+  display: inline-flex;
+}
+
+/* The "⋮" trigger. Matches the sibling header icon buttons exactly
+ * (ThemeToggle / HeaderMenu — 32px, --rule/--paper/--graphite, hover flips to
+ * --ink) so it sits as a peer next to the UsageCounter pill, and always offers
+ * at least a 44px touch target on coarse pointers (this is the primary mobile
+ * control). */
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  color: var(--graphite);
+  background: var(--paper);
+  transition:
+    color 120ms,
+    border-color 120ms,
+    background-color 120ms;
+}
+
+.trigger:hover {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.trigger:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+@media (pointer: coarse) {
+  .trigger {
+    width: var(--touch-target);
+    height: var(--touch-target);
+  }
+}
+
+.icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+/* Portaled to <body> so it escapes the sticky header's stacking context
+ * (mirrors HeaderMenu/NewMenu). --z-popover (110) sits above the docked side
+ * panels (--z-panel 81 / --z-ghost-panel 95) but below modals (--z-modal 1000),
+ * so "close menu then open modal" keeps Import/Help/Auth dialogs on top.
+ *
+ * Edition surface: warm paper, a hairline rule, the standard --ms-shadow, and a
+ * thin rubric top-rule for identity. */
+.menu {
+  position: fixed;
+  z-index: var(--z-popover, 110);
+  width: max-content;
+  min-width: 232px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 80px - var(--safe-b, 0px));
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  padding-bottom: calc(6px + var(--safe-b, 0px));
+  background: var(--ms-paper);
+  border: 1px solid var(--ms-edge-strong);
+  border-top: 2px solid var(--ms-rubric);
+  border-radius: var(--ms-radius-lg);
+  box-shadow: var(--ms-shadow);
+  /* Subtle entrance; instant for reduced-motion users. */
+  animation: menuIn 120ms ease-out;
+  transform-origin: top right;
+}
+
+@keyframes menuIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu {
+    animation: none;
+  }
+}
+
+/* Mono section label — the edition's label face, quiet and uppercase. */
+.section {
+  margin: 8px 10px 2px;
+  font-family: var(--font-label);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--graphite);
+  user-select: none;
+}
+
+.section:first-child {
+  margin-top: 4px;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: var(--touch-target); /* 44px — WCAG touch target */
+  padding: 10px 12px;
+  border: none;
+  border-radius: var(--ms-radius);
+  font-size: 14px;
+  color: var(--ink);
+  background: transparent;
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.item:hover:not(:disabled) {
+  background: var(--ms-rubric-soft);
+}
+
+.item:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
+}
+
+.item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* The one upsell row, tinted with the rubric accent. */
+.accent {
+  color: var(--ms-rubric);
+  font-weight: 600;
+}
+
+.rule {
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--ms-edge);
+}

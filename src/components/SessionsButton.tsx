@@ -2,9 +2,12 @@
 
 import { useEffect, useState } from 'react'
 import { useChatStore } from '@/lib/chat/state'
+import { mq } from '@/lib/ui/breakpoints'
 import styles from './SessionsButton.module.css'
 
-const DESKTOP_BREAKPOINT = '(min-width: 1024px)'
+// Single source of truth for the lg threshold — same value the header's CSS
+// split and the `.label` icon-only rule mirror (BREAKPOINTS.lg = 1024).
+const DESKTOP_BREAKPOINT = mq.up('lg')
 
 /**
  * Header trigger for the sessions sidebar. Toggles the mobile drawer
@@ -54,7 +57,9 @@ export default function SessionsButton() {
           <path d="M2 3.5h10M2 7h10M2 10.5h10" strokeLinecap="round" />
         </svg>
       </span>
-      <span>Sessions</span>
+      {/* Label collapses below lg (the icon + aria-label carry it) so the
+          mobile header holds a single compact row. */}
+      <span className={styles.label}>Sessions</span>
     </button>
   )
 }
