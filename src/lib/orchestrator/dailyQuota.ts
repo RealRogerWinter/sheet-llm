@@ -23,7 +23,12 @@ import type { GenerationTier } from '@/lib/orchestrator/generationTier'
  *       device's anon + logged-in usage is ONE running total: 5 anon then login
  *       grants 5 more (10/device), NOT a fresh 10. The account bucket then caps
  *       the same user to 10/day even as they roam to new IPs.
- *   - anonymous OR unverified   → key 'a:<hmac(ip)>', limit SL_DAILY_QUOTA_ANON (5)
+ *   - anonymous OR unverified   → BOTH the per-IP floor 'a:<hmac(ip)>' AND the
+ *       per-DEVICE bucket 'd:<userId>' (keyed on the stable signed sl_uid), each at
+ *       SL_DAILY_QUOTA_ANON (5); admitted only if BOTH allow. The 'd:' bucket binds
+ *       the allowance to the device so a mobile wifi<->cellular IP switch can't mint a
+ *       fresh anon allowance (SHE-14); the 'a:' floor is KEPT so clearing the sl_uid
+ *       cookie isn't a fresh-quota oracle. The 'd:' row stores userId=null like 'a:'.
  *   - risky-IP + TRULY anon     → login_required (sign-in CTA), no row
  *
  * Counting is COUNT-ON-ADMISSION with NO refunds: the increment happens here,
@@ -176,11 +181,23 @@ export function classifyQuota(input: QuotaInput, db = getDb()): QuotaClass {
   }
 
   // Everyone else is the ANON CLASS (anonymous, or logged-in-but-unverified — so a
-  // farmed unverified account is worth no more than the anon path): one per-device
-  // bucket at the lower anon limit. Same key as the verified device bucket above,
-  // so the count carries across the login boundary.
+  // farmed unverified account is worth no more than the anon path). Two buckets,
+  // each at the anon limit, admitted only if BOTH allow:
+  //   - the per-IP 'a:' floor (same key as the verified device bucket above, so the
+  //     count carries across the login boundary). KEPT as the mandatory floor:
+  //     clearing the sl_uid cookie still hits this shared IP bucket, so a cookie
+  //     wipe is NOT a fresh-quota oracle.
+  //   - the per-ANON-DEVICE 'd:<userId>' bucket keyed on the stable, server-signed
+  //     sl_uid every visitor carries. This binds the allowance to the device's
+  //     identity so a mobile wifi<->cellular switch (which rotates the IP /24-/56
+  //     and would otherwise mint a fresh 'a:' bucket) is still bounded. ADDITIVE,
+  //     not a replacement — defense-in-depth (SHE-14). userId stays null on the row
+  //     (like 'a:') so the time-based janitor reaps it and an account deletion can't
+  //     FK-cascade-reset a device's running total.
   if (!deviceKey) return { kind: 'bypass', reason: 'untrusted_ip' } // fail-open to availability
-  return { kind: 'counted', buckets: [{ key: deviceKey, limit: anonLimit(), userId: null }], isAnon: true }
+  const buckets: QuotaBucket[] = [{ key: deviceKey, limit: anonLimit(), userId: null }]
+  if (user.userId) buckets.push({ key: 'd:' + user.userId, limit: anonLimit(), userId: null })
+  return { kind: 'counted', buckets, isAnon: true }
 }
 
 // ---------------------------------------------------------------------------

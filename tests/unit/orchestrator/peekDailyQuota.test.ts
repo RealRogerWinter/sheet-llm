@@ -91,6 +91,25 @@ describe('peekDailyQuota', () => {
     })
   })
 
+  it('reflects the per-DEVICE (sl_uid) bucket: after IP rotation the counter shows the device standing, not the fresh IP', async () => {
+    const { checkDailyQuota, peekDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
+    const me = { userId: 'dev-peek', authenticated: false }
+    // Spend 4 on the device across two networks (each fresh IP 'a:' bucket gets 2,
+    // but the 'd:' device bucket accumulates all 4).
+    for (const ip of ['7.7.7.0', '7.7.7.0', '8.8.8.0', '8.8.8.0']) {
+      expect(checkDailyQuota({ user: me, tier: 'free', request: cfReq(ip), risk: CLEAR }).ok).toBe(true)
+    }
+    // Peek from a THIRD, brand-new network: the IP 'a:' bucket is fresh (5 left)
+    // but the device 'd:' bucket is the binding (most-constrained) one — 4 used.
+    expect(peekDailyQuota(me, 'free', cfReq('9.9.9.0'))).toMatchObject({
+      enabled: true,
+      isAnon: true,
+      limit: 5,
+      used: 4,
+      remaining: 1,
+    })
+  })
+
   it('treats an expired fixed window as a fresh allowance', async () => {
     const { checkDailyQuota, peekDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
     const req = cfReq('6.6.6.6')

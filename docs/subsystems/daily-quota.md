@@ -3,8 +3,8 @@ title: Daily Request Quota & Abuse Gating
 subsystem: daily-quota
 audience: [contributor, ai-agent]
 status: current
-last_verified: 2026-06-05
-verified_against: 3fcf277
+last_verified: 2026-06-09
+verified_against: 90d4c2f
 source_paths:
   - src/lib/orchestrator/dailyQuota.ts
   - src/lib/security/ipRisk.ts
@@ -71,9 +71,21 @@ account‑farming on one device nor IP‑rotation by one account exceeds 10.
   bucket the anon path uses, so login can't reset a device's running total) AND the
   per‑account `u:<userId>` — admitted only when both allow (if the IP is untrusted,
   the account bucket alone still applies); anonymous **and unverified‑logged‑in** →
-  `a:<hmac(ip)>` (5/24h, so farming unverified accounts is worth no more than the
-  anon path); risky **truly‑anonymous** IP → `login_required` (sign‑in CTA). An
-  untrusted/`local` IP → bypass for the anon path (never a shared counted bucket).
+  **two** buckets, each at 5/24h: the per‑IP `a:<hmac(ip)>` floor AND a
+  per‑anon‑**device** `d:<userId>` keyed on the stable, server‑signed `sl_uid` every
+  visitor carries — admitted only when both allow (so farming unverified accounts is
+  worth no more than the anon path, AND a mobile wifi↔cellular network switch that
+  rotates the IP can't mint a fresh allowance — SHE‑14); risky **truly‑anonymous** IP
+  → `login_required` (sign‑in CTA). An untrusted/`local` IP → bypass for the anon
+  path (never a shared counted bucket).
+- **Per‑device anon binding (`d:`)** is **additive, not a replacement** for the IP
+  floor: the `a:<hmac(ip)>` bucket stays mandatory so clearing/changing the `sl_uid`
+  cookie is NOT a fresh‑quota oracle — a cookie wipe still hits the shared per‑IP
+  bucket. The `sl_uid` is a server‑verified JWT (`session.ts`), so it can't be forged
+  to a counted‑but‑unused identity. The `d:` row stores `user_id = NULL` (like `a:`,
+  NOT like `u:`): it's keyed on a device identity, not a verified subject, so it is
+  reaped by the time‑based janitor and an account deletion / GDPR erase never
+  FK‑cascade‑resets a device's running total (a reset would itself be an abuse oracle).
 - **IP key**: `CF-Connecting-IP`, trusted only when `isCfRequest()`, normalized to
   `/24` (v4) or `/56` (v6, closes the `/64` self‑rotation multiplier; `ipMath.ts`
   also fixes the abbreviated‑IPv6 bug the shared `normalizeIp` has), then
@@ -93,11 +105,13 @@ account‑farming on one device nor IP‑rotation by one account exceeds 10.
   cap (`SL_DAILY_QUOTA_MAX_ROWS`) bounds table bloat from distinct‑key spray
   (logged when it trips). Availability is preferred over enforcement — the
   Anthropic org spend cap is the final hard stop.
-- **Retention/GDPR**: anon `a:` rows are short‑lived IP PII, reaped on a window+grace
-  cutoff (`janitor.reapExpiredQuotaCounters`) both opportunistically
-  (`maybeReapStaleQuota`) and at boot (`instrumentation.ts`). `u:` rows carry a
-  `users` FK `ON DELETE CASCADE` (erased on account deletion + counted in the
-  deletion receipt) and are included in the GDPR export (`gdpr/exportUser.ts`).
+- **Retention/GDPR**: anon `a:` rows (short‑lived IP PII) AND per‑device `d:` rows
+  (keyed on `sl_uid`, `user_id = NULL`) are reaped purely on a window+grace cutoff
+  (`janitor.reapExpiredQuotaCounters`) both opportunistically (`maybeReapStaleQuota`)
+  and at boot (`instrumentation.ts`). Only `u:` rows carry a `users` FK
+  `ON DELETE CASCADE` (erased on account deletion + counted in the deletion receipt)
+  and appear in the GDPR export (`gdpr/exportUser.ts`); `d:` rows are deliberately
+  NOT FK‑bound, so deleting an account can't reset a device's anon allowance.
 - **Limit‑reached UX** (`quotaMessages.ts` → `/api/chat` error body → client): a
   structured `cta` drives an in‑transcript card + a one‑shot modal (anon → create
   account; free → Pro waitlist; risky‑anon → sign in). The plain `error` string is
@@ -160,8 +174,14 @@ reviewable.
 
 - **Account‑farming** → Turnstile on signup + unverified‑as‑anon. Residual: mass
   disposable‑email verification — bounded by L7 + the org spend cap, not per‑identity.
-- **Residential/mobile‑proxy + incognito IP rotation** → cannot be stopped at the
-  origin; bounded by the low anon limit + the instance ceiling + the org spend cap.
+- **Mobile network switching (wifi↔cellular) by a single anon visitor** → the IP
+  /24‑/56 changes, but the stable server‑signed `sl_uid` does not, so the additive
+  per‑device `d:<sl_uid>` bucket caps the device at the anon limit regardless of how
+  many networks it roams across (SHE‑14). The per‑IP `a:` floor is retained, so a
+  cookie wipe is not an escape hatch either.
+- **Residential/mobile‑proxy + incognito IP rotation** (NEW IP *and* NEW `sl_uid` per
+  request) → still cannot be stopped at the origin; bounded by the low anon limit +
+  the instance ceiling + the org spend cap.
 - **CGNAT / university / office NAT false positives** → shared‑egress users share one
   5/24h bucket; mitigated by the sign‑in escape hatch, low‑friction (Turnstile, not
   pre‑use verify) signup, a tuneable `SL_DAILY_QUOTA_ANON`, and the IPv6 `/56` key.

@@ -409,6 +409,9 @@ export const authTokens = sqliteTable(
 // dailyQuota.ts / SL_DAILY_QUOTA_ENABLED). One row per quota key:
 //   'u:<userId>'  verified logged-in free tier (keyed on the account)
 //   'a:<hash>'    anonymous (keyed on the pseudonymized, normalized client IP)
+//   'd:<userId>'  per-anon-DEVICE bucket keyed on the stable signed sl_uid, so a
+//                 mobile wifi<->cellular IP switch can't mint a fresh anon allowance
+//                 (additive to 'a:'; user_id stays NULL like 'a:' — see dailyQuota.ts)
 //   '*'           optional instance-wide anonymous ceiling
 // Unlike the in-memory burst limiter (requestRateLimit.ts), this MUST be durable:
 // the single container is redeployed frequently and an in-memory counter resets
