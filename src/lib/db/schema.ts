@@ -409,6 +409,9 @@ export const authTokens = sqliteTable(
 // dailyQuota.ts / SL_DAILY_QUOTA_ENABLED). One row per quota key:
 //   'u:<userId>'  verified logged-in free tier (keyed on the account)
 //   'a:<hash>'    anonymous (keyed on the pseudonymized, normalized client IP)
+//   'd:<userId>'  per-anon-DEVICE bucket keyed on the stable signed sl_uid, so a
+//                 mobile wifi<->cellular IP switch can't mint a fresh anon allowance
+//                 (additive to 'a:'; user_id stays NULL like 'a:' — see dailyQuota.ts)
 //   '*'           optional instance-wide anonymous ceiling
 // Unlike the in-memory burst limiter (requestRateLimit.ts), this MUST be durable:
 // the single container is redeployed frequently and an in-memory counter resets
@@ -425,8 +428,8 @@ export const requestQuota = sqliteTable(
     // an IP string ever equals a userId. 'a:' values are HMAC-pseudonymized.
     quotaKey: text('quota_key').primaryKey(),
     // Set ONLY for 'u:' rows so GDPR erasure is automatic via the users FK
-    // cascade (foreign_keys=ON). NULL for anonymous ('a:') and instance ('*')
-    // rows, which carry no subject and rely on short retention.
+    // cascade (foreign_keys=ON). NULL for anonymous ('a:'), per-device ('d:'),
+    // and instance ('*') rows, which carry no subject and rely on short retention.
     userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
     // Epoch seconds of the first counted hit in the current window. Reset to now
     // when now >= window_start + WINDOW_SEC (fixed window anchored at first hit).

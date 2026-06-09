@@ -180,6 +180,72 @@ describe('checkDailyQuota', () => {
     expect(k).not.toContain('u:u2')
   })
 
+  it('anon device cap: IP rotation with the SAME sl_uid is STILL blocked once the device bucket is exhausted', async () => {
+    const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
+    // Same anonymous identity (stable sl_uid 'dev1') but a wifi<->cellular switch
+    // changes the IP /24 on every call — the per-IP 'a:' bucket never bites.
+    const me = { userId: 'dev1', authenticated: false }
+    let ok = 0
+    for (let n = 0; n < 12; n++) {
+      const i = input({ user: me, tier: 'free', ip: `10.0.${n}.5` })
+      if (checkDailyQuota(i).ok) ok++
+      else break
+    }
+    // Bound by the anon limit on the per-DEVICE bucket, not refreshed per network.
+    expect(ok).toBe(5)
+    const k = await keys()
+    expect(k).toContain('d:dev1') // per-device (sl_uid) bucket exists
+    expect(k.filter((x) => x.startsWith('a:')).length).toBe(5) // a fresh IP floor per network
+  })
+
+  it('clearing/changing the sl_uid cookie (new userId) on the SAME IP is still bounded by the IP a: floor', async () => {
+    const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
+    const ip = '11.11.11.11'
+    // Each request presents a brand-new sl_uid (as if the cookie were cleared) but
+    // shares one IP /24. The device 'd:' bucket is always fresh, so only the IP
+    // 'a:' floor can bound this — it must, capping the IP at the anon limit.
+    let ok = 0
+    for (let n = 0; n < 12; n++) {
+      const i = input({ user: { userId: `wiped-${n}`, authenticated: false }, tier: 'free', ip })
+      if (checkDailyQuota(i).ok) ok++
+      else break
+    }
+    expect(ok).toBe(5) // the IP floor holds even as the device key churns
+    const k = await keys()
+    expect(k.filter((x) => x.startsWith('a:')).length).toBe(1) // one shared IP bucket
+  })
+
+  it('anon device bucket uses the anon limit + 24h window; admission decrements BOTH buckets; no refund', async () => {
+    vi.stubEnv('SL_DAILY_QUOTA_ANON', '3')
+    const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
+    const { getDb } = await import('@/lib/db')
+    const { requestQuota } = await import('@/lib/db/schema')
+    const { eq, sql } = await import('drizzle-orm')
+    const me = { userId: 'dev2', authenticated: false }
+    const ip = '12.12.12.12'
+    // Two admissions on one device+IP increment BOTH buckets in lockstep.
+    expect(checkDailyQuota(input({ user: me, tier: 'free', ip })).ok).toBe(true)
+    expect(checkDailyQuota(input({ user: me, tier: 'free', ip })).ok).toBe(true)
+    const dev = getDb().select().from(requestQuota).where(eq(requestQuota.quotaKey, 'd:dev2')).get()
+    const ipRow = getDb().select().from(requestQuota).all().find((r) => r.quotaKey.startsWith('a:'))
+    expect(dev?.count).toBe(2)
+    expect(ipRow?.count).toBe(2)
+    expect(dev?.userId).toBeNull() // null like 'a:' so the time-based janitor reaps it
+    // The device bucket honours the anon limit (3) — a 4th from a NEW IP is denied
+    // by 'd:' (the IP floor is fresh), and the denial must NOT refund either bucket.
+    expect(checkDailyQuota(input({ user: me, tier: 'free', ip })).ok).toBe(true) // 3rd ok
+    const r = checkDailyQuota(input({ user: me, tier: 'free', ip: '99.99.99.99' }))
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.quotaClass).toBe('anon')
+    const devAfter = getDb().select().from(requestQuota).where(eq(requestQuota.quotaKey, 'd:dev2')).get()
+    expect(devAfter?.count).toBe(3) // not 4, not refunded to 2
+    // The fresh IP's 'a:' row was never written by the denied request (all-or-nothing).
+    expect((await keys()).filter((x) => x.startsWith('a:')).length).toBe(1)
+    // The 24h window: rewinding window_start fully lets the device bucket reset.
+    getDb().run(sql`UPDATE request_quota SET window_start = window_start - 100000`)
+    expect(checkDailyQuota(input({ user: me, tier: 'free', ip })).ok).toBe(true)
+  })
+
   it('risky anon + accounts ON → login_required 403, no row', async () => {
     vi.stubEnv('SL_ACCOUNTS_ENABLED', '1')
     const { checkDailyQuota } = await import('@/lib/orchestrator/dailyQuota')
