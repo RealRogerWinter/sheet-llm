@@ -124,6 +124,45 @@ describe('GET /api/auth/oauth/[provider]/callback', () => {
     expect(row?.emailVerified).toBe(1)
   })
 
+  it("adopts the browser's anonymous work when OAuth logs into an EXISTING account (SHE-9)", async () => {
+    const { getDb } = await import('@/lib/db')
+    const { users, oauthAccounts, sessions } = await import('@/lib/db/schema')
+    // Pre-existing account A with a linked Google identity (so resolveOAuthLogin
+    // returns kind:'login' for a DIFFERENT userId than the anon browser).
+    getDb()
+      .insert(users)
+      .values({ id: 'acct-A', createdAt: 0, lastSeenAt: 0, email: 'a@example.com', claimedAt: 1, emailVerified: 1 })
+      .run()
+    getDb()
+      .insert(oauthAccounts)
+      .values({ id: 'link-1', userId: 'acct-A', provider: 'google', providerAccountId: 'g-existing', createdAt: 0 })
+      .run()
+
+    // The browser is anonymous and has its own score session.
+    const { getRequestUser } = await import('@/lib/auth/session')
+    const anon = await getRequestUser()
+    expect(cookieJar.get('sl_uid')).toBeDefined()
+    getDb().insert(sessions).values({ id: 's-anon', userId: anon.userId, createdAt: 1, updatedAt: 1, lastMessageAt: 1 }).run()
+
+    await setFlow('GOOD')
+    const { exchangeCodeForUser } = await import('@/lib/auth/oauth/oauthUser')
+    ;(exchangeCodeForUser as unknown as Mock).mockResolvedValue({
+      provider: 'google',
+      providerAccountId: 'g-existing',
+      email: 'a@example.com',
+      emailVerified: true,
+    })
+    const { GET } = await import('@/app/api/auth/oauth/[provider]/callback/route')
+    const res = await GET(get('/api/auth/oauth/google/callback', { code: 'c', state: 'GOOD' }), ctx('google'))
+
+    expect(res.headers.get('location')).toContain('oauth=login')
+    // SHE-9: OAuth logins must adopt the anon work too, not just password logins.
+    const owner = getDb().select().from(sessions).where(eq(sessions.id, 's-anon')).get()?.userId
+    expect(owner).toBe('acct-A')
+    expect(cookieJar.get('sl_sess')).toBeDefined()
+    expect(cookieJar.get('sl_uid')).toBeUndefined() // absorbed identity consumed
+  })
+
   it('refuses an unverified provider email → oauth_error=email_unverified, no session', async () => {
     await setFlow('GOOD')
     const { exchangeCodeForUser } = await import('@/lib/auth/oauth/oauthUser')

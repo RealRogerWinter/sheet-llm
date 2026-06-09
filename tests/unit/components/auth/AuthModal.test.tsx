@@ -11,14 +11,16 @@ vi.mock('next/link', () => ({
     </a>
   ),
 }))
-vi.mock('@/lib/auth/authClient', () => ({ login: vi.fn(), signup: vi.fn() }))
+vi.mock('@/lib/auth/authClient', () => ({ login: vi.fn(), signup: vi.fn(), adoptAnonWork: vi.fn() }))
 vi.mock('@/lib/auth/clientBackup', () => ({ clearBackup: vi.fn() }))
-// AuthModal only reads useChatStore.getState().abc imperatively.
-const chatMock = vi.hoisted(() => ({ abc: undefined as unknown }))
-vi.mock('@/lib/chat/state', () => ({ useChatStore: { getState: () => ({ abc: chatMock.abc }) } }))
+// AuthModal reads useChatStore.getState().abc and calls refreshSessions() imperatively.
+const chatMock = vi.hoisted(() => ({ abc: undefined as unknown, refreshSessions: vi.fn() }))
+vi.mock('@/lib/chat/state', () => ({
+  useChatStore: { getState: () => ({ abc: chatMock.abc, refreshSessions: chatMock.refreshSessions }) },
+}))
 
 import AuthModal from '@/components/auth/AuthModal'
-import { login, signup } from '@/lib/auth/authClient'
+import { login, signup, adoptAnonWork } from '@/lib/auth/authClient'
 
 afterEach(() => {
   cleanup()
@@ -44,6 +46,37 @@ describe('AuthModal', () => {
     await user.click(screen.getByRole('button', { name: 'Log in' }))
     expect(login).toHaveBeenCalledWith('a@b.c', 'longpassword1', true)
     expect(useAuthStore.getState().loginOpen).toBe(false)
+  })
+
+  it('adopts anon work on a plain login (no score on screen) before refreshing the sidebar', async () => {
+    // SHE-9: anon-created scores were stranded because adoptAnonWork only ran from
+    // the keep/discard panel, which only appears when a score is visually on screen.
+    // A plain login from a blank canvas must STILL adopt the browser's anon sessions.
+    ;(login as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true })
+    ;(adoptAnonWork as ReturnType<typeof vi.fn>).mockResolvedValue(0)
+    chatMock.abc = undefined // blank canvas — no keep/discard panel
+    useAuthStore.setState({ loginOpen: true, oauthProviders: [], csrfToken: 't' })
+    const user = userEvent.setup()
+    render(<AuthModal />)
+    await user.type(screen.getByLabelText('Email'), 'a@b.c')
+    await user.type(screen.getByLabelText('Password'), 'longpassword1')
+    await user.click(screen.getByRole('button', { name: 'Log in' }))
+    expect(adoptAnonWork).toHaveBeenCalledTimes(1)
+    // Sidebar refreshes so the just-adopted sessions appear, then the modal closes.
+    expect(chatMock.refreshSessions).toHaveBeenCalled()
+    expect(screen.queryByText('Keep my work')).not.toBeInTheDocument()
+    expect(useAuthStore.getState().loginOpen).toBe(false)
+  })
+
+  it('does NOT adopt anon work on signup (signup claims the anon identity in place)', async () => {
+    ;(signup as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true })
+    useAuthStore.setState({ loginOpen: true, mode: 'signup', oauthProviders: [], csrfToken: 't' })
+    const user = userEvent.setup()
+    render(<AuthModal />)
+    await user.type(screen.getByLabelText('Email'), 'new@b.c')
+    await user.type(screen.getByLabelText(/^Password/), 'longpassword1')
+    await user.click(screen.getByRole('button', { name: 'Create account' }))
+    expect(adoptAnonWork).not.toHaveBeenCalled()
   })
 
   it('shows the mapped error and stays open on a failed login', async () => {

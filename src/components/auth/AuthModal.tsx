@@ -26,9 +26,11 @@ const DISCARD_KEYS = [
  * would eat input). Hosts BOTH the login and signup forms (toggled in place via
  * the auth store's `mode`), so Sign up opens here as a modal rather than routing
  * to the standalone `/signup` page. Correct autocomplete (username /
- * current-password vs new-password). After a successful login, if there's
- * unsaved local work, offers keep-or-discard so the anon work is never silently
- * lost; signup adopts the current anon work, so it just closes.
+ * current-password vs new-password). After a successful login the browser's
+ * anonymous work is ALWAYS adopted onto the account (SHE-9), independent of
+ * whether a score is on screen; the keep-or-discard prompt is now only a UX
+ * choice for visible on-screen work, not the mechanism that prevents loss.
+ * Signup claims the anon identity in place, so it just closes.
  */
 export default function AuthModal() {
   const open = useAuthStore((s) => s.loginOpen)
@@ -81,11 +83,30 @@ export default function AuthModal() {
       setError(res.message)
       return
     }
-    // Signup creates a fresh account that adopts the current browser's work, so
-    // there's nothing to reconcile — just finish. Login may collide with work
-    // from a previous anon session: if there's unsaved local work, ask
-    // keep/discard so it's never silently lost.
-    if (!isSignup && useChatStore.getState().abc) setKeepDiscard(true)
+    // Signup creates a fresh account that adopts the current browser's work IN
+    // PLACE (same userId), so there's nothing to reconcile — just finish.
+    if (isSignup) {
+      closeModal()
+      return
+    }
+    // Login authenticates a DIFFERENT userId than the anonymous one, so the
+    // browser's pre-login anon sessions/scores would otherwise stay stranded and
+    // never appear in the account's sidebar. Always migrate them onto the account
+    // (SHE-9): this MUST NOT depend on a score being visually on screen — logging
+    // in from a blank/not-yet-hydrated canvas previously closed the modal silently
+    // and never adopted. adoptAnonWork is server-side safe/idempotent and no-ops
+    // when there's nothing to adopt, and reads the source anon identity from the
+    // verified sl_uid cookie (never from client input). Best-effort.
+    try {
+      await adoptAnonWork()
+    } catch {
+      /* ignore — current work (if any) stays on screen */
+    }
+    // Re-fetch the sidebar so the just-adopted sessions show up now.
+    useChatStore.getState().refreshSessions()
+    // If there's unsaved local work visible, still offer keep/discard so the user
+    // can choose to start fresh in their account; otherwise just finish.
+    if (useChatStore.getState().abc) setKeepDiscard(true)
     else closeModal()
   }
 
@@ -111,19 +132,10 @@ export default function AuthModal() {
     window.location.reload()
   }
 
-  async function keepLocalWork() {
-    // Make "Keep my work" actually keep it: migrate the pre-login anonymous
-    // sessions onto this account so they appear in the left sidebar. Login (unlike
-    // signup) authenticates a DIFFERENT userId than the anon one, so without this
-    // the anon scores stay stranded and never register in the Sessions list.
-    // Best-effort — the current score is already loaded locally either way.
-    try {
-      await adoptAnonWork()
-    } catch {
-      /* ignore — local work stays on screen */
-    }
-    // Nudge the sidebar to re-fetch so the just-adopted sessions show up now.
-    useChatStore.getState().refreshSessions()
+  function keepLocalWork() {
+    // The anon sessions were already migrated onto the account in the login
+    // success path (and the sidebar already refreshed), so "Keep my work" just
+    // keeps the current score on screen and closes — nothing else to reconcile.
     closeModal()
   }
 

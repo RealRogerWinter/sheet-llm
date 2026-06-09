@@ -5,6 +5,7 @@ import { clearOAuthFlow, readOAuthFlow, sanitizeReturnTo } from '@/lib/auth/oaut
 import { exchangeCodeForUser } from '@/lib/auth/oauth/oauthUser'
 import { resolveOAuthLogin } from '@/lib/auth/oauth/oauthLink'
 import { getRequestUser } from '@/lib/auth/session'
+import { adoptAnonWorkInto } from '@/lib/auth/adoptAnonWork'
 import { createAuthSession } from '@/lib/auth/sessionStore'
 import { clientUserAgent } from '@/lib/auth/routeGuard'
 import { checkAuthIp, extractClientIp } from '@/lib/auth/authRateLimit'
@@ -93,5 +94,18 @@ export async function GET(request: Request, ctx: { params: Promise<{ provider: s
     ip,
   })
   await issueCsrfToken()
+  // SHE-9: OAuth logins are full-page redirects that bypass the modal's
+  // adopt-anon-work call, so adopt here too — but only when the browser was
+  // anonymous before this login (don't absorb anon work into an account that is
+  // merely LINKING a provider while already signed in). Best-effort: an adoption
+  // failure must never break a successful login. (No-ops via the helper's guards
+  // when OAuth claimed the anon identity in place — outcome.userId === anon id.)
+  if (!current.authenticated) {
+    try {
+      await adoptAnonWorkInto(outcome.userId)
+    } catch (e) {
+      console.error('[oauth] adopt anon work failed:', (e as Error).message)
+    }
+  }
   return appRedirect(request, returnTo, { oauth: outcome.kind })
 }
