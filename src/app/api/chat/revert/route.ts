@@ -17,6 +17,7 @@ import { ValidationError } from '@/lib/music/errors'
 import { scoreToAbc } from '@/lib/music/scoreToAbc'
 import { validateAbc, validateScore } from '@/lib/music/validateScore'
 import { scoreHash } from '@/lib/orchestrator/scoreVersion'
+import { recordTurnOutcome } from '@/lib/orchestrator/turnOutcome'
 import { summarizeScore } from '@/lib/shared/scoreSummary'
 import type { RevertResponse, TranscriptTurn } from '@/lib/shared/types'
 import {
@@ -127,6 +128,15 @@ export async function POST(request: Request) {
     throw e
   }
 
+  // SHE-18 PR1 — capture the head BEFORE the revert so we can label the
+  // turn that emitted it as `reverted` (the user is undoing it). Read it now;
+  // appendMessages below moves the head to the freshly-cloned revert row.
+  const headBeforeRevert = (await getDb()
+    .select({ headVersionId: sessions.headVersionId })
+    .from(sessions)
+    .where(eq(sessions.id, parsed.chatId))
+    .get())?.headVersionId
+
   const seedToolUseId = synthToolUseId()
   const userContent: UserContentBlock[] = [{ type: 'text', text: REVERT_USER_PROMPT }]
   const assistantContent: AssistantContentBlock[] = [
@@ -150,6 +160,12 @@ export async function POST(request: Request) {
     ],
     { scoreSource: 'revert' },
   )
+
+  // SHE-18 PR1 — the version we just undid is a negative training signal.
+  // Best-effort; no-op if its turn was a manual edit / earlier revert.
+  if (headBeforeRevert) {
+    await recordTurnOutcome(headBeforeRevert, 'reverted')
+  }
 
   // Re-read head to surface the new score_versions.id to the client so
   // it can use it as parentVersionId for the next manual-edit POST.

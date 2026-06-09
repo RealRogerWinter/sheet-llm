@@ -8,6 +8,7 @@ import { attachRecoveryHeader } from '@/lib/auth/attachRecovery'
 import { hasConversation } from '@/lib/llm/conversations'
 import { ScoreSchema } from '@/lib/music/types'
 import { scoreHash } from '@/lib/orchestrator/scoreVersion'
+import { recordTurnOutcome } from '@/lib/orchestrator/turnOutcome'
 import type { ConfirmReplacementResponse } from '@/lib/shared/types'
 import {
   UuidSchema,
@@ -139,6 +140,10 @@ export async function POST(request: Request) {
     }
     await db.update(sessions).set(update).where(eq(sessions.id, parsed.chatId)).run()
 
+    // SHE-18 PR1 — record the explicit accept on the turn that emitted this
+    // candidate (keyed by after_score_version_id). Best-effort.
+    await recordTurnOutcome(parsed.candidateVersionId, 'accepted')
+
     const body: ConfirmReplacementResponse = {
       chatId: parsed.chatId,
       headVersionId: parsed.candidateVersionId,
@@ -212,6 +217,10 @@ export async function POST(request: Request) {
     })
     .where(eq(sessions.id, parsed.chatId))
     .run()
+
+  // SHE-18 PR1 — record the explicit rejection on the turn that emitted the
+  // rejected candidate (keyed by after_score_version_id). Best-effort.
+  await recordTurnOutcome(parsed.candidateVersionId, 'reverted')
 
   const body: ConfirmReplacementResponse = {
     chatId: parsed.chatId,

@@ -35,6 +35,7 @@ vi.mock('@/lib/orchestrator', async () => {
 })
 
 const { POST } = await import('@/app/api/chat/route')
+const { POST: CONFIRM_POST } = await import('@/app/api/chat/confirm-replacement/route')
 const { orchestratorTurns, sessions } = await import('@/lib/db/schema')
 const { eq } = await import('drizzle-orm')
 
@@ -182,6 +183,85 @@ describe('/api/chat orchestrator integration (Phase 0)', () => {
       .where(eq(orchestratorTurns.sessionId, chatId))
       .get()!
     expect(turn.after).toBe(head)
+  })
+
+  it('SHE-18 PR2: full chain — gated /api/chat turn → confirm accept → outcome=accepted', async () => {
+    // The definitive non-seeded test: drive a REAL gated /api/chat turn (the
+    // mock writes the turn row run() would, after_score_version_id=NULL), let
+    // the responder mint the candidate + PR1 link it, then POST the real
+    // confirm-replacement and assert the turn's OUTCOME is set. Nothing about
+    // the turn row's outcome or link is seeded.
+    const candidateScore: Score = {
+      title: 'Wholesale rewrite',
+      key: 'F',
+      meter: '4/4',
+      measures: [{ events: [{ pitches: [{ step: 'F', octave: 4 }], duration: 'whole' }] }],
+    }
+    orchestratorRunMock.mockImplementation(
+      async (input: { requestId: string; chatId?: string }) => {
+        getDb()
+          .insert(orchestratorTurns)
+          .values({
+            id: crypto.randomUUID(),
+            sessionId: input.chatId!,
+            requestId: input.requestId,
+            createdAt: 1000,
+            latencyMs: 1,
+            finalStatus: 'ok',
+            replacementBlocked: 1,
+          })
+          .run()
+        return {
+          score: candidateScore,
+          introText: 'rewrote it',
+          requiresConfirmation: true,
+          replacement: { retainedIdentityRatio: 0.1, reasons: ['wholesale_rewrite'] },
+          classification: {
+            kind: 'generate_complex',
+            scope: 'long',
+            complexity: 'complex',
+            confidence: 1,
+          },
+          model: null,
+          latencyMs: 1,
+          toolUseId: 'toolu_gated',
+        }
+      },
+    )
+
+    const res = await POST(req({ message: 'start over with something new' }))
+    expect(res.status).toBe(200)
+    const data = await res.json()
+    expect(data.requiresConfirmation).toBe(true)
+    const candidateVersionId: string = data.replacement.candidateVersionId
+    const chatId: string = data.chatId
+    expect(candidateVersionId).toBeTruthy()
+
+    // PR1 linked the turn to the candidate version (not seeded).
+    const linkedBefore = getDb()
+      .select({ after: orchestratorTurns.afterScoreVersionId, outcome: orchestratorTurns.outcome })
+      .from(orchestratorTurns)
+      .where(eq(orchestratorTurns.sessionId, chatId))
+      .get()!
+    expect(linkedBefore.after).toBe(candidateVersionId)
+    expect(linkedBefore.outcome).toBeNull() // no decision yet
+
+    // Now the user accepts at the modal.
+    const confirmRes = await CONFIRM_POST(
+      new Request('http://localhost:3000/api/chat/confirm-replacement', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ chatId, candidateVersionId, decision: 'accept' }),
+      }),
+    )
+    expect(confirmRes.status).toBe(200)
+
+    const turnAfter = getDb()
+      .select({ outcome: orchestratorTurns.outcome })
+      .from(orchestratorTurns)
+      .where(eq(orchestratorTurns.sessionId, chatId))
+      .get()!
+    expect(turnAfter.outcome).toBe('accepted')
   })
 
   it('translates an orchestrator refusal into a 422 with structured reason', async () => {
