@@ -1,12 +1,15 @@
 'use client'
 
 import {
+  useCallback,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
   type FormEvent,
   type KeyboardEvent,
   type MouseEvent,
+  type PointerEvent as ReactPointerEvent,
 } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -15,6 +18,7 @@ import { useSubmitPrompt } from '@/lib/chat/useSubmitPrompt'
 import { usePromptHistory } from '@/lib/chat/usePromptHistory'
 import { mq } from '@/lib/ui/breakpoints'
 import { useMatchMedia } from '@/lib/ui/useMatchMedia'
+import { resolveSheetDrag, clampDragOffset } from '@/lib/ui/bottomSheet'
 import type { RevertRequest, RevertResponse, TranscriptTurn } from '@/lib/shared/types'
 import QuotaCard from './chat/QuotaCard'
 import styles from './ChatHistoryPanel.module.css'
@@ -56,6 +60,111 @@ function usePanelMode(): PanelMode {
   return 'drawer'
 }
 
+/**
+ * Lock body scroll while the (expanded) bottom sheet covers the viewport,
+ * restoring the prior value on close/unmount. No-op outside a DOM env.
+ */
+function useBodyScrollLock(active: boolean) {
+  useEffect(() => {
+    if (!active || typeof document === 'undefined') return
+    const { body } = document
+    const prev = body.style.overflow
+    body.style.overflow = 'hidden'
+    return () => {
+      body.style.overflow = prev
+    }
+  }, [active])
+}
+
+interface SheetDrag {
+  /** Live translateY in px (0 = fully open). Drives the inline transform. */
+  offset: number
+  /** True while a pointer drag is in progress (disables the snap transition). */
+  dragging: boolean
+  /** Attach to the grabber/header drag handle. */
+  onPointerDown: (e: ReactPointerEvent) => void
+}
+
+/**
+ * Pointer-drag controller for the sheet-mode grabber/header. Tracks the
+ * vertical drag, exposes a live `offset` for the transform, and on release
+ * feeds position + velocity into the pure `resolveSheetDrag` snap decision:
+ * dismiss (→ `onDismiss`) or snap back open. Honors reduced motion by
+ * skipping the live transform (state still commits on release).
+ *
+ * jsdom can't exercise real pointer geometry, so this wiring isn't
+ * unit-tested; the snap MATH it delegates to is exhaustively tested in
+ * tests/unit/lib/ui/bottomSheet.test.ts.
+ */
+function useSheetDrag(onDismiss: () => void, reduceMotion: boolean): SheetDrag {
+  const [offset, setOffset] = useState(0)
+  const [dragging, setDragging] = useState(false)
+  const startYRef = useRef(0)
+  const lastYRef = useRef(0)
+  const lastTRef = useRef(0)
+  const velocityRef = useRef(0)
+
+  const onPointerDown = useCallback(
+    (e: ReactPointerEvent) => {
+      // Primary button / touch only; let the close button etc. pass through.
+      if (e.button !== 0) return
+      const target = e.currentTarget as HTMLElement
+      try {
+        target.setPointerCapture(e.pointerId)
+      } catch {
+        /* jsdom / unsupported — drag still works via the listeners below */
+      }
+      startYRef.current = e.clientY
+      lastYRef.current = e.clientY
+      lastTRef.current = e.timeStamp
+      velocityRef.current = 0
+      setDragging(true)
+
+      const sheetHeight =
+        target.closest(`[data-mode='sheet']`)?.getBoundingClientRect().height ??
+        window.innerHeight
+
+      const handleMove = (ev: PointerEvent) => {
+        const raw = ev.clientY - startYRef.current
+        // Track instantaneous velocity (px/ms) for the flick threshold.
+        const dt = ev.timeStamp - lastTRef.current
+        if (dt > 0) velocityRef.current = (ev.clientY - lastYRef.current) / dt
+        lastYRef.current = ev.clientY
+        lastTRef.current = ev.timeStamp
+        if (!reduceMotion) setOffset(clampDragOffset(raw, sheetHeight))
+      }
+
+      const handleUp = (ev: PointerEvent) => {
+        window.removeEventListener('pointermove', handleMove)
+        window.removeEventListener('pointerup', handleUp)
+        window.removeEventListener('pointercancel', handleUp)
+        try {
+          target.releasePointerCapture(ev.pointerId)
+        } catch {
+          /* ignore */
+        }
+        const dragOffsetPx = ev.clientY - startYRef.current
+        const next = resolveSheetDrag({
+          dragOffsetPx,
+          velocityPxPerMs: velocityRef.current,
+          sheetHeightPx: sheetHeight,
+          currentState: 'expanded',
+        })
+        setDragging(false)
+        setOffset(0)
+        if (next === 'dismissed') onDismiss()
+      }
+
+      window.addEventListener('pointermove', handleMove)
+      window.addEventListener('pointerup', handleUp)
+      window.addEventListener('pointercancel', handleUp)
+    },
+    [onDismiss, reduceMotion],
+  )
+
+  return { offset, dragging, onPointerDown }
+}
+
 export default function ChatHistoryPanel() {
   const open = useChatStore((s) => s.panelOpen)
   const abc = useChatStore((s) => s.abc)
@@ -70,8 +179,16 @@ export default function ChatHistoryPanel() {
 
   // True while the docked AI-diff panel is showing — it shares the dock track.
   const ghostDiffActive = useChatStore((s) => s.pendingProposal?.presentation === 'diff-panel')
+  const reduceMotion = useChatStore((s) => s.reduceMotion)
 
   const mode = usePanelMode()
+  const isSheet = mode === 'sheet'
+
+  // Sheet-mode drag-to-dismiss. The grabber/header is the drag handle; on
+  // release `resolveSheetDrag` decides snap-back-open vs. dismiss-close.
+  const sheetDrag = useSheetDrag(() => setPanelOpen(false), reduceMotion)
+  // Lock body scroll while the (expanded) sheet covers the viewport.
+  useBodyScrollLock(isSheet && open)
 
   // The panel is permanently visible in docked mode (>=1280px) once a
   // score exists; in the narrower drawer / sheet modes it stays an
@@ -100,12 +217,26 @@ export default function ChatHistoryPanel() {
       )}
       <aside
         id="chat-history-panel"
-        className={styles.panel}
+        className={`${styles.panel} ${isSheet && sheetDrag.dragging ? styles.dragging : ''}`}
         data-mode={mode}
         role={isDocked ? 'complementary' : 'dialog'}
         aria-label="Chat history"
         {...(isDocked ? {} : { 'aria-modal': true })}
+        {...(isSheet && sheetDrag.offset > 0
+          ? { style: { transform: `translateY(${sheetDrag.offset}px)` } }
+          : {})}
       >
+        {isSheet && (
+          <button
+            type="button"
+            className={styles.grabber}
+            onPointerDown={sheetDrag.onPointerDown}
+            onClick={() => setPanelOpen(false)}
+            aria-label="Drag to resize, or tap to close the conversation panel"
+          >
+            <span className={styles.grabberPill} aria-hidden="true" />
+          </button>
+        )}
         <PanelHeader
           turnCount={turns.length}
           onClose={() => setPanelOpen(false)}

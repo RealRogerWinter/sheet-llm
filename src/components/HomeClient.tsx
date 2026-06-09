@@ -5,6 +5,7 @@ import AppHeader from './AppHeader'
 import Hero from './Hero'
 import DebugPanel from './DebugPanel'
 import ChatHistoryPanel from './ChatHistoryPanel'
+import ChatPanelFab from './ChatPanelFab'
 import SessionSidebar from './SessionSidebar'
 import AuthModal from './auth/AuthModal'
 import QuotaCtaModal from './chat/QuotaCtaModal'
@@ -53,6 +54,10 @@ export default function HomeClient() {
       <AppHeader />
       <Hero />
       <ChatHistoryPanel />
+      {/* Touch/narrow-viewport open control for the conversation panel
+          (SHE-11). Self-gates: hidden in docked mode, when no conversation
+          exists, and while the panel is already open. */}
+      <ChatPanelFab />
       {/* Docked AI-diff panel — a direct shell child so it can occupy the
           `panel` grid track (push) at xl, like the chat panel. */}
       <GhostPreviewPanel />

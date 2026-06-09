@@ -1,0 +1,75 @@
+/* Floating open-the-conversation control for touch / narrow viewports
+ * (drawer + sheet modes). Anchored bottom-right, lifted above the fixed
+ * transport bar (--transport-height) and clear of the iOS home indicator
+ * (safe-area inset). Engraved-edition vocabulary: solid --ink disc on
+ * --ms-paper, the rubric accent reserved for the turn-count badge. */
+.fab {
+  position: fixed;
+  right: var(--gap-4);
+  bottom: calc(
+    var(--gap-4) + var(--transport-height, 0px) + env(safe-area-inset-bottom, 0px)
+  );
+  z-index: var(--z-overlay);
+
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-1);
+  height: 48px;
+  padding: 0 14px;
+
+  border: 1px solid var(--ms-edge-strong);
+  border-radius: 24px;
+  background: var(--ink);
+  color: var(--paper);
+  box-shadow: var(--ms-shadow);
+
+  transition: transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 120ms, opacity 120ms;
+}
+
+.fab:hover {
+  transform: translateY(-1px);
+}
+
+.fab:active {
+  transform: translateY(0);
+}
+
+.fab:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+  color: currentColor;
+}
+
+/* Turn-count tab — the one rubric-accented element, echoing the panel's
+ * .currentBadge so the FAB reads as part of the same edition. */
+.count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--ms-rubric);
+  color: var(--ms-rubric-ink);
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fab {
+    transition: none;
+  }
+  .fab:hover,
+  .fab:active {
+    transform: none;
+  }
+}
