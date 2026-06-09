@@ -418,6 +418,21 @@ DATABASE_URL=file:./data/sheet-llm.db     # default; only file:* supported
   [`docs/subsystems/providers-llm.md`](../subsystems/providers-llm.md),
   [`docs/subsystems/auth-gdpr.md`](../subsystems/auth-gdpr.md)
 
+## Training-data capture (hosted-only, SHE-18)
+
+**HOSTED sheetllm.com ONLY; OFF BY DEFAULT** — leave `SL_CAPTURE_TRAINING` unset
+and no `training_pairs` rows are written, so self-hosted/local installs never
+build a training corpus. When on, `recordTurn` marks each turn with a thin
+consent row (turn FK + salted session hash + timestamp); `orchestrator_turns`
+stays the source of truth and the export joins back. Read fresh per call.
+Reader: `src/lib/orchestrator/trainingCapture.ts`. ⚠️ Capturing is decoupled
+from USING the data — a ToS/legal review gates feeding any training run.
+
+| Var | Default | Meaning |
+| --- | --- | --- |
+| `SL_CAPTURE_TRAINING` | off | Master toggle. `1`/`true`/`on` marks turns for the training corpus. |
+| `SL_CAPTURE_SALT` | empty | Per-deployment salt for the opaque `sha256(SALT:sessionId)` session hash (no raw session id / user is stored). Set a long random value when capture is on. |
+
 ## Daily request quota & abuse gating (hosted-only)
 
 **HOSTED sheetllm.com ONLY; OFF BY DEFAULT** — inert unless `SL_DAILY_QUOTA_ENABLED`

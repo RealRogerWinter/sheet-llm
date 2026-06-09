@@ -7,7 +7,8 @@ import {
   linkTurnScoreVersion,
 } from '@/lib/orchestrator/observability'
 import { eq } from 'drizzle-orm'
-import { orchestratorTurns, scoreVersions, sessions, users } from '@/lib/db/schema'
+import { captureTrainingPair } from '@/lib/orchestrator/trainingCapture'
+import { orchestratorTurns, scoreVersions, sessions, trainingPairs, users } from '@/lib/db/schema'
 import { setDbForTesting } from '@/lib/db'
 import { makeTestDb } from '../../factories/db'
 import type { Score } from '@/lib/music/types'
@@ -568,5 +569,94 @@ describe('linkTurnScoreVersion — backfill after_score_version_id (SHE-18 PR1)'
     // Link is scoped to session-1, but the only matching turn is in session-2.
     await linkTurnScoreVersion('shared-req', v, 'session-1')
     expect(afterOf('t-other')).toBeNull()
+  })
+})
+
+describe('recordTurn — training_pairs consent capture (SHE-18 PR4)', () => {
+  let db: ReturnType<typeof makeTestDb>
+
+  beforeEach(() => {
+    vi.unstubAllEnvs()
+    vi.stubEnv('ORCHESTRATOR_LOG_SILENT', '') // enable DB writes
+    db = makeTestDb()
+    db.insert(users).values({ id: 'u1', createdAt: 0, lastSeenAt: 0 }).run()
+    db.insert(sessions)
+      .values({ id: 'session-1', userId: 'u1', createdAt: 0, updatedAt: 0, lastMessageAt: 0 })
+      .run()
+    setDbForTesting(db)
+    vi.spyOn(console, 'log').mockImplementation(() => undefined)
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
+    setDbForTesting(undefined)
+    vi.unstubAllEnvs()
+  })
+
+  const okTurn = {
+    requestId: 'r-cap',
+    sessionId: 'session-1',
+    label: 'compose' as const,
+    handler: 'compose',
+    model: null,
+    latencyMs: 1,
+    finalStatus: 'ok' as const,
+  }
+
+  it('writes NO marker when SL_CAPTURE_TRAINING is unset (self-hosted default)', async () => {
+    await recordTurn(okTurn)
+    expect(db.select().from(trainingPairs).all()).toHaveLength(0)
+  })
+
+  it('writes NO marker when SL_CAPTURE_TRAINING is explicitly off', async () => {
+    vi.stubEnv('SL_CAPTURE_TRAINING', 'off')
+    await recordTurn(okTurn)
+    expect(db.select().from(trainingPairs).all()).toHaveLength(0)
+  })
+
+  it('writes a marker keyed to the turn, with an OPAQUE session hash, when on', async () => {
+    vi.stubEnv('SL_CAPTURE_TRAINING', '1')
+    await recordTurn(okTurn)
+    const turn = db.select().from(orchestratorTurns).get()!
+    const rows = db.select().from(trainingPairs).all()
+    expect(rows).toHaveLength(1)
+    expect(rows[0].turnId).toBe(turn.id)
+    // session id is NEVER stored raw — only a salted sha256 hex digest.
+    expect(rows[0].sessionHash).not.toBe('session-1')
+    expect(rows[0].sessionHash).toMatch(/^[0-9a-f]{64}$/)
+    expect(rows[0].capturedAt).toBeGreaterThan(0)
+  })
+
+  it('does not capture sessionless turns (no orchestrator_turns row to mark)', async () => {
+    vi.stubEnv('SL_CAPTURE_TRAINING', '1')
+    await recordTurn({ ...okTurn, sessionId: undefined, finalStatus: 'fell_through' })
+    expect(db.select().from(trainingPairs).all()).toHaveLength(0)
+  })
+
+  it('the session hash is stable for the same session (dedup/grouping key)', async () => {
+    vi.stubEnv('SL_CAPTURE_TRAINING', '1')
+    vi.stubEnv('SL_CAPTURE_SALT', 'salt-A')
+    await recordTurn({ ...okTurn, requestId: 'r1' })
+    await recordTurn({ ...okTurn, requestId: 'r2' })
+    const hashes = db.select().from(trainingPairs).all().map((r) => r.sessionHash)
+    expect(hashes).toHaveLength(2)
+    expect(hashes[0]).toBe(hashes[1]) // same session → same hash
+  })
+
+  it('captures a non-ok turn too (the marker is consent, not quality — export filters)', async () => {
+    vi.stubEnv('SL_CAPTURE_TRAINING', '1')
+    await recordTurn({ ...okTurn, finalStatus: 'error', error: 'boom' })
+    const rows = db.select().from(trainingPairs).all()
+    expect(rows).toHaveLength(1)
+    const turn = db.select().from(orchestratorTurns).get()!
+    expect(rows[0].turnId).toBe(turn.id)
+  })
+
+  it('captureTrainingPair is idempotent on a repeated turn id (no throw, one row)', async () => {
+    vi.stubEnv('SL_CAPTURE_TRAINING', '1')
+    await recordTurn(okTurn) // writes the turn + one marker
+    const turn = db.select().from(orchestratorTurns).get()!
+    // Re-capturing the same turn (e.g. a future backfill) must be a no-op.
+    expect(() => captureTrainingPair(db, { turnId: turn.id, sessionId: 'session-1' })).not.toThrow()
+    expect(db.select().from(trainingPairs).all()).toHaveLength(1)
   })
 })
