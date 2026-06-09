@@ -24,11 +24,14 @@ export function clearHighlight() {
 export function handleEvent(ev: NoteTimingEvent | null) {
   clearHighlight()
   if (!ev) return
-  // abcjs aggregates every glyph sounding at this beat — across all
-  // staves/voices, ordered top-to-bottom — into ev.elements. The last valid
-  // glyph is therefore the lowest staff: on a grand staff that's the bass note,
-  // which follow-score previously left off-screen because it only scrolled the
-  // first (treble) glyph (SHE-7). Track the bottom-most glyph instead.
+  // abcjs aggregates every glyph sounding at this beat into ev.elements, one
+  // group per voice in VOICE-DECLARATION order. scoreToAbcWithMap always emits
+  // the primary staff (treble) before secondStaff (bass), so the last valid
+  // glyph is the lowest staff — the bass note that follow-score previously left
+  // off-screen because it only scrolled the first (treble) glyph (SHE-7). Track
+  // the bottom-most glyph instead. NB: this relies on that top-to-bottom emit
+  // order (true for every score this app generates); it is not a general
+  // vertical sort of arbitrary ABC where a lower voice could be declared first.
   let bottomPlaying: HTMLElement | undefined
   if (ev.elements) {
     for (const group of ev.elements) {

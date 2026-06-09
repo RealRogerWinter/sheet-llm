@@ -101,6 +101,49 @@ describe('transportCursor', () => {
     expect(spy).toHaveBeenCalled()
   })
 
+  it('handleEvent scrolls the last element of the last group when the bottom staff has a chord', () => {
+    // A multi-voice/chord on the lowest staff means the final group holds more
+    // than one element; the scroll target must be the last of them.
+    const treble = document.createElement('div')
+    const bassLow = document.createElement('div')
+    const bassHigh = document.createElement('div')
+    for (const el of [treble, bassLow, bassHigh]) el.classList.add('abcjs-note')
+    document.body.append(treble, bassLow, bassHigh)
+    const trebleSpy = vi.fn()
+    const lowSpy = vi.fn()
+    const highSpy = vi.fn()
+    treble.scrollIntoView = trebleSpy as never
+    bassLow.scrollIntoView = lowSpy as never
+    bassHigh.scrollIntoView = highSpy as never
+    useChatStore.setState({ followPlayback: true } as never)
+
+    handleEvent({ elements: [[treble], [bassLow, bassHigh]], startCharArray: [], type: 'event' })
+
+    expect(highSpy).toHaveBeenCalled()
+    expect(trebleSpy).not.toHaveBeenCalled()
+    expect(lowSpy).not.toHaveBeenCalled()
+  })
+
+  it('handleEvent skips null/no-classList entries when choosing the bottom glyph', () => {
+    const treble = document.createElement('div')
+    const bass = document.createElement('div')
+    treble.classList.add('abcjs-note')
+    bass.classList.add('abcjs-note')
+    document.body.append(treble, bass)
+    const bassSpy = vi.fn()
+    bass.scrollIntoView = bassSpy as never
+    useChatStore.setState({ followPlayback: true } as never)
+
+    // A trailing null group must not become the scroll target nor crash.
+    handleEvent({
+      elements: [[treble], [bass], [null as unknown as HTMLElement]],
+      startCharArray: [],
+      type: 'event',
+    })
+
+    expect(bassSpy).toHaveBeenCalled()
+  })
+
   it('handleEvent does not scroll when followPlayback is off', () => {
     const treble = document.createElement('div')
     const bass = document.createElement('div')
