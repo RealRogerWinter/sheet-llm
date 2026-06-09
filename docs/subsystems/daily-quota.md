@@ -104,7 +104,10 @@ account‑farming on one device nor IP‑rotation by one account exceeds 10.
 - **Fail‑open everywhere**: any DB error → request allowed; a fail‑open admission
   cap (`SL_DAILY_QUOTA_MAX_ROWS`) bounds table bloat from distinct‑key spray
   (logged when it trips). Availability is preferred over enforcement — the
-  Anthropic org spend cap is the final hard stop.
+  Anthropic org spend cap is the final hard stop. Note: the anon path now writes
+  up to **two** rows per `(IP, device)` pair (`a:` + `d:`), so distinct‑key spray
+  fills toward `SL_DAILY_QUOTA_MAX_ROWS` ~2× faster than the IP‑only design — size
+  the cap (and the reaper cadence) with that headroom in mind.
 - **Retention/GDPR**: anon `a:` rows (short‑lived IP PII) AND per‑device `d:` rows
   (keyed on `sl_uid`, `user_id = NULL`) are reaped purely on a window+grace cutoff
   (`janitor.reapExpiredQuotaCounters`) both opportunistically (`maybeReapStaleQuota`)

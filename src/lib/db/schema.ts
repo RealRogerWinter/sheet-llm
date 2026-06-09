@@ -428,8 +428,8 @@ export const requestQuota = sqliteTable(
     // an IP string ever equals a userId. 'a:' values are HMAC-pseudonymized.
     quotaKey: text('quota_key').primaryKey(),
     // Set ONLY for 'u:' rows so GDPR erasure is automatic via the users FK
-    // cascade (foreign_keys=ON). NULL for anonymous ('a:') and instance ('*')
-    // rows, which carry no subject and rely on short retention.
+    // cascade (foreign_keys=ON). NULL for anonymous ('a:'), per-device ('d:'),
+    // and instance ('*') rows, which carry no subject and rely on short retention.
     userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
     // Epoch seconds of the first counted hit in the current window. Reset to now
     // when now >= window_start + WINDOW_SEC (fixed window anchored at first hit).
