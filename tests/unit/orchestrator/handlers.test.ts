@@ -160,14 +160,21 @@ describe('orchestrator/handlers/generateSimple', () => {
     vi.resetModules()
   })
 
-  it('delegates to the LLM client via completeWithRetry and returns its Score', async () => {
-    const completeMock = vi.fn().mockResolvedValue({
-      score: BASE_SCORE,
-      introText: 'Generated.',
+  it('routes fresh generation through the registry and returns its Score (default Sonnet)', async () => {
+    const toolCallMock = vi.fn().mockResolvedValue({
+      input: BASE_SCORE,
       toolUseId: 'toolu_real_1',
+      model: 'claude-sonnet-4-6',
+      introText: 'Generated.',
+      usage: { inputTokens: 10, outputTokens: 5 },
     })
-    vi.doMock('@/lib/llm', () => ({
-      getLLMClient: () => ({ complete: completeMock }),
+    vi.doMock('@/lib/providers/select', () => ({
+      selectProvider: () => ({
+        provider: { name: 'anthropic', toolCall: toolCallMock },
+        providerName: 'anthropic',
+        model: 'claude-sonnet-4-6',
+        tier: 'medium',
+      }),
     }))
     const { runGenerateSimple } = await import('@/lib/orchestrator/handlers/generateSimple')
     const result = await runGenerateSimple({
@@ -177,12 +184,21 @@ describe('orchestrator/handlers/generateSimple', () => {
         complexity: 'simple',
         confidence: 0.95,
       },
-      history: [],
+      history: [{ role: 'user', content: [{ type: 'text', text: 'make a C major scale' }] }],
+      chatId: 'chat-1',
     })
     expect(result.score).toEqual(BASE_SCORE)
     expect(result.introText).toBe('Generated.')
     expect(result.toolUseId).toBe('toolu_real_1')
     expect(result.model).toMatch(/sonnet/i)
-    expect(completeMock).toHaveBeenCalledTimes(1)
+    expect(toolCallMock).toHaveBeenCalledTimes(1)
+    // The stored transcript is forwarded as neutral history, and the legacy
+    // render_score tool description is preserved (byte-equivalence).
+    const [tool, callOpts] = toolCallMock.mock.calls[0]
+    expect(tool.description).toBeTruthy()
+    expect(callOpts.history).toEqual([
+      { role: 'user', content: [{ type: 'text', text: 'make a C major scale' }] },
+    ])
+    expect(callOpts.userText).toBeUndefined()
   })
 })

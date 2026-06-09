@@ -23,6 +23,18 @@ const completeMock = vi.fn()
 vi.mock('@/lib/llm/stubClient', () => ({ stubClient: { complete: completeMock } }))
 vi.mock('@/lib/llm', () => ({ getLLMClient: () => ({ complete: completeMock }) }))
 
+// SHE-17: generate_simple via the orchestrator routes through the registry.
+// (completeMock stays for the legacy debug.orchestrator=off / shadow paths.)
+const toolCallMock = vi.fn()
+vi.mock('@/lib/providers/select', () => ({
+  selectProvider: () => ({
+    provider: { name: 'anthropic', toolCall: toolCallMock },
+    providerName: 'anthropic',
+    model: 'claude-sonnet-4-6',
+    tier: 'medium',
+  }),
+}))
+
 const classifyMock = vi.fn()
 vi.mock('@/lib/orchestrator/classifier', () => ({
   classify: classifyMock,
@@ -74,6 +86,13 @@ describe('/api/chat debug overrides', () => {
       score: VALID_SCORE,
       introText: 'mocked',
       toolUseId: 'toolu_real_1',
+    })
+    toolCallMock.mockReset()
+    toolCallMock.mockResolvedValue({
+      input: VALID_SCORE,
+      introText: 'mocked',
+      toolUseId: 'toolu_real_1',
+      model: 'claude-sonnet-4-6',
     })
     classifyMock.mockReset()
     classifyMock.mockResolvedValue({
