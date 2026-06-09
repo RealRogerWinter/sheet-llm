@@ -3,7 +3,7 @@ import { and, eq, lt, sql } from 'drizzle-orm'
 import { getDb } from '@/lib/db'
 import { requestQuota, users } from '@/lib/db/schema'
 import { extractClientIp } from '@/lib/http/clientIp'
-import { isAccountsEnabled } from '@/lib/auth/account'
+import { isFlagEnabled } from '@/lib/env/flag'
 import { assessClientRisk, isCfRequest, logIpRisk, type RiskVerdict } from '@/lib/security/ipRisk'
 import { networkPrefix } from '@/lib/security/ipMath'
 import type { GenerationTier } from '@/lib/orchestrator/generationTier'
@@ -43,10 +43,6 @@ import type { GenerationTier } from '@/lib/orchestrator/generationTier'
 // ---------------------------------------------------------------------------
 // Config — read FRESH on every call so an operator can retune without redeploy.
 // ---------------------------------------------------------------------------
-function envBool(name: string): boolean {
-  const v = process.env[name]
-  return v === '1' || v?.toLowerCase() === 'true'
-}
 function intEnv(name: string, def: number): number {
   const n = Number(process.env[name])
   return Number.isInteger(n) && n > 0 ? n : def
@@ -57,7 +53,7 @@ function clampIntEnv(name: string, def: number, min: number, max: number): numbe
 }
 
 export function isDailyQuotaEnabled(): boolean {
-  return envBool('SL_DAILY_QUOTA_ENABLED')
+  return isFlagEnabled('SL_DAILY_QUOTA_ENABLED')
 }
 const anonLimit = (): number => intEnv('SL_DAILY_QUOTA_ANON', 5)
 const freeLimit = (): number => intEnv('SL_DAILY_QUOTA_FREE', 10)
@@ -162,7 +158,7 @@ export function classifyQuota(input: QuotaInput, db = getDb()): QuotaClass {
 
   // login_required applies ONLY to the truly-unauthenticated (an already-logged-in
   // unverified user must not be told to "sign in"; they just share the anon bucket).
-  if (!user.authenticated && risk.risky && isAccountsEnabled()) return { kind: 'needsSignIn' }
+  if (!user.authenticated && risk.risky && isFlagEnabled('SL_ACCOUNTS_ENABLED')) return { kind: 'needsSignIn' }
 
   // The per-DEVICE bucket (IP /24-or-/56, pseudonymized). Shared by the anon path
   // AND the verified-logged-in path so login can't reset a device's running total.

@@ -117,8 +117,17 @@ describe('isAdvancedComposerEnabled (PR-8 — Opus routing operator flag)', () =
     expect(isAdvancedComposerEnabled()).toBe(true)
   })
 
-  it('stays OFF for any other value', () => {
-    for (const v of ['0', 'false', 'yes', 'on', 'enabled']) {
+  // SHE-8: the flag now goes through the canonical isFlagEnabled truthiness,
+  // which ALSO accepts yes/on (a superset of the old 1/true-only parse).
+  it('also honors yes / on (SHE-8 canonical truthiness)', () => {
+    for (const v of ['yes', 'YES', 'on', 'ON']) {
+      vi.stubEnv('SL_ADVANCED_COMPOSER', v)
+      expect(isAdvancedComposerEnabled()).toBe(true)
+    }
+  })
+
+  it('stays OFF for 0 / false / no / off and unrecognized values', () => {
+    for (const v of ['0', 'false', 'no', 'off', 'enabled', 'maybe']) {
       vi.stubEnv('SL_ADVANCED_COMPOSER', v)
       expect(isAdvancedComposerEnabled()).toBe(false)
     }

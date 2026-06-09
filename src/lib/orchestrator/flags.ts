@@ -1,14 +1,4 @@
-function readBool(name: string): boolean {
-  const v = process.env[name]
-  if (!v) return false
-  return v === '1' || v.toLowerCase() === 'true'
-}
-
-function readExplicitFalse(name: string): boolean {
-  const v = process.env[name]
-  if (!v) return false
-  return v === '0' || v.toLowerCase() === 'false'
-}
+import { isFlagEnabled } from '@/lib/env/flag'
 
 export type OrchestratorMode = 'off' | 'shadow' | 'primary'
 
@@ -18,18 +8,18 @@ export type OrchestratorMode = 'off' | 'shadow' | 'primary'
  * toggles take effect without redeploy.
  *
  * Phase 5: orchestrator is ON by default. The presence of
- * ORCHESTRATOR_ENABLED=false (or '0') opts out.
+ * ORCHESTRATOR_ENABLED=false (or '0'/'no'/'off') opts out.
  *
  * Layering, highest precedence first:
- *   ORCHESTRATOR_KILL=1            → 'off' (operator escape hatch)
- *   ORCHESTRATOR_ENABLED in {false,0} → 'off' (explicit opt-out)
- *   ORCHESTRATOR_MODE=shadow       → 'shadow' (orchestrator runs
+ *   ORCHESTRATOR_KILL truthy        → 'off' (operator escape hatch)
+ *   ORCHESTRATOR_ENABLED disabled   → 'off' (explicit opt-out)
+ *   ORCHESTRATOR_MODE=shadow        → 'shadow' (orchestrator runs
  *     alongside legacy; legacy wins the response, divergence is logged)
  *   default                        → 'primary'
  */
 export function getOrchestratorMode(): OrchestratorMode {
-  if (readBool('ORCHESTRATOR_KILL')) return 'off'
-  if (readExplicitFalse('ORCHESTRATOR_ENABLED')) return 'off'
+  if (isFlagEnabled('ORCHESTRATOR_KILL')) return 'off'
+  if (!isFlagEnabled('ORCHESTRATOR_ENABLED', { defaultOn: true })) return 'off'
   if (process.env.ORCHESTRATOR_MODE === 'shadow') return 'shadow'
   return 'primary'
 }
@@ -59,7 +49,7 @@ export function isOrchestratorEnabled(): boolean {
  * the existing kill-switch pattern).
  */
 export function isComposePatchDispatchEnabled(): boolean {
-  return readBool('SL_COMPOSE_PATCH_DISPATCH')
+  return isFlagEnabled('SL_COMPOSE_PATCH_DISPATCH')
 }
 
 /**
@@ -70,17 +60,17 @@ export function isComposePatchDispatchEnabled(): boolean {
  * — eliminating the misclassification risk that surfaced as the
  * triplet-demo silent-replacement bug.
  *
- * **Default ON since PR-6.** Set `SL_NEW_TOOL_DISPATCH=0` (or `false`)
+ * **Default ON since PR-6.** Set `SL_NEW_TOOL_DISPATCH=0`/`false`/`no`/`off`
  * to fall back to the legacy classifier path. Read on every call so
  * operators can flip without redeploy.
  */
 export function isNewToolDispatchEnabled(): boolean {
-  return !readExplicitFalse('SL_NEW_TOOL_DISPATCH')
+  return isFlagEnabled('SL_NEW_TOOL_DISPATCH', { defaultOn: true })
 }
 
 /**
  * M3.5-PR-4 — replacement-as-confirmation gate. ON by default. When
- * disabled (`SL_REPLACEMENT_GATE=0` or `false`), the orchestrator
+ * disabled (`SL_REPLACEMENT_GATE=0`/`false`/`no`/`off`), the orchestrator
  * never marks a turn as `requiresConfirmation` and the legacy silent-
  * replace behaviour returns. Provided as an escape hatch in case the
  * gate misfires (e.g. on a corpus where wholesale key changes are
@@ -88,7 +78,7 @@ export function isNewToolDispatchEnabled(): boolean {
  * without redeploy.
  */
 export function isReplacementGateEnabled(): boolean {
-  return !readExplicitFalse('SL_REPLACEMENT_GATE')
+  return isFlagEnabled('SL_REPLACEMENT_GATE', { defaultOn: true })
 }
 
 /**
@@ -99,8 +89,8 @@ export function isReplacementGateEnabled(): boolean {
  * event ids) or a right-docked diff panel (>=5). Manual edits during
  * a pending proposal interrupt it; a 30s toast offers Resume.
  *
- * **ON by default since M24-PR-6.** Set `SL_GHOST_PREVIEW=0` (or
- * `false`) to opt out — the orchestrator silently commits scores and
+ * **ON by default since M24-PR-6.** Set `SL_GHOST_PREVIEW=0`/`false`/`no`/`off`
+ * to opt out — the orchestrator silently commits scores and
  * the overlay/panel UI never fires. Read on every call so operators
  * can flip without redeploy.
  *
@@ -110,7 +100,7 @@ export function isReplacementGateEnabled(): boolean {
  * doesn't replicate).
  */
 export function isGhostPreviewEnabled(): boolean {
-  return !readExplicitFalse('SL_GHOST_PREVIEW')
+  return isFlagEnabled('SL_GHOST_PREVIEW', { defaultOn: true })
 }
 
 /**
@@ -120,12 +110,12 @@ export function isGhostPreviewEnabled(): boolean {
  * and delivered over SSE, so large pieces never truncate and the score
  * renders section-by-section. **ON by default since M25-PR-5** (route
  * maxDuration raised + the client score-stream consumer landed). Set
- * `SL_SECTIONAL_GEN=0` (or `false`) to fall back to single-shot
+ * `SL_SECTIONAL_GEN=0`/`false`/`no`/`off` to fall back to single-shot
  * `runGenerateComplex`. Read on every call so operators can flip without
  * redeploy.
  */
 export function isSectionalGenEnabled(): boolean {
-  return !readExplicitFalse('SL_SECTIONAL_GEN')
+  return isFlagEnabled('SL_SECTIONAL_GEN', { defaultOn: true })
 }
 
 /**
@@ -139,7 +129,7 @@ export function isSectionalGenEnabled(): boolean {
  * itself lives in `generationTier.ts`. Read fresh; no redeploy.
  */
 export function isBoundedGenEnabled(): boolean {
-  return !readExplicitFalse('SL_BOUNDED_GEN')
+  return isFlagEnabled('SL_BOUNDED_GEN', { defaultOn: true })
 }
 
 /**
@@ -151,5 +141,5 @@ export function isBoundedGenEnabled(): boolean {
  * streamed-tool) path. Read fresh.
  */
 export function isStreamAbortEnabled(): boolean {
-  return readBool('SL_STREAM_ABORT')
+  return isFlagEnabled('SL_STREAM_ABORT')
 }

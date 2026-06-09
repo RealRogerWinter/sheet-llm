@@ -3,8 +3,8 @@ title: Contributing to sheet-llm
 subsystem: cross-cutting
 audience: [contributor, ai-agent]
 status: current
-last_verified: 2026-06-03
-verified_against: 150cb15
+last_verified: 2026-06-09
+verified_against: 881aa3b
 source_paths:
   - package.json
   - drizzle.config.ts
@@ -12,6 +12,7 @@ source_paths:
   - src/lib/auth/session.ts
   - src/lib/auth/recovery.ts
   - src/lib/orchestrator/flags.ts
+  - src/lib/env/flag.ts
 related:
   - development-workflow
   - getting-started
@@ -78,10 +79,16 @@ These are derived from `git log`, not invented:
   (MusicXML export) shipped as 17 PRs, each adding one emit path. Prefer
   a narrow PR that passes every gate over a broad one.
 - **Behavior changes ship dark first.** Gate any new behavior behind a
-  default-off flag (`readBool` in `src/lib/orchestrator/flags.ts`), then
-  flip the default in a **separate** PR once it bakes. The flag stays as
+  default-off flag read through `isFlagEnabled(name, { defaultOn? })`
+  (`src/lib/env/flag.ts`) — the one canonical server-side truthiness reader —
+  then flip the default in a **separate** PR once it bakes. The flag stays as
   an operator escape hatch. See development-workflow §"Feature-flag
   rollout discipline".
+- **OSS↔SaaS layering invariant.** Core / render / orchestrator code must
+  impose no paywall and must not import `@/lib/billing` or `@/lib/auth` (use
+  `@/lib/metering` / `@/lib/http`); **SaaS flags default OFF and fail closed**;
+  **no secret reaches a client bundle**; the OSS edition runs uncapped. Full
+  reference: [`docs/SAAS_BYOK_SEAMS.md`](../SAAS_BYOK_SEAMS.md).
 
 ### Commit message style
 
