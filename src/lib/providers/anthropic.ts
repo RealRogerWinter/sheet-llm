@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { ChatMessage } from '@/lib/llm/wrapper'
 import { RateLimitedError, UpstreamError } from '@/lib/llm/errors'
+import { toAnthropicMessages } from './anthropicConversation'
 import type {
   LLMProvider,
   ProviderCallOptions,
@@ -412,7 +413,10 @@ function buildSystemBlocks(
 }
 
 function buildMessages(options: ProviderCallOptions): ChatMessage[] {
-  if (options.history) return [...options.history]
+  // Adapt the neutral IR (SHE-17) to the Anthropic-native shape. This
+  // round-trips byte-identically with the stored transcript — see
+  // anthropicConversation.ts and the goldens in conversation.test.ts.
+  if (options.history) return toAnthropicMessages(options.history)
   if (!options.userText) {
     throw new Error('AnthropicProvider.toolCall requires either history or userText')
   }

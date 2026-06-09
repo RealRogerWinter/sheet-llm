@@ -23,7 +23,7 @@ import type {
   SystemBlock,
   Tier,
 } from '@/lib/providers/types'
-import type { ChatMessage } from '@/lib/llm/wrapper'
+import type { NeutralMessage } from '@/lib/providers/conversation'
 
 export interface ScoreCallTarget {
   provider: LLMProvider
@@ -86,7 +86,12 @@ export async function callWithScoreRetry(
     ...(opts.providerOptions !== undefined ? { providerOptions: opts.providerOptions } : {}),
   }
 
-  let history: ChatMessage[] | undefined = undefined
+  // ProviderCallOptions.history is the neutral IR — every block built here
+  // must be neutral-modelable (text / tool_use / tool_result), since the
+  // Anthropic adapter (toAnthropicMessages), not the API, is now the shape
+  // gate. Built from scratch from app strings + the current call's parsed
+  // output; no stored/DB history flows in.
+  let history: NeutralMessage[] | undefined = undefined
   let lastError: ValidationError | undefined
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -155,8 +160,8 @@ export async function callWithScoreRetry(
         content: [
           {
             type: 'tool_result',
-            tool_use_id: result.toolUseId,
-            is_error: true,
+            toolUseId: result.toolUseId,
+            isError: true,
             content: `Score failed validation: ${e.describe()}. Call render_score again with the fix; keep everything else unchanged.`,
           },
         ],

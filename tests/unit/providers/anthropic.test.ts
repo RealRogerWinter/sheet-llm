@@ -257,6 +257,52 @@ describe('AnthropicProvider', () => {
     expect(call.messages[2].content[0]).toEqual({ type: 'text', text: 'turn 2' })
   })
 
+  it('adapts neutral tool_use/tool_result history to the Anthropic wire shape (SHE-17)', async () => {
+    anthropicCreateMock.mockResolvedValue(toolUseResponse({ x: 'hi', y: 1 }))
+    await provider.toolCall(
+      { name: 'test_tool', inputSchema: SimpleSchema, inputSchemaJson: {} },
+      {
+        systemPrompt: 'sys',
+        toolChoice: 'required',
+        // Neutral IR: camelCase toolUseId / isError, no @anthropic-ai/sdk types.
+        history: [
+          { role: 'user', content: [{ type: 'text', text: 'make a scale' }] },
+          {
+            role: 'assistant',
+            // introText + tool_use: pins the [text, tool_use] block ORDER
+            // that scoreRetry emits when result.introText is present.
+            content: [
+              { type: 'text', text: 'here you go' },
+              { type: 'tool_use', id: 'toolu_1', name: 'test_tool', input: { x: 'a', y: 1 } },
+            ],
+          },
+          {
+            role: 'user',
+            content: [
+              { type: 'tool_result', toolUseId: 'toolu_1', isError: true, content: 'bad' },
+            ],
+          },
+        ],
+      },
+    )
+    const call = anthropicCreateMock.mock.calls[0][0]
+    // Assistant block order [text, tool_use] is preserved, both in Anthropic shape.
+    expect(call.messages[1].content[0]).toEqual({ type: 'text', text: 'here you go' })
+    expect(call.messages[1].content[1]).toEqual({
+      type: 'tool_use',
+      id: 'toolu_1',
+      name: 'test_tool',
+      input: { x: 'a', y: 1 },
+    })
+    // tool_result maps camelCase -> snake_case wire keys, is_error preserved.
+    expect(call.messages[2].content[0]).toEqual({
+      type: 'tool_result',
+      tool_use_id: 'toolu_1',
+      is_error: true,
+      content: 'bad',
+    })
+  })
+
   it('maps Anthropic.RateLimitError to RateLimitedError', async () => {
     const Anthropic = (await import('@anthropic-ai/sdk')).default as unknown as {
       RateLimitError: new (message: string) => Error

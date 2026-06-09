@@ -1,5 +1,5 @@
 import type { z } from 'zod'
-import type { ChatMessage } from '@/lib/llm/wrapper'
+import type { NeutralMessage } from './conversation'
 
 /** All providers that the registry can route to. */
 export type ProviderName = 'anthropic' | 'groq' | 'ollama'
@@ -71,8 +71,13 @@ export interface ProviderCallOptions {
   systemPrompt: string | SystemBlock[]
   /** Single-shot user text (when `history` is not used). */
   userText?: string
-  /** Multi-turn conversation history (alternative to userText). */
-  history?: ReadonlyArray<ChatMessage>
+  /**
+   * Multi-turn conversation history (alternative to userText), in the
+   * provider-agnostic neutral IR (SHE-17). Each provider adapts it to its
+   * own wire shape — Anthropic via `toAnthropicMessages`, OpenAI-compatible
+   * via its own mapping. The core no longer speaks the Anthropic block type.
+   */
+  history?: ReadonlyArray<NeutralMessage>
   /** Forces the model to call the given tool by name. Omit on text-only
    *  (non-tool) streaming calls — see `LLMProvider.textStream`. */
   toolChoice?: 'required'
