@@ -13,8 +13,8 @@
  *
  * Single-process, `globalThis`-cached (HMR-safe), `MAX_ENTRIES` fail-closed —
  * mirrors `requestRateLimit` / `authRateLimit`. Env-overridable via
- * `SL_BYOK_IP_RATE_LIMIT` (default 30 requests / 5 min / IP; set `0` or a
- * negative value to fall back to the default — there is no "disable", only tune).
+ * `SL_BYOK_IP_RATE_LIMIT` (default 30 requests / 5 min / IP; `0` or `off`
+ * disables the cap entirely for a single-tenant self-host).
  */
 const WINDOW_MS = 5 * 60 * 1000
 const DEFAULT_LIMIT = 30
@@ -35,17 +35,23 @@ function getStore(): Map<string, Bucket> {
   return globalThis.__sheetllm_byok_rate
 }
 
-function ipLimit(): number {
+/** Resolved per-IP cap, or `null` when the operator disabled it outright. */
+function ipLimit(): number | null {
+  const raw = process.env.SL_BYOK_IP_RATE_LIMIT?.trim().toLowerCase()
+  // Self-host escape hatch: explicit `0` / `off` disables the cap entirely. A
+  // single-tenant install (the intended BYOK audience) may want no per-IP brake.
+  if (raw === '0' || raw === 'off') return null
   const n = Number(process.env.SL_BYOK_IP_RATE_LIMIT)
   return Number.isInteger(n) && n > 0 ? n : DEFAULT_LIMIT
 }
 
 /** Per-IP throttle for one BYOK request. Records the hit on success. */
 export function checkByokIp(ip: string): { ok: boolean; retryAfterSec?: number } {
+  const limit = ipLimit()
+  if (limit === null) return { ok: true } // disabled (self-host opt-out)
   const bucket = getStore()
   const now = Date.now()
   const cutoff = now - WINDOW_MS
-  const limit = ipLimit()
   const existing = bucket.get(ip)
   if (existing) {
     existing.hits = existing.hits.filter((t) => t >= cutoff)

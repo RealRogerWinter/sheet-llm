@@ -66,6 +66,7 @@ import {
 } from '@/lib/billing/valueTier'
 import { checkRequestIp, extractClientIp } from '@/lib/orchestrator/requestRateLimit'
 import { checkByokIp } from '@/lib/orchestrator/byokRateLimit'
+import { redactSecrets } from '@/lib/orchestrator/observability'
 import { hasClearance } from '@/lib/security/turnstile'
 import { scoreHash } from '@/lib/orchestrator/scoreVersion'
 import { computeDeadlineAt } from '@/lib/orchestrator/deadline'
@@ -733,7 +734,11 @@ async function handleChat(
         editedScore: orchestratorScore,
         history: messagesForLLM,
         // SHE-8 — both are CLIENT-supplied debug fields, gated behind the BYOK
-        // acceptance check (dev/test or SL_BYOK_ALLOWED); ignored on hosted.
+        // acceptance check (dev/test or SL_BYOK_ALLOWED); ignored on hosted. NOTE:
+        // BYOK is honored only on the orchestrator path; a legacy fall-through
+        // (mode=off / low-confidence / handler error) runs on the server's own
+        // key+model. Benign for the single-tenant self-host this targets (server
+        // key == operator key, and BYOK is off the money path).
         modelOverride: byokAccepted ? parsed.debug?.modelOverride : undefined,
         ...(byok && parsed.debug?.apiKey ? { apiKeyOverride: parsed.debug.apiKey } : {}),
         ...(parsed.targetRegion ? { targetRegion: parsed.targetRegion } : {}),
@@ -771,7 +776,7 @@ async function handleChat(
       // The model ran past its token ceiling before finishing the score.
       // Surface a clean, actionable message rather than the raw schema
       // failure — and never echo the Zod internals to the user.
-      console.error('[chat] generation truncated at max_tokens', { chatId, requestId, error: e.message })
+      console.error('[chat] generation truncated at max_tokens', { chatId, requestId, error: redactSecrets(e.message) })
       return errorResponse(
         'output_too_large',
         422,
@@ -779,7 +784,7 @@ async function handleChat(
         chatId,
       )
     } else if (e instanceof ProviderSchemaError) {
-      console.error('[chat] provider returned malformed tool input', { chatId, requestId, error: e.message })
+      console.error('[chat] provider returned malformed tool input', { chatId, requestId, error: redactSecrets(e.message) })
       return errorResponse('upstream_error', 502, 'The model returned an unexpected response. Please try again.', chatId)
     } else {
       // Log the raw detail server-side; return a generic message so we
@@ -787,7 +792,7 @@ async function handleChat(
       console.error('[chat] orchestrator failed', {
         chatId,
         requestId,
-        error: e instanceof Error ? e.message : String(e),
+        error: redactSecrets(e instanceof Error ? e.message : String(e)),
       })
       return errorResponse('internal_error', 500, 'Something went wrong while generating your score. Please try again.', chatId)
     }
@@ -1737,7 +1742,7 @@ async function respondWithConverseStream(
               console.error('[chat] converse stream upstream error', {
                 chatId,
                 requestId,
-                error: ev.error.message,
+                error: redactSecrets(ev.error.message),
               })
               write('error', {
                 code: 'upstream_error',
@@ -1752,7 +1757,7 @@ async function respondWithConverseStream(
           console.error('[chat] converse stream failed', {
             chatId,
             requestId,
-            error: e instanceof Error ? e.message : String(e),
+            error: redactSecrets(e instanceof Error ? e.message : String(e)),
           })
           write('error', {
             code: 'upstream_error',
@@ -2082,7 +2087,7 @@ async function respondWithScoreStream(
           console.error('[chat] score stream failed', {
             chatId,
             requestId,
-            error: e instanceof Error ? e.message : String(e),
+            error: redactSecrets(e instanceof Error ? e.message : String(e)),
           })
           write('error', {
             code: 'internal_error' as ChatErrorCode,

@@ -29,6 +29,14 @@ describe('byokRateLimit', () => {
     expect(checkByokIp('9.9.9.9').ok).toBe(false)
   })
 
+  it('SL_BYOK_IP_RATE_LIMIT=0 / off disables the cap (self-host escape hatch)', async () => {
+    const { checkByokIp } = await import('@/lib/orchestrator/byokRateLimit')
+    for (const v of ['0', 'off', 'OFF']) {
+      vi.stubEnv('SL_BYOK_IP_RATE_LIMIT', v)
+      for (let i = 0; i < 100; i++) expect(checkByokIp('3.3.3.3').ok).toBe(true)
+    }
+  })
+
   it('is a SEPARATE bucket from requestRateLimit (no shared state)', async () => {
     vi.stubEnv('SL_BYOK_IP_RATE_LIMIT', '1')
     vi.stubEnv('SL_REQUEST_IP_RATE_LIMIT', '5')
