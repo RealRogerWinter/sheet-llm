@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server'
-import { and, eq, isNull } from 'drizzle-orm'
 import { getDb } from '@/lib/db'
-import { sessions } from '@/lib/db/schema'
-import { clearSessionCookie, readAnonCookieIdentity } from '@/lib/auth/session'
+import { adoptAnonWorkInto } from '@/lib/auth/adoptAnonWork'
 import { verifyAuthSession } from '@/lib/auth/sessionStore'
 import { authError, guardAuthMutation } from '@/lib/auth/routeGuard'
 
@@ -38,25 +36,9 @@ export async function POST(request: Request) {
     return authError('unauthorized', 401, 'You must be signed in to keep your previous work.')
   }
 
-  const anon = await readAnonCookieIdentity(db)
-  // Nothing to adopt: no anon cookie, a GC'd or CLAIMED identity, or the anon id
-  // IS the account (signup claimed it in place). Succeed with migrated:0.
-  if (!anon || !anon.exists || anon.claimed || anon.userId === authed.userId) {
-    return NextResponse.json({ ok: true, migrated: 0 }, { headers: { 'cache-control': 'no-store' } })
-  }
-
-  const moved = await db
-    .update(sessions)
-    .set({ userId: authed.userId })
-    .where(and(eq(sessions.userId, anon.userId), isNull(sessions.deletedAt)))
-    .returning({ id: sessions.id })
-
-  // Consume the absorbed anonymous identity so it can't be double-adopted and the
-  // browser is cleanly the account from here on.
-  await clearSessionCookie()
-
+  const migrated = await adoptAnonWorkInto(authed.userId)
   return NextResponse.json(
-    { ok: true, migrated: moved.length },
+    { ok: true, migrated },
     { headers: { 'cache-control': 'no-store' } },
   )
 }

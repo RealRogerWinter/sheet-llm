@@ -26,9 +26,11 @@ const DISCARD_KEYS = [
  * would eat input). Hosts BOTH the login and signup forms (toggled in place via
  * the auth store's `mode`), so Sign up opens here as a modal rather than routing
  * to the standalone `/signup` page. Correct autocomplete (username /
- * current-password vs new-password). After a successful login, if there's
- * unsaved local work, offers keep-or-discard so the anon work is never silently
- * lost; signup adopts the current anon work, so it just closes.
+ * current-password vs new-password). After a successful login the browser's
+ * anonymous work is ALWAYS adopted onto the account (SHE-9), independent of
+ * whether a score is on screen; the keep-or-discard prompt is now only a UX
+ * choice for visible on-screen work, not the mechanism that prevents loss.
+ * Signup claims the anon identity in place, so it just closes.
  */
 export default function AuthModal() {
   const open = useAuthStore((s) => s.loginOpen)
