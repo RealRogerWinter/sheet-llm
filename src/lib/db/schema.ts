@@ -383,6 +383,41 @@ export const orchestratorTurns = sqliteTable(
 )
 
 // ============================================================================
+// training_pairs — SHE-18 PR4. The hosted-only, flag-gated CONSENT MARKER for
+// training-data capture. One thin row per turn that was captured while
+// `SL_CAPTURE_TRAINING` was on (sheetllm.com only; self-hosted installs never
+// write here, so they never build a training corpus). It deliberately stores
+// NO score/prompt content and NO user identifier — only a FK to the
+// orchestrator_turns row (the source of truth) and a SALTED hash of the chat
+// session id (an opaque, non-reversible dedup/grouping key; the raw session id
+// and user are never persisted here). The export (PR5) joins this marker back
+// to orchestrator_turns ⨝ score_versions ⨝ messages and anonymizes there.
+// ============================================================================
+export const trainingPairs = sqliteTable(
+  'training_pairs',
+  {
+    id: text('id').primaryKey(),
+    // Source-of-truth turn. CASCADE so a turn deletion (e.g. user/session
+    // erasure cascading down) drops its capture marker too.
+    turnId: text('turn_id')
+      .notNull()
+      .references((): AnySQLiteColumn => orchestratorTurns.id, { onDelete: 'cascade' }),
+    // sha256(SL_CAPTURE_SALT : sessionId) — opaque, no PII. Lets the export
+    // dedup/group by session without exposing the session id or user.
+    sessionHash: text('session_hash').notNull(),
+    // Unix epoch MILLISECONDS (matches orchestrator_turns.created_at), so the
+    // incremental export watermark and the turn ordering share a clock.
+    capturedAt: integer('captured_at').notNull(),
+  },
+  (table) => [
+    // A turn is captured at most once (idempotent re-capture is a no-op).
+    uniqueIndex('training_pairs_turn').on(table.turnId),
+    // Bounds the incremental export (watermark on captured_at).
+    index('training_pairs_captured').on(table.capturedAt),
+  ],
+)
+
+// ============================================================================
 // auth_sessions — server-side, REVOCABLE login sessions (PR-2 mints these).
 // Distinct from the `sessions` table above, which is MUSIC chat sessions. The
 // cookie carries an opaque 32-byte random token; only its SHA-256 hash is
@@ -711,6 +746,8 @@ export type ScoreVersion = typeof scoreVersions.$inferSelect
 export type NewScoreVersion = typeof scoreVersions.$inferInsert
 export type OrchestratorTurn = typeof orchestratorTurns.$inferSelect
 export type NewOrchestratorTurn = typeof orchestratorTurns.$inferInsert
+export type TrainingPair = typeof trainingPairs.$inferSelect
+export type NewTrainingPair = typeof trainingPairs.$inferInsert
 export type AuthSession = typeof authSessions.$inferSelect
 export type NewAuthSession = typeof authSessions.$inferInsert
 export type OAuthAccount = typeof oauthAccounts.$inferSelect

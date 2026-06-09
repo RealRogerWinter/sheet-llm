@@ -4,6 +4,7 @@ import { getDb } from '@/lib/db'
 import { orchestratorTurns } from '@/lib/db/schema'
 import type { Score } from '@/lib/music/types'
 import { DIFF_ALGO_VERSION, scoreDiff } from '@/lib/music/scoreDiff'
+import { captureTrainingPair } from './trainingCapture'
 import type { OrchestratorFinalStatus, TaskKind } from './types'
 
 /** Hard upper bound on the `error` column so a runaway stack trace
@@ -201,11 +202,13 @@ export async function recordTurn(fields: RecordTurnFields): Promise<void> {
       ? redactedError.slice(0, ERROR_MAX_LEN)
       : redactedError
 
+  const turnId = randomUUID()
+  const db = getDb()
   try {
-    getDb()
+    db
       .insert(orchestratorTurns)
       .values({
-        id: randomUUID(),
+        id: turnId,
         sessionId,
         messageId: messageId ?? null,
         requestId: fields.requestId,
@@ -253,6 +256,14 @@ export async function recordTurn(fields: RecordTurnFields): Promise<void> {
         replacementUserExplicitRewrite: boolToInt(replacementUserExplicitRewrite ?? null),
       })
       .run()
+    // SHE-18 PR4 — mark this turn for the training corpus IF hosted capture is
+    // on (SL_CAPTURE_TRAINING). Self-hosted installs (flag off) never write a
+    // marker. Deliberately INSIDE the try, right after the turn insert's .run()
+    // autocommits (better-sqlite3 is synchronous), so it only marks turns that
+    // actually persisted and the turn_id FK is satisfiable. captureTrainingPair
+    // self-swallows, so it cannot throw into the outer catch and mislabel a
+    // capture failure as a turn-insert failure.
+    captureTrainingPair(db, { turnId, sessionId })
   } catch (e) {
     // Observability must never break the caller. Re-emit as a stdout
     // line so the failure itself isn't lost.
