@@ -34,7 +34,20 @@ export interface ScoreCallTarget {
 
 export interface ScoreCallOptions {
   systemPrompt: string | SystemBlock[]
-  userText: string
+  /** Single-shot prompt. Provide this OR `history` (history wins). */
+  userText?: string
+  /**
+   * Multi-turn neutral history to seed the FIRST call with (e.g. a replayed
+   * transcript). The validation-retry loop appends to it. When omitted, the
+   * loop seeds from `userText` on the first failure (the original behavior).
+   */
+  history?: NeutralMessage[]
+  /**
+   * Optional tool description forwarded to the render_score tool definition.
+   * Set it to keep a migrated legacy call byte-identical to the path it
+   * replaces (the registry's SCORE_TOOL omits the description by default).
+   */
+  toolDescription?: string
   maxTokens?: number
   temperature?: number
   /** Reasoning effort — forwarded to ProviderCallOptions.effort (dropped on
@@ -91,15 +104,24 @@ export async function callWithScoreRetry(
   // Anthropic adapter (toAnthropicMessages), not the API, is now the shape
   // gate. Built from scratch from app strings + the current call's parsed
   // output; no stored/DB history flows in.
-  let history: NeutralMessage[] | undefined = undefined
+  // Seed from a caller-provided transcript when present; otherwise the loop
+  // seeds from userText on the first validation failure (original behavior).
+  let history: NeutralMessage[] | undefined = opts.history ? [...opts.history] : undefined
   let lastError: ValidationError | undefined
+
+  // Keep a migrated legacy call byte-identical by forwarding the tool
+  // description; default registry calls leave it off (description: '').
+  const tool =
+    opts.toolDescription !== undefined
+      ? { ...SCORE_TOOL, description: opts.toolDescription }
+      : SCORE_TOOL
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const callOpts: ProviderCallOptions = history
       ? { ...baseCall, history }
       : { ...baseCall, userText: opts.userText }
 
-    const result = await callWithFailover<Score>(target, SCORE_TOOL, callOpts)
+    const result = await callWithFailover<Score>(target, tool, callOpts)
 
     try {
       validateScore(result.input)
@@ -141,7 +163,7 @@ export async function callWithScoreRetry(
       // sees its own bad output (assistant turn) and the validator's
       // complaint (user tool_result) on the retry.
       if (!history) {
-        history = [{ role: 'user', content: [{ type: 'text', text: opts.userText }] }]
+        history = [{ role: 'user', content: [{ type: 'text', text: opts.userText ?? '' }] }]
       }
       history.push({
         role: 'assistant',

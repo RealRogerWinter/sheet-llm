@@ -273,7 +273,13 @@ async function dispatch(
       return runEditScoreLevel({ classification, editedScore: input.editedScore })
 
     case 'generate_simple':
-      return runGenerateSimple({ classification, history: input.history })
+      return runGenerateSimple({
+        classification,
+        history: input.history,
+        chatId: input.chatId ?? 'anonymous',
+        modelOverride: input.modelOverride,
+        apiKeyOverride: input.apiKeyOverride,
+      })
 
     case 'refuse':
       return runRefuse({ classification, refusalCode: 'out_of_scope' })

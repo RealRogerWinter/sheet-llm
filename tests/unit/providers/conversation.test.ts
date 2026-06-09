@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import type { ChatMessage } from '@/lib/llm/wrapper'
 import {
   fromAnthropicMessages,
+  fromAnthropicMessagesLenient,
   toAnthropicMessages,
 } from '@/lib/providers/anthropicConversation'
 import type { NeutralMessage } from '@/lib/providers/conversation'
@@ -190,5 +191,62 @@ describe('neutral conversation IR <-> Anthropic adapter', () => {
       { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_x' }] },
     ] as unknown as ChatMessage[]
     expect(() => fromAnthropicMessages(absent)).toThrow(/tool_result content \(absent\)/)
+  })
+})
+
+describe('fromAnthropicMessagesLenient (stored-history adapter, S1-safe)', () => {
+  it('is identical to the strict converter for well-formed history', () => {
+    expect(fromAnthropicMessagesLenient(GOLDEN_CORPUS)).toEqual(
+      fromAnthropicMessages(GOLDEN_CORPUS),
+    )
+  })
+
+  it('never throws — it coerces non-string tool_result content to a string instead', () => {
+    const weird = [
+      {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'toolu_x', content: [{ type: 'text', text: 'n' }] }],
+      },
+    ] as unknown as ChatMessage[]
+    const out = fromAnthropicMessagesLenient(weird)
+    const turn = out[0] as Extract<NeutralMessage, { role: 'user' }>
+    const tr = turn.content[0]
+    expect(tr.type).toBe('tool_result')
+    if (tr.type === 'tool_result') {
+      expect(typeof tr.content).toBe('string')
+      expect(tr.content).toContain('text')
+    }
+  })
+
+  it('skips unknown-role and non-array-content messages without throwing', () => {
+    const corrupt = [
+      { role: 'system', content: [{ type: 'text', text: 'x' }] },
+      { role: 'user', content: 'oops' },
+      { role: 'user', content: [{ type: 'text', text: 'kept' }] },
+    ] as unknown as ChatMessage[]
+    const out = fromAnthropicMessagesLenient(corrupt)
+    expect(out).toEqual([{ role: 'user', content: [{ type: 'text', text: 'kept' }] }])
+  })
+
+  it('drops unmodelled blocks but keeps the surviving valid ones in the same message', () => {
+    const mixed = [
+      {
+        role: 'assistant',
+        content: [
+          { type: 'image', source: {} },
+          { type: 'text', text: 'survives' },
+          { type: 'tool_use', id: 'tc', name: 'render_score', input: { k: 1 } },
+        ],
+      },
+    ] as unknown as ChatMessage[]
+    expect(fromAnthropicMessagesLenient(mixed)).toEqual([
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'survives' },
+          { type: 'tool_use', id: 'tc', name: 'render_score', input: { k: 1 } },
+        ],
+      },
+    ])
   })
 })

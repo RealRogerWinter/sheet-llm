@@ -23,9 +23,16 @@ vi.mock('@/lib/orchestrator/classifier', () => ({
   },
 }))
 
-const completeMock = vi.fn()
-vi.mock('@/lib/llm', () => ({
-  getLLMClient: () => ({ complete: completeMock }),
+// generate_simple now routes through the provider registry (SHE-17), so mock
+// the selected provider's toolCall rather than the legacy getLLMClient path.
+const toolCallMock = vi.fn()
+vi.mock('@/lib/providers/select', () => ({
+  selectProvider: () => ({
+    provider: { name: 'anthropic', toolCall: toolCallMock },
+    providerName: 'anthropic',
+    model: 'claude-sonnet-4-6',
+    tier: 'medium',
+  }),
 }))
 
 const runEditIntraMeasureMock = vi.fn()
@@ -53,11 +60,12 @@ const { run } = await import('@/lib/orchestrator')
 describe('orchestrator.run dispatch (Phase 1)', () => {
   beforeEach(() => {
     classifyMock.mockReset()
-    completeMock.mockReset()
-    completeMock.mockResolvedValue({
-      score: BASE_SCORE,
-      introText: 'mocked',
+    toolCallMock.mockReset()
+    toolCallMock.mockResolvedValue({
+      input: BASE_SCORE,
       toolUseId: 'toolu_llm_1',
+      model: 'claude-sonnet-4-6',
+      introText: 'mocked',
     })
     runEditIntraMeasureMock.mockReset()
     runGenerateComplexMock.mockReset()
@@ -93,7 +101,7 @@ describe('orchestrator.run dispatch (Phase 1)', () => {
       expect(result.reason).toContain('copyrighted')
     }
     expect(classifyMock).not.toHaveBeenCalled()
-    expect(completeMock).not.toHaveBeenCalled()
+    expect(toolCallMock).not.toHaveBeenCalled()
   })
 
   it('dispatches generate_simple → LLM, returns Score', async () => {
@@ -121,7 +129,7 @@ describe('orchestrator.run dispatch (Phase 1)', () => {
       expect(result.toolUseId).toBe('toolu_llm_1')
       expect(result.model).toMatch(/sonnet/i)
     }
-    expect(completeMock).toHaveBeenCalledTimes(1)
+    expect(toolCallMock).toHaveBeenCalledTimes(1)
   })
 
   it('dispatches edit_score_level → applies ops without LLM call', async () => {
@@ -148,7 +156,7 @@ describe('orchestrator.run dispatch (Phase 1)', () => {
       expect(result.score.key).toBe('D')
       expect(result.model).toBeNull()
     }
-    expect(completeMock).not.toHaveBeenCalled()
+    expect(toolCallMock).not.toHaveBeenCalled()
   })
 
   it('dispatches refuse → refusal with classifier reason', async () => {
@@ -170,7 +178,7 @@ describe('orchestrator.run dispatch (Phase 1)', () => {
       expect(result.reason).toBe('off-topic request')
       expect(result.refusalCode).toBe('out_of_scope')
     }
-    expect(completeMock).not.toHaveBeenCalled()
+    expect(toolCallMock).not.toHaveBeenCalled()
   })
 
   it('falls through with reason=low_confidence when confidence < 0.6', async () => {
@@ -193,7 +201,7 @@ describe('orchestrator.run dispatch (Phase 1)', () => {
       expect(result.reason).toBe('low_confidence')
       expect(result.classification?.confidence).toBe(0.4)
     }
-    expect(completeMock).not.toHaveBeenCalled()
+    expect(toolCallMock).not.toHaveBeenCalled()
   })
 
   it('falls through with reason=classifier_schema_error when classifier rejects', async () => {
@@ -249,7 +257,7 @@ describe('orchestrator.run dispatch (Phase 1)', () => {
       expect(result.score.title).toBe('After intra edit')
     }
     expect(runEditIntraMeasureMock).toHaveBeenCalledTimes(1)
-    expect(completeMock).not.toHaveBeenCalled()
+    expect(toolCallMock).not.toHaveBeenCalled()
   })
 
   it('dispatches generate_complex → runGenerateComplex handler (Opus)', async () => {
@@ -358,7 +366,7 @@ describe('orchestrator.run dispatch (Phase 1)', () => {
       confidence: 0.95,
     })
     const { RateLimitedError } = await import('@/lib/llm/errors')
-    completeMock.mockRejectedValue(new RateLimitedError('429'))
+    toolCallMock.mockRejectedValue(new RateLimitedError('429'))
     await expect(
       run({
         requestId: 'r12',
@@ -368,7 +376,7 @@ describe('orchestrator.run dispatch (Phase 1)', () => {
       }),
     ).rejects.toThrow(RateLimitedError)
     // The LLM was called exactly once — no silent retry.
-    expect(completeMock).toHaveBeenCalledTimes(1)
+    expect(toolCallMock).toHaveBeenCalledTimes(1)
   })
 
   it('propagates UpstreamError from a handler', async () => {
@@ -379,7 +387,7 @@ describe('orchestrator.run dispatch (Phase 1)', () => {
       confidence: 0.95,
     })
     const { UpstreamError } = await import('@/lib/llm/errors')
-    completeMock.mockRejectedValue(new UpstreamError('502 from anthropic', 502))
+    toolCallMock.mockRejectedValue(new UpstreamError('502 from anthropic', 502))
     await expect(
       run({
         requestId: 'r13',

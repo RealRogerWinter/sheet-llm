@@ -19,6 +19,7 @@ import type { ChatMessage } from '@/lib/llm/wrapper'
 import type {
   NeutralAssistantBlock,
   NeutralMessage,
+  NeutralToolResultBlock,
   NeutralUserBlock,
 } from './conversation'
 
@@ -138,6 +139,61 @@ function assistantBlockFromAnthropic(
  * does not model, so unmodelled shapes surface immediately rather than
  * being silently dropped.
  */
+/**
+ * Like `fromAnthropicMessages`, but NEVER throws — for adapting STORED
+ * history (`content_json`), where a corrupt or legacy row must not make a
+ * whole conversation un-loadable (the PR1 S1 finding). Unmodellable blocks
+ * are coerced to their nearest valid neutral form (non-string tool_result
+ * content is JSON-stringified) or dropped (unknown block types); messages
+ * with an unknown role, non-array content, or no surviving blocks are
+ * skipped. For WELL-FORMED input it is identical to `fromAnthropicMessages`
+ * (the strict round-trip golden covers that equivalence).
+ */
+export function fromAnthropicMessagesLenient(
+  history: ReadonlyArray<ChatMessage>,
+): NeutralMessage[] {
+  const out: NeutralMessage[] = []
+  for (const msg of history) {
+    if ((msg.role !== 'user' && msg.role !== 'assistant') || !Array.isArray(msg.content)) {
+      continue
+    }
+    if (msg.role === 'user') {
+      const content: NeutralUserBlock[] = []
+      for (const b of msg.content) {
+        if (b.type === 'text' && typeof b.text === 'string') {
+          content.push({ type: 'text', text: b.text })
+        } else if (b.type === 'tool_result' && typeof b.tool_use_id === 'string') {
+          const c = typeof b.content === 'string' ? b.content : JSON.stringify(b.content ?? '')
+          const block: NeutralToolResultBlock = {
+            type: 'tool_result',
+            toolUseId: b.tool_use_id,
+            content: c,
+          }
+          if (b.is_error !== undefined) block.isError = b.is_error
+          content.push(block)
+        }
+      }
+      if (content.length > 0) out.push({ role: 'user', content })
+    } else {
+      const content: NeutralAssistantBlock[] = []
+      for (const b of msg.content) {
+        if (b.type === 'text' && typeof b.text === 'string') {
+          content.push({ type: 'text', text: b.text })
+        } else if (b.type === 'tool_use' && typeof b.id === 'string' && typeof b.name === 'string') {
+          content.push({
+            type: 'tool_use',
+            id: b.id,
+            name: b.name,
+            input: (b.input ?? {}) as Record<string, unknown>,
+          })
+        }
+      }
+      if (content.length > 0) out.push({ role: 'assistant', content })
+    }
+  }
+  return out
+}
+
 export function fromAnthropicMessages(
   history: ReadonlyArray<ChatMessage>,
 ): NeutralMessage[] {
