@@ -4,7 +4,7 @@ subsystem: ghost-preview
 audience: [contributor, ai-agent]
 status: current
 last_verified: 2026-06-09
-verified_against: 90d4c2f
+verified_against: 36afe91
 source_paths:
   - src/lib/orchestrator/index.ts
   - src/lib/orchestrator/flags.ts
