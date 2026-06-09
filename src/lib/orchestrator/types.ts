@@ -260,6 +260,17 @@ export interface OrchestratorResult {
     reasons: string[]
   }
   /**
+   * SHE-18 PR3 — server-side preservation-verify result, set by the
+   * `extend_composition` handler (the only one that currently calls
+   * `verifyAllOriginalsPreserved`). Carried up so `recordTurn` can persist
+   * it on the turn row (it was previously discarded — only a warning was
+   * appended). Absent for handlers that don't verify preservation.
+   */
+  preservation?: {
+    ok: boolean
+    mismatchCount: number
+  }
+  /**
    * M24-PR-2 — AI ghost preview proposal payload. When present AND
    * `requiresConfirmation === true`, the chat route MUST NOT update
    * sessions.headVersionId; instead it surfaces a proposal-mode

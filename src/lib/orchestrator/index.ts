@@ -22,7 +22,11 @@ import {
   isReplacementGateEnabled,
   isSectionalGenEnabled,
 } from './flags'
-import { detectReplacement, type DispatchToolName } from './replacementDetect'
+import {
+  detectReplacement,
+  type DispatchToolName,
+  type ReplacementDecision,
+} from './replacementDetect'
 import { computeAffectedEventIds, scoreDiff } from '@/lib/music/scoreDiff'
 import { ensureEventIds } from '@/lib/music/eventIds'
 import {
@@ -124,16 +128,19 @@ async function isReplacementGateSuppressed(sessionId: string | undefined): Promi
  * suppression via `sessions.replacement_gate_suppressed` short-circuits
  * the gate for one session.
  *
- * Returns the `replacementBlocked` flag so `recordTurn` can persist the
- * telemetry on the same row.
+ * Returns the full `ReplacementDecision` (or null when the gate short-circuits
+ * before computing one — disabled, no before-score, or per-session suppressed)
+ * so `recordTurn` can persist BOTH the gate-fired boolean AND the detail
+ * (ratio / reasons / userExplicitRewrite) on the same row — the decision is
+ * computed for every edit turn, not only when the gate fires (SHE-18 PR3).
  */
 async function maybeApplyReplacementGate(
   result: OrchestratorResult,
   input: OrchestratorInput,
-): Promise<boolean> {
-  if (!isReplacementGateEnabled()) return false
-  if (!input.editedScore) return false
-  if (await isReplacementGateSuppressed(input.chatId)) return false
+): Promise<ReplacementDecision | null> {
+  if (!isReplacementGateEnabled()) return null
+  if (!input.editedScore) return null
+  if (await isReplacementGateSuppressed(input.chatId)) return null
 
   // The dispatcher's confirmExplicitRewrite flag is implicit in
   // dispatchTool === 'regenerate_all': PR-3 only reaches the apply
@@ -152,14 +159,36 @@ async function maybeApplyReplacementGate(
     ...(confirmExplicitRewrite !== undefined ? { confirmExplicitRewrite } : {}),
   })
 
-  if (!decision.isReplacement) return false
+  if (!decision.isReplacement) return decision
 
   result.requiresConfirmation = true
   result.replacement = {
     retainedIdentityRatio: decision.retainedIdentityRatio,
     reasons: decision.reasons,
   }
-  return true
+  return decision
+}
+
+/** SHE-18 PR3 — project a ReplacementDecision (or its absence) into the
+ *  RecordTurnFields quality-detail subset, so both record sites share one
+ *  mapping. Returns an empty object when no decision was computed (the
+ *  fields then stay omitted => persisted as NULL). */
+function replacementDetailFields(
+  decision: ReplacementDecision | null,
+): Pick<
+  RecordTurnFields,
+  | 'replacementBlocked'
+  | 'replacementRetainedIdentityRatio'
+  | 'replacementReasons'
+  | 'replacementUserExplicitRewrite'
+> {
+  if (!decision) return {}
+  return {
+    replacementBlocked: decision.isReplacement,
+    replacementRetainedIdentityRatio: decision.retainedIdentityRatio,
+    replacementReasons: decision.reasons,
+    replacementUserExplicitRewrite: decision.userExplicitRewrite,
+  }
 }
 
 /**
@@ -596,8 +625,9 @@ async function runDispatchedHandler(
           ],
         }
         // Preview-mode is its own gate; the replacement-confirmation
-        // gate doesn't fire on top of it (already an explicit confirm).
-        await recordTurnForResult(previewResult, input, t0, decision, false)
+        // gate doesn't fire on top of it (already an explicit confirm), so
+        // there is no ReplacementDecision to record (null).
+        await recordTurnForResult(previewResult, input, t0, decision, null)
         return previewResult
       }
       const result = await runCompose({
@@ -656,10 +686,21 @@ async function finalizeDispatchResult(
   decision: DispatchDecision,
 ): Promise<OrchestratorResult> {
   const out: OrchestratorResult = { ...result, latencyMs: Date.now() - t0 }
-  const replacementBlocked = await maybeApplyReplacementGate(out, input)
+  const replacementDecision = await maybeApplyReplacementGate(out, input)
   maybeAttachGhostProposal(out, input)
-  await recordTurnForResult(out, input, t0, decision, replacementBlocked)
+  await recordTurnForResult(out, input, t0, decision, replacementDecision)
   return out
+}
+
+/** SHE-18 PR3 — project result.preservation into the RecordTurnFields subset. */
+function preservationDetailFields(
+  result: OrchestratorResult,
+): Pick<RecordTurnFields, 'preservationOk' | 'preservationMismatchCount'> {
+  if (!result.preservation) return {}
+  return {
+    preservationOk: result.preservation.ok,
+    preservationMismatchCount: result.preservation.mismatchCount,
+  }
 }
 
 async function recordTurnForResult(
@@ -667,7 +708,7 @@ async function recordTurnForResult(
   input: OrchestratorInput,
   t0: number,
   decision: DispatchDecision,
-  replacementBlocked: boolean,
+  replacementDecision: ReplacementDecision | null,
 ): Promise<void> {
   await recordTurnT(input, {
     requestId: input.requestId,
@@ -688,7 +729,8 @@ async function recordTurnForResult(
     ...(result.dispatchTool !== undefined
       ? { composePatchDispatch: result.dispatchTool }
       : {}),
-    replacementBlocked,
+    ...replacementDetailFields(replacementDecision),
+    ...preservationDetailFields(result),
   })
 }
 
@@ -1052,7 +1094,7 @@ async function runInner(input: OrchestratorInput): Promise<OrchestratorRunOutcom
   const result: OrchestratorResult = isResult(outcome)
     ? { ...outcome, latencyMs: Date.now() - t0 }
     : outcome
-  const replacementBlocked = await maybeApplyReplacementGate(result, input)
+  const replacementDecision = await maybeApplyReplacementGate(result, input)
   maybeAttachGhostProposal(result, input)
   await recordTurnT(input, {
     requestId: input.requestId,
@@ -1069,7 +1111,8 @@ async function runInner(input: OrchestratorInput): Promise<OrchestratorRunOutcom
     ...(result.composePatchDispatch !== undefined
       ? { composePatchDispatch: result.composePatchDispatch }
       : {}),
-    replacementBlocked,
+    ...replacementDetailFields(replacementDecision),
+    ...preservationDetailFields(result),
   })
   return result
 }

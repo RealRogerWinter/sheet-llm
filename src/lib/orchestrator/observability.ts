@@ -149,6 +149,19 @@ export interface RecordTurnFields extends LogTurnFields {
   /** Count of ops applied by an edit handler. NULL/omitted for
    *  non-edit handlers. */
   appliedOpsCount?: number
+  // SHE-18 PR3 — quality detail. All optional; omitted (=> NULL) for turns
+  // with no before-score (compose/converse/refuse) or when the gate path
+  // didn't run. See the column comments in schema.ts.
+  /** verifyAllOriginalsPreserved: did every claimed-retained measure survive. */
+  preservationOk?: boolean
+  /** Number of claimed-retained measures whose hash diverged. */
+  preservationMismatchCount?: number
+  /** detectReplacement.retainedIdentityRatio ∈ [0,1] (computed every edit turn). */
+  replacementRetainedIdentityRatio?: number
+  /** detectReplacement.reasons — persisted as a JSON array string. */
+  replacementReasons?: string[]
+  /** detectReplacement.userExplicitRewrite — user/dispatch asked to start over. */
+  replacementUserExplicitRewrite?: boolean
 }
 
 export async function recordTurn(fields: RecordTurnFields): Promise<void> {
@@ -164,6 +177,11 @@ export async function recordTurn(fields: RecordTurnFields): Promise<void> {
     beforeScore,
     afterScore,
     appliedOpsCount,
+    preservationOk,
+    preservationMismatchCount,
+    replacementRetainedIdentityRatio,
+    replacementReasons,
+    replacementUserExplicitRewrite,
     ...logFields
   } = fields
   logTurn(logFields)
@@ -226,6 +244,13 @@ export async function recordTurn(fields: RecordTurnFields): Promise<void> {
         costMicroUsd: fields.costMicroUsd ?? null,
         error: truncatedError ?? null,
         replacementBlocked: fields.replacementBlocked ? 1 : 0,
+        // SHE-18 PR3 — quality detail. boolToInt preserves NULL (not-computed)
+        // vs 0 (computed-false); reasons serialize to a JSON array string.
+        preservationOk: boolToInt(preservationOk ?? null),
+        preservationMismatchCount: preservationMismatchCount ?? null,
+        replacementRetainedIdentityRatio: replacementRetainedIdentityRatio ?? null,
+        replacementReasons: replacementReasons ? JSON.stringify(replacementReasons) : null,
+        replacementUserExplicitRewrite: boolToInt(replacementUserExplicitRewrite ?? null),
       })
       .run()
   } catch (e) {
