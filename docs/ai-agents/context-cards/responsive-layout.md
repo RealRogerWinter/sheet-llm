@@ -3,18 +3,22 @@ title: responsive-layout — Context Card
 subsystem: responsive-layout
 audience: [contributor, ai-agent]
 status: current
-last_verified: 2026-06-04
-verified_against: 41db583
+last_verified: 2026-06-09
+verified_against: 3735526
 source_paths:
   - src/app/globals.css
   - src/app/layout.tsx
   - src/lib/ui/breakpoints.ts
   - src/lib/ui/useMatchMedia.ts
   - src/lib/ui/useViewportRect.ts
+  - src/lib/ui/bottomSheet.ts
   - src/components/AppShell.module.css
   - src/components/HomeClient.tsx
   - src/components/AppHeader.tsx
+  - src/components/ChatHistoryPanel.tsx
   - src/components/ChatHistoryPanel.module.css
+  - src/components/ChatPanelFab.tsx
+  - src/components/ChatPanelFab.module.css
   - src/components/orchestrator/GhostPreviewPanel.module.css
   - src/components/editor/useLongPress.ts
   - src/components/editor/touchGestureBus.ts
@@ -61,6 +65,31 @@ SessionSidebar / HomeClient) to clear the docked chrome.
 reflows beside them instead of being overlaid. Only one occupies the track at a
 time (ChatHistoryPanel yields when `pendingProposal.presentation==='diff-panel'`).
 Drawer/sheet modes stay fixed overlays.
+
+## Opening the conversation on touch (`ChatPanelFab` + sheet drag, SHE-11)
+
+Below the dock breakpoint the panel is a toggled overlay, so it needs an
+on-screen, pointer-activatable open control (the header `ChatHistoryButton` was
+removed in PR #65, leaving only keyboard toggles: Ctrl/⌘+/ and the ⌘K palette,
+both still wired). **`ChatPanelFab`** is a bottom-right floating action button
+that calls `togglePanel()` with the same a11y semantics the old button had
+(`aria-controls="chat-history-panel"`, `aria-expanded`, `aria-keyshortcuts`,
+turn-count label). It self-gates: hidden in docked mode, when there's no
+conversation (`!abc || turns.length===0`, mirroring the panel's own render gate),
+and while the panel is already open. It sits above the fixed transport
+(`--transport-height`) + safe-area inset.
+
+**Sheet-mode drag-to-dismiss** (`<768px`): the grabber is a real
+pointer-activatable handle (not the old decorative `::before`). The drag→snap
+DECISION is the pure, exhaustively-tested `src/lib/ui/bottomSheet.ts`
+(`resolveSheetDrag`/`clampDragOffset`): a small drag snaps back open; a drag past
+`POSITION_THRESHOLD_RATIO` of the sheet height OR a flick past
+`VELOCITY_THRESHOLD_PX_PER_MS` commits (state machine collapsed↔expanded↔
+dismissed). `ChatHistoryPanel`'s `useSheetDrag` feeds live pointer geometry in and
+applies the result (close on `dismissed`). Body scroll is locked while the sheet
+is expanded; `prefers-reduced-motion` skips the live transform + snap transition
+(instant state change). The grabber also accepts a plain tap to close. Drawer
+mode (768–1280px) is unchanged (right-edge overlay).
 
 **GOTCHA:** never put `container-type` on Hero (or any ancestor of the editor
 overlays) — it applies layout containment and becomes the containing block for
