@@ -7,8 +7,9 @@ import type {
   ProviderTool,
   ProviderToolResult,
 } from './types'
-import { ProviderSchemaError } from './types'
+import { OutputTruncatedError, ProviderRefusalError, ProviderSchemaError } from './types'
 import { flattenSystemPrompt } from './systemBlocks'
+import { recordProviderCall } from '@/lib/billing/usageMeter'
 
 export interface OpenAICompatibleConfig {
   name: ProviderName
@@ -31,9 +32,11 @@ interface OpenAIChatCompletionResponse {
   id?: string
   model?: string
   choices?: Array<{
+    finish_reason?: string
     message?: {
       role?: string
       content?: string | null
+      refusal?: string | null
       tool_calls?: Array<{
         id?: string
         type?: string
@@ -124,9 +127,44 @@ export class OpenAICompatibleProvider implements LLMProvider {
     }
 
     const data = (await response.json()) as OpenAIChatCompletionResponse
-    const message = data.choices?.[0]?.message
+    const choice = data.choices?.[0]
+    const message = choice?.message
     if (!message) {
       throw new UpstreamError(`${this.name}: no message in response`, 500)
+    }
+
+    // Normalised usage, hoisted so the truncation / refusal paths can meter the
+    // tokens the provider already billed before we throw.
+    const usage = data.usage
+      ? {
+          inputTokens: data.usage.prompt_tokens,
+          cachedInputTokens: data.usage.prompt_tokens_details?.cached_tokens,
+          outputTokens: data.usage.completion_tokens,
+        }
+      : undefined
+    const effectiveModel = data.model ?? model
+
+    // Truncation: finish_reason 'length' means the model hit max_tokens
+    // mid-emission, so the tool arguments are incomplete. Surface a typed,
+    // recoverable OutputTruncatedError (NOT a schema failure) so it doesn't
+    // masquerade as model unreliability or trip the degradation ladder — mirrors
+    // the AnthropicProvider max_tokens guard.
+    if (choice?.finish_reason === 'length') {
+      recordProviderCall(effectiveModel, usage)
+      throw new OutputTruncatedError(
+        `${this.name}: "${tool.name}" hit the max_tokens ceiling (${options.maxTokens ?? 'default'}) before the tool call completed`,
+        {
+          ...(options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
+          ...(usage?.outputTokens !== undefined ? { outputTokens: usage.outputTokens } : {}),
+        },
+      )
+    }
+
+    // Structured refusal (OpenAI / gpt-oss `message.refusal`): a clean, typed
+    // refusal signal, distinct from a tool-contract failure below.
+    if (typeof message.refusal === 'string' && message.refusal.length > 0) {
+      recordProviderCall(effectiveModel, usage)
+      throw new ProviderRefusalError(`${this.name}: model refused the request`, message.refusal)
     }
 
     const toolCall = message.tool_calls?.[0]
@@ -157,22 +195,17 @@ export class OpenAICompatibleProvider implements LLMProvider {
       )
     }
 
-    const usage = data.usage
+    recordProviderCall(effectiveModel, usage)
     return {
       input: validated.data,
       toolUseId: toolCall.id ?? `${this.name}_${crypto.randomUUID().replace(/-/g, '').slice(0, 22)}`,
-      model: data.model ?? model,
+      model: effectiveModel,
+      stopReason: choice?.finish_reason,
       introText:
         typeof message.content === 'string' && message.content.length > 0
           ? message.content
           : undefined,
-      usage: usage
-        ? {
-            inputTokens: usage.prompt_tokens,
-            cachedInputTokens: usage.prompt_tokens_details?.cached_tokens,
-            outputTokens: usage.completion_tokens,
-          }
-        : undefined,
+      usage,
     }
   }
 

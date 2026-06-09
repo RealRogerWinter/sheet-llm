@@ -43,6 +43,17 @@ export const PRICING: Record<string, ModelPricing> = {
   'claude-opus-4-7-20251201': { inputPerM: 5, outputPerM: 25, cachedInputPerM: 0.5, cacheWrite5mPerM: 6.25 },
   'claude-opus-4-8': { inputPerM: 5, outputPerM: 25, cachedInputPerM: 0.5, cacheWrite5mPerM: 6.25 },
   'claude-opus-4-8-20260528': { inputPerM: 5, outputPerM: 25, cachedInputPerM: 0.5, cacheWrite5mPerM: 6.25 },
+
+  // Groq (SHE-15 cheaper-model experiment). Verified groq.com/pricing 2026-06-09.
+  // Groq levies no cache-WRITE premium, so cacheWrite5mPerM == inputPerM; and
+  // cachedInputPerM is the published Groq cached rate where available, else
+  // == inputPerM (conservative — no phantom discount). Inert for production
+  // billing: production routes Anthropic only (production never selects Groq).
+  'llama-3.1-8b-instant': { inputPerM: 0.05, outputPerM: 0.08, cachedInputPerM: 0.05, cacheWrite5mPerM: 0.05 },
+  'openai/gpt-oss-20b': { inputPerM: 0.075, outputPerM: 0.3, cachedInputPerM: 0.0375, cacheWrite5mPerM: 0.075 },
+  'openai/gpt-oss-120b': { inputPerM: 0.15, outputPerM: 0.6, cachedInputPerM: 0.075, cacheWrite5mPerM: 0.15 },
+  'qwen/qwen3-32b': { inputPerM: 0.29, outputPerM: 0.59, cachedInputPerM: 0.29, cacheWrite5mPerM: 0.29 },
+  'llama-3.3-70b-versatile': { inputPerM: 0.59, outputPerM: 0.79, cachedInputPerM: 0.59, cacheWrite5mPerM: 0.59 },
 }
 
 /** Thrown by the strict billing path on an unpriced model. */
