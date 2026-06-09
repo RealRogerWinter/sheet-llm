@@ -30,6 +30,7 @@
     "db:studio": "drizzle-kit studio",
     "replay": "tsx scripts/replay.ts",
     "backfill:orchestrator-turns": "tsx scripts/backfill-orchestrator-turns.ts",
+    "export-training-pairs": "tsx scripts/export-training-pairs.ts",
     "trim:orchestrator-turns": "tsx scripts/trim-orchestrator-turns.ts",
     "docs:check": "tsx scripts/docs/check-doc-freshness.ts"
   },
