@@ -28,6 +28,19 @@ vi.mock('@/lib/llm', () => ({
   getLLMClient: () => ({ complete: completeMock }),
 }))
 
+// SHE-17: generate_simple routes through the provider registry; mock the
+// selected provider's toolCall. (completeMock stays for the route's legacy
+// fall-through paths.)
+const toolCallMock = vi.fn()
+vi.mock('@/lib/providers/select', () => ({
+  selectProvider: () => ({
+    provider: { name: 'anthropic', toolCall: toolCallMock },
+    providerName: 'anthropic',
+    model: 'claude-sonnet-4-6',
+    tier: 'medium',
+  }),
+}))
+
 const classifyMock = vi.fn()
 vi.mock('@/lib/orchestrator/classifier', () => ({
   classify: classifyMock,
@@ -70,6 +83,13 @@ describe('/api/chat orchestrator (Phase 2)', () => {
       score: VALID_SCORE,
       introText: 'mocked',
       toolUseId: 'toolu_real_1',
+    })
+    toolCallMock.mockReset()
+    toolCallMock.mockResolvedValue({
+      input: VALID_SCORE,
+      introText: 'mocked',
+      toolUseId: 'toolu_real_1',
+      model: 'claude-sonnet-4-6',
     })
     classifyMock.mockReset()
     runEditIntraMeasureMock.mockReset()

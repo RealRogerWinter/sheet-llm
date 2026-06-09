@@ -139,37 +139,66 @@ function assistantBlockFromAnthropic(
  * does not model, so unmodelled shapes surface immediately rather than
  * being silently dropped.
  */
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null
+}
+
+function safeStringify(v: unknown): string {
+  try {
+    return JSON.stringify(v ?? '')
+  } catch {
+    // Circular / BigInt etc. can't come from JSON.parse'd content_json, but
+    // guard anyway so the "never throws" contract is absolute.
+    return ''
+  }
+}
+
 /**
- * Like `fromAnthropicMessages`, but NEVER throws — for adapting STORED
- * history (`content_json`), where a corrupt or legacy row must not make a
- * whole conversation un-loadable (the PR1 S1 finding). Unmodellable blocks
- * are coerced to their nearest valid neutral form (non-string tool_result
- * content is JSON-stringified) or dropped (unknown block types); messages
- * with an unknown role, non-array content, or no surviving blocks are
- * skipped. For WELL-FORMED input it is identical to `fromAnthropicMessages`
- * (the strict round-trip golden covers that equivalence).
+ * Like `fromAnthropicMessages`, but treats its input as UNTRUSTED and NEVER
+ * throws — for adapting STORED history (`content_json`, hydrated via
+ * `JSON.parse` with no per-element validation), where a corrupt or legacy
+ * row must not make a whole conversation un-loadable (the PR1 S1 finding).
+ *
+ * Degradation rules:
+ *  - A null/non-object message, an unknown role, or non-array content → the
+ *    message is skipped.
+ *  - A null/non-object content block, or one whose required fields are
+ *    missing/mistyped → that block is dropped; non-string tool_result
+ *    content is JSON-stringified.
+ *  - A `tool_result` is kept only if a PRECEDING surviving `tool_use` minted
+ *    its id (orphan-prune) — so degrading a corrupt row never produces an
+ *    orphaned tool_result that the API would 400 on (which would break the
+ *    conversation anyway, defeating the purpose).
+ *  - A message with no surviving blocks is dropped.
+ *
+ * For WELL-FORMED input it is identical to `fromAnthropicMessages` (the
+ * strict round-trip golden covers that equivalence).
  */
 export function fromAnthropicMessagesLenient(
   history: ReadonlyArray<ChatMessage>,
 ): NeutralMessage[] {
   const out: NeutralMessage[] = []
-  for (const msg of history) {
-    if ((msg.role !== 'user' && msg.role !== 'assistant') || !Array.isArray(msg.content)) {
-      continue
-    }
-    if (msg.role === 'user') {
+  const seenToolUseIds = new Set<string>()
+  for (const msg of history as ReadonlyArray<unknown>) {
+    if (!isObject(msg) || !Array.isArray(msg.content)) continue
+    const role = msg.role
+    if (role !== 'user' && role !== 'assistant') continue
+
+    if (role === 'user') {
       const content: NeutralUserBlock[] = []
       for (const b of msg.content) {
+        if (!isObject(b)) continue
         if (b.type === 'text' && typeof b.text === 'string') {
           content.push({ type: 'text', text: b.text })
         } else if (b.type === 'tool_result' && typeof b.tool_use_id === 'string') {
-          const c = typeof b.content === 'string' ? b.content : JSON.stringify(b.content ?? '')
+          // Orphan-prune: only keep a tool_result that answers a tool_use we kept.
+          if (!seenToolUseIds.has(b.tool_use_id)) continue
           const block: NeutralToolResultBlock = {
             type: 'tool_result',
             toolUseId: b.tool_use_id,
-            content: c,
+            content: typeof b.content === 'string' ? b.content : safeStringify(b.content),
           }
-          if (b.is_error !== undefined) block.isError = b.is_error
+          if (b.is_error !== undefined) block.isError = Boolean(b.is_error)
           content.push(block)
         }
       }
@@ -177,6 +206,7 @@ export function fromAnthropicMessagesLenient(
     } else {
       const content: NeutralAssistantBlock[] = []
       for (const b of msg.content) {
+        if (!isObject(b)) continue
         if (b.type === 'text' && typeof b.text === 'string') {
           content.push({ type: 'text', text: b.text })
         } else if (b.type === 'tool_use' && typeof b.id === 'string' && typeof b.name === 'string') {
@@ -184,8 +214,9 @@ export function fromAnthropicMessagesLenient(
             type: 'tool_use',
             id: b.id,
             name: b.name,
-            input: (b.input ?? {}) as Record<string, unknown>,
+            input: isObject(b.input) ? (b.input as Record<string, unknown>) : {},
           })
+          seenToolUseIds.add(b.id)
         }
       }
       if (content.length > 0) out.push({ role: 'assistant', content })

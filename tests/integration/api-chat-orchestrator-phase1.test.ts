@@ -27,6 +27,19 @@ vi.mock('@/lib/llm', () => ({
   getLLMClient: () => ({ complete: completeMock }),
 }))
 
+// SHE-17: generate_simple routes through the provider registry, so mock the
+// selected provider's toolCall (the legacy getLLMClient mock above stays for
+// the route's bounded/legacy fall-through paths).
+const toolCallMock = vi.fn()
+vi.mock('@/lib/providers/select', () => ({
+  selectProvider: () => ({
+    provider: { name: 'anthropic', toolCall: toolCallMock },
+    providerName: 'anthropic',
+    model: 'claude-sonnet-4-6',
+    tier: 'medium',
+  }),
+}))
+
 const classifyMock = vi.fn()
 vi.mock('@/lib/orchestrator/classifier', () => ({
   classify: classifyMock,
@@ -62,6 +75,13 @@ describe('/api/chat orchestrator integration (Phase 1)', () => {
       score: BASE_SCORE,
       introText: 'mocked',
       toolUseId: 'toolu_real_1',
+    })
+    toolCallMock.mockReset()
+    toolCallMock.mockResolvedValue({
+      input: BASE_SCORE,
+      introText: 'mocked',
+      toolUseId: 'toolu_real_1',
+      model: 'claude-sonnet-4-6',
     })
     classifyMock.mockReset()
   })
@@ -143,7 +163,9 @@ describe('/api/chat orchestrator integration (Phase 1)', () => {
     const res = await POST(req({ message: 'a c major scale' }))
     expect(res.status).toBe(200)
     expect(res.headers.get('X-Orchestrator-Label')).toBe('generate_simple')
-    expect(completeMock).toHaveBeenCalledTimes(1)
+    // SHE-17: the orchestrator owns the call via the provider registry now.
+    expect(toolCallMock).toHaveBeenCalledTimes(1)
+    expect(completeMock).not.toHaveBeenCalled()
     const data = await res.json()
     expect(data.scoreJson).toEqual(BASE_SCORE)
   })

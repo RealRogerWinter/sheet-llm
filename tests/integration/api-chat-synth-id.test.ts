@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { Score } from '@/lib/music/types'
-import type { ChatMessage } from '@/lib/llm/wrapper'
+import type { NeutralMessage } from '@/lib/providers/conversation'
 import { installTestDb, mockAuthSession } from '../factories/testEnv'
 
 vi.mock('@/lib/auth/session', () => mockAuthSession())
@@ -39,6 +39,33 @@ const completeMock = vi.fn()
 vi.mock('@/lib/llm/stubClient', () => ({ stubClient: { complete: completeMock } }))
 vi.mock('@/lib/llm', () => ({ getLLMClient: () => ({ complete: completeMock }) }))
 
+// SHE-17: generate_simple is served by the orchestrator via the provider
+// registry, so the LLM call is provider.toolCall (not the legacy complete).
+const toolCallMock = vi.fn()
+vi.mock('@/lib/providers/select', () => ({
+  selectProvider: () => ({
+    provider: { name: 'anthropic', toolCall: toolCallMock },
+    providerName: 'anthropic',
+    model: 'claude-sonnet-4-6',
+    tier: 'medium',
+  }),
+}))
+
+/** Queue one generate_simple LLM result (provider.toolCall shape). */
+function mockGenTurn(score: Score, introText: string, toolUseId: string) {
+  toolCallMock.mockResolvedValueOnce({
+    input: score,
+    introText,
+    toolUseId,
+    model: 'claude-sonnet-4-6',
+  })
+}
+
+/** The neutral history the orchestrator handed to provider.toolCall on call N. */
+function historyOfCall(n: number): NeutralMessage[] {
+  return toolCallMock.mock.calls[n][1].history as NeutralMessage[]
+}
+
 const classifyMock = vi.fn()
 vi.mock('@/lib/orchestrator/classifier', () => ({
   classify: classifyMock,
@@ -66,7 +93,12 @@ describe('/api/chat synth-id stripping (PR A)', () => {
     // M26: this synth-id test drives fresh generation through the legacy path;
     // opt out of the free-tier bounded choke point.
     vi.stubEnv('SL_BOUNDED_GEN', '0')
+    // These tests drive edits via the classifier (edit_score_level), so opt
+    // out of the native tool dispatcher — otherwise an edited-score turn calls
+    // the (mocked) provider expecting a dispatch decision and gets a Score.
+    vi.stubEnv('SL_NEW_TOOL_DISPATCH', '0')
     completeMock.mockReset()
+    toolCallMock.mockReset()
     classifyMock.mockReset()
   })
 
@@ -82,9 +114,7 @@ describe('/api/chat synth-id stripping (PR A)', () => {
     classifyMock.mockResolvedValueOnce({
       kind: 'generate_simple', scope: 'snippet', complexity: 'simple', confidence: 0.95,
     })
-    completeMock.mockResolvedValueOnce({
-      score: SCORE_C, introText: 'turn 1', toolUseId: 'toolu_REAL_1',
-    })
+    mockGenTurn(SCORE_C, 'turn 1', 'toolu_REAL_1')
     const t1 = await (await POST(req({ message: 'a c major scale' }))).json()
 
     // Turn 2: classifier picks edit_score_level → orchestrator handles → synth tool_use id.
@@ -94,33 +124,31 @@ describe('/api/chat synth-id stripping (PR A)', () => {
     })
     await POST(req({ chatId: t1.chatId, message: 'change key to G', editedScore: SCORE_C }))
 
-    // Turn 3: classifier picks generate_simple again → legacy LLM path. The
-    // messages sent to the LLM MUST NOT contain a tool_result block pointing
-    // at any toolu_orch_* id.
+    // Turn 3: classifier picks generate_simple again → LLM path. The messages
+    // sent to the LLM MUST NOT contain a tool_result block pointing at any
+    // toolu_orch_* id.
     classifyMock.mockResolvedValueOnce({
       kind: 'generate_simple', scope: 'snippet', complexity: 'simple', confidence: 0.95,
     })
-    completeMock.mockResolvedValueOnce({
-      score: SCORE_D, introText: 'turn 3', toolUseId: 'toolu_REAL_3',
-    })
+    mockGenTurn(SCORE_D, 'turn 3', 'toolu_REAL_3')
     await POST(req({ chatId: t1.chatId, message: 'now in D major', editedScore: SCORE_G }))
 
-    const sentMessages = completeMock.mock.calls[1][0].messages as ChatMessage[]
+    const sentMessages = historyOfCall(1)
     // The final user turn's tool_result must reference the LAST REAL
     // tool_use id (toolu_REAL_1), not a synth id and not undefined.
     const lastUserTurn = sentMessages.at(-1)
     expect(lastUserTurn?.role).toBe('user')
     const finalToolResult = lastUserTurn?.content.find((c) => c.type === 'tool_result') as
-      | { type: 'tool_result'; tool_use_id: string }
+      | { type: 'tool_result'; toolUseId: string }
       | undefined
     expect(finalToolResult).toBeDefined()
-    expect(finalToolResult!.tool_use_id).toBe('toolu_REAL_1')
+    expect(finalToolResult!.toolUseId).toBe('toolu_REAL_1')
     // And NO tool_result anywhere in the transcript should reference a synth id.
     for (const m of sentMessages) {
       if (m.role !== 'user') continue
       for (const block of m.content) {
         if (block.type === 'tool_result') {
-          expect(block.tool_use_id).not.toMatch(/^toolu_orch_/)
+          expect(block.toolUseId).not.toMatch(/^toolu_orch_/)
         }
       }
     }
@@ -131,9 +159,7 @@ describe('/api/chat synth-id stripping (PR A)', () => {
     classifyMock.mockResolvedValueOnce({
       kind: 'generate_simple', scope: 'snippet', complexity: 'simple', confidence: 0.95,
     })
-    completeMock.mockResolvedValueOnce({
-      score: SCORE_C, introText: 'turn 1', toolUseId: 'toolu_REAL_1',
-    })
+    mockGenTurn(SCORE_C, 'turn 1', 'toolu_REAL_1')
     const t1 = await (await POST(req({ message: 'a c major scale' }))).json()
 
     classifyMock.mockResolvedValueOnce({
@@ -145,12 +171,10 @@ describe('/api/chat synth-id stripping (PR A)', () => {
     classifyMock.mockResolvedValueOnce({
       kind: 'generate_simple', scope: 'snippet', complexity: 'simple', confidence: 0.95,
     })
-    completeMock.mockResolvedValueOnce({
-      score: SCORE_D, introText: 'turn 3', toolUseId: 'toolu_REAL_3',
-    })
+    mockGenTurn(SCORE_D, 'turn 3', 'toolu_REAL_3')
     await POST(req({ chatId: t1.chatId, message: 'now in D major', editedScore: SCORE_G }))
 
-    const sentMessages = completeMock.mock.calls[1][0].messages as ChatMessage[]
+    const sentMessages = historyOfCall(1)
     const allToolUseIds = sentMessages
       .filter((m) => m.role === 'assistant')
       .flatMap((m) => m.content)
@@ -172,16 +196,14 @@ describe('/api/chat synth-id stripping (PR A)', () => {
     })
     const t1 = await (await POST(req({ message: 'change key to G', editedScore: SCORE_C }))).json()
 
-    // Turn 2: legacy LLM path. Should be first-call shape because no real prior id.
+    // Turn 2: LLM path. Should be first-call shape because no real prior id.
     classifyMock.mockResolvedValueOnce({
       kind: 'generate_simple', scope: 'snippet', complexity: 'simple', confidence: 0.95,
     })
-    completeMock.mockResolvedValueOnce({
-      score: SCORE_D, introText: 'turn 2', toolUseId: 'toolu_REAL_2',
-    })
+    mockGenTurn(SCORE_D, 'turn 2', 'toolu_REAL_2')
     await POST(req({ chatId: t1.chatId, message: 'rewrite in D major', editedScore: SCORE_G }))
 
-    const sentMessages = completeMock.mock.calls[0][0].messages as ChatMessage[]
+    const sentMessages = historyOfCall(0)
     const lastUserTurn = sentMessages.at(-1)
     expect(lastUserTurn?.role).toBe('user')
     // First-call shape: no tool_result block at all.

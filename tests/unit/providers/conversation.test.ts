@@ -201,21 +201,58 @@ describe('fromAnthropicMessagesLenient (stored-history adapter, S1-safe)', () =>
     )
   })
 
-  it('never throws — it coerces non-string tool_result content to a string instead', () => {
+  it('coerces non-string tool_result content to a string (kept because its tool_use survives)', () => {
     const weird = [
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_x', name: 'render_score', input: {} }] },
       {
         role: 'user',
         content: [{ type: 'tool_result', tool_use_id: 'toolu_x', content: [{ type: 'text', text: 'n' }] }],
       },
     ] as unknown as ChatMessage[]
     const out = fromAnthropicMessagesLenient(weird)
-    const turn = out[0] as Extract<NeutralMessage, { role: 'user' }>
+    const turn = out[1] as Extract<NeutralMessage, { role: 'user' }>
     const tr = turn.content[0]
     expect(tr.type).toBe('tool_result')
     if (tr.type === 'tool_result') {
       expect(typeof tr.content).toBe('string')
       expect(tr.content).toContain('text')
     }
+  })
+
+  it('NEVER throws on null/non-object messages or content elements (corrupt content_json)', () => {
+    const corrupt = [
+      null,
+      'not-an-object',
+      { role: 'user', content: [null, undefined, 42, { type: 'text', text: 'kept' }] },
+      { role: 'assistant', content: null },
+    ] as unknown as ChatMessage[]
+    let out: unknown
+    expect(() => {
+      out = fromAnthropicMessagesLenient(corrupt)
+    }).not.toThrow()
+    expect(out).toEqual([{ role: 'user', content: [{ type: 'text', text: 'kept' }] }])
+  })
+
+  it('orphan-prunes a tool_result whose tool_use was dropped (no API-invalid request)', () => {
+    const orphan = [
+      // tool_use missing its id -> dropped -> assistant turn has no surviving blocks
+      { role: 'assistant', content: [{ type: 'tool_use', name: 'render_score', input: {} }] },
+      // its tool_result is now orphaned -> must be pruned, not emitted
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_gone', content: 'r' }] },
+    ] as unknown as ChatMessage[]
+    expect(fromAnthropicMessagesLenient(orphan)).toEqual([])
+  })
+
+  it('keeps a tool_result only after a surviving preceding tool_use of the same id', () => {
+    const seq = [
+      { role: 'user', content: [{ type: 'text', text: 'go' }] },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'tc1', name: 'render_score', input: {} }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tc1', content: 'ok' }] },
+    ] as unknown as ChatMessage[]
+    const out = fromAnthropicMessagesLenient(seq)
+    expect(out).toHaveLength(3)
+    const last = out[2] as Extract<NeutralMessage, { role: 'user' }>
+    expect(last.content[0]).toEqual({ type: 'tool_result', toolUseId: 'tc1', content: 'ok' })
   })
 
   it('skips unknown-role and non-array-content messages without throwing', () => {
