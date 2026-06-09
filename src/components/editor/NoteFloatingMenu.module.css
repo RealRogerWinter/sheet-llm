@@ -7,8 +7,10 @@
    * viewport. The row is wider than a phone (Play + accidentals + durations +
    * category submenus + pitch chips + Chord…), so cap it like the shared
    * Popover shell and let it scroll horizontally instead of overflowing off
-   * the right edge. Only overflow-x is set — overflow-y stays visible so the
-   * (position:fixed) submenu/Popover dropdowns are not clipped vertically. */
+   * the right edge. The submenu/Popover dropdowns are NOT clipped by this
+   * overflow box because they are position:fixed — their containing block is
+   * the viewport, not .menu. (Setting overflow-x:auto coerces overflow-y to
+   * auto per the CSS overflow spec, but fixed descendants escape it anyway.) */
   flex-wrap: nowrap;
   max-width: calc(100vw - 2 * var(--gap-2) - var(--safe-l) - var(--safe-r));
   box-sizing: border-box;
@@ -19,6 +21,11 @@
   border: 1px solid var(--rule);
   border-radius: var(--radius);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  /* fadeIn applies a transform; while it runs, .menu briefly becomes the
+   * containing block for the fixed Popover dropdowns. Safe only because the
+   * fade plays on mount and no dropdown can be open then — do NOT add a
+   * transform to .menu while a submenu can be open, or overflow-x:auto above
+   * would clip/mis-anchor the dropdown. */
   animation: fadeIn 120ms ease-out;
 }
 
