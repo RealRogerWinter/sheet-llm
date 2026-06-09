@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { clampMenuLeft } from '@/components/editor/NoteFloatingMenu'
+import { clampMenuLeft, isMenuOverflowing } from '@/components/editor/NoteFloatingMenu'
 
 /**
  * SHE-13: the NoteFloatingMenu toolbar used to clamp its `left` against a
@@ -45,5 +45,28 @@ describe('clampMenuLeft', () => {
 
   it('never returns less than the gutter', () => {
     expect(clampMenuLeft(0, 5000, 360, GUTTER)).toBeGreaterThanOrEqual(GUTTER)
+  })
+})
+
+/**
+ * SHE-13 follow-up: only show the right-edge scroll-affordance fade when the row
+ * actually overflows its (capped) box, so a toolbar that fits gets no fade.
+ */
+describe('isMenuOverflowing', () => {
+  it('is true when content is wider than the visible box (beyond the 1px tolerance)', () => {
+    expect(isMenuOverflowing(620, 360)).toBe(true)
+  })
+
+  it('is false when the row fits', () => {
+    expect(isMenuOverflowing(300, 360)).toBe(false)
+  })
+
+  it('is false at equal width and within a 1px sub-pixel rounding tolerance', () => {
+    expect(isMenuOverflowing(360, 360)).toBe(false)
+    expect(isMenuOverflowing(361, 360)).toBe(false)
+  })
+
+  it('is false for the jsdom zero-measurement case', () => {
+    expect(isMenuOverflowing(0, 0)).toBe(false)
   })
 })

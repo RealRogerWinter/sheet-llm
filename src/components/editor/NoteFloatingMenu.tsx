@@ -93,6 +93,16 @@ export function clampMenuLeft(
   return Math.max(gutter, Math.min(centered, rightBound))
 }
 
+/**
+ * SHE-13 follow-up: whether the toolbar's content overflows its (viewport-
+ * capped) box and is therefore horizontally scrollable — drives the right-edge
+ * scroll-affordance fade. A 1px tolerance absorbs sub-pixel rounding so a row
+ * that exactly fits doesn't get a spurious fade; jsdom reports 0/0 → false.
+ */
+export function isMenuOverflowing(scrollWidth: number, clientWidth: number): boolean {
+  return scrollWidth - clientWidth > 1
+}
+
 const ACCIDENTALS: Array<{ key: Accidental; label: string; title: string }> = [
   { key: 'sharp', label: '♯', title: 'Sharp (=)' },
   { key: 'natural', label: '♮', title: 'Natural (0)' },
@@ -135,6 +145,7 @@ export default function NoteFloatingMenu() {
   // in state to re-clamp once the real width is known.
   const menuRef = useRef<HTMLDivElement | null>(null)
   const [menuWidth, setMenuWidth] = useState(0)
+  const [overflowing, setOverflowing] = useState(false)
   // Reactive viewport size so the clamp re-runs on resize / rotate / mobile
   // address-bar show-hide (matches Popover's clamp; render-time
   // window.innerWidth would go stale).
@@ -490,8 +501,13 @@ export default function NoteFloatingMenu() {
   // for offsetWidth, so the clamp gracefully falls back to anchor-centering
   // until a real width is known.
   useLayoutEffect(() => {
-    const w = menuRef.current?.offsetWidth ?? 0
+    const el = menuRef.current
+    const w = el?.offsetWidth ?? 0
     setMenuWidth((prev) => (prev === w ? prev : w))
+    // SHE-13 follow-up: track whether the capped row overflows, to show the
+    // right-edge scroll-affordance fade only when there's actually more to reach.
+    const over = el ? isMenuOverflowing(el.scrollWidth, el.clientWidth) : false
+    setOverflowing((prev) => (prev === over ? prev : over))
   }, [selection, viewport.width])
 
   if (contextMenu) return null
@@ -540,6 +556,12 @@ export default function NoteFloatingMenu() {
       aria-label="Edit selected note"
       onMouseDown={(e) => e.preventDefault()}
     >
+      {/* SHE-13: right-edge fade hinting the row scrolls horizontally on narrow
+          screens. A SIBLING of the buttons (never an ancestor of the submenu
+          Popover, which is a fixed-position descendant) with pointer-events:none,
+          so it neither clips dropdowns nor blocks taps. CSS `order` floats it to
+          the row's end; it only renders when the row actually overflows. */}
+      {overflowing && <span className={styles.scrollFade} aria-hidden="true" />}
       <button
         type="button"
         className={styles.button}

@@ -29,6 +29,26 @@
   animation: fadeIn 120ms ease-out;
 }
 
+/* SHE-13: right-edge fade that hints the row scrolls horizontally when it's
+ * wider than the viewport. `order: 1` floats it to the visual end regardless of
+ * DOM position; `position: sticky; right: 0` pins it to the scrollport's right
+ * edge; the negative margin overlays it on the last content (rather than adding
+ * scroll width). pointer-events:none keeps the button underneath tappable, and
+ * it is a sibling of the buttons (not an ancestor of the fixed dropdowns), so
+ * it can't clip a submenu. Only rendered when the row actually overflows. */
+.scrollFade {
+  order: 1;
+  position: sticky;
+  right: 0;
+  align-self: stretch;
+  flex: 0 0 28px;
+  width: 28px;
+  margin-left: -28px;
+  pointer-events: none;
+  background: linear-gradient(to right, transparent, var(--paper));
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
 .group {
   display: flex;
   align-items: center;
