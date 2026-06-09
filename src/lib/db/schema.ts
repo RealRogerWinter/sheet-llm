@@ -332,6 +332,41 @@ export const orchestratorTurns = sqliteTable(
      * source of truth; this asymmetry is deliberate, not an omission.
      */
     outcome: text('outcome'),
+    /**
+     * SHE-18 PR3 — quality detail the orchestrator computes every turn but
+     * previously discarded (only the boolean `replacement_blocked` + the
+     * primary-staff `retained_event_ratio` survived). All nullable: a
+     * compose-from-scratch / converse / refuse turn has no before-score, so
+     * neither metric applies (NULL = "not computed", distinct from a 0/false
+     * result). These are the per-turn signals a training-data filter wants:
+     * keep turns that preserved the user's material and weren't wholesale
+     * rewrites.
+     *
+     * Preservation — from `verifyAllOriginalsPreserved`, currently only the
+     * `extend_composition` handler (the sole one that verifies preservation
+     * today; insert/region don't yet, so they leave this NULL): did every
+     * original measure hash identically before/after, and how many diverged.
+     */
+    preservationOk: integer('preservation_ok'), // 1/0/NULL
+    preservationMismatchCount: integer('preservation_mismatch_count'),
+    /**
+     * Replacement gate — from `detectReplacement` (computed for EVERY edit
+     * turn with a before-score, even when the gate does not fire):
+     * `retainedIdentityRatio` ∈ [0,1] (overlap-measure hash match fraction),
+     * the human-readable `reasons` (stored as a JSON array string), and
+     * `userExplicitRewrite` (the user/dispatch asked to start over, so a low
+     * ratio is intended, not a regression). `replacement_blocked` above stays
+     * the gate-fired boolean; these add the WHY behind it.
+     */
+    replacementRetainedIdentityRatio: real('replacement_retained_identity_ratio'),
+    // JSON string[] | NULL. ⚠️ PII: the `title 'X' → 'Y'` reason variant
+    // embeds the user-authored before-score title (free text). Fine at rest
+    // (this is server-internal forensic telemetry, never sent to clients), but
+    // the SHE-18 training EXPORT (PR5) MUST scrub it — drop this column, or
+    // filter out reason elements matching /^title /. The other variants
+    // (`key X → Y`, `meter X → Y`, `only N of M measures retained`) are safe.
+    replacementReasons: text('replacement_reasons'),
+    replacementUserExplicitRewrite: integer('replacement_user_explicit_rewrite'), // 1/0/NULL
   },
   (table) => [
     index('orchestrator_turns_session_created').on(table.sessionId, table.createdAt),

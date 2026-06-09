@@ -252,6 +252,47 @@ describe('recordTurn — DB persistence', () => {
     expect(row?.diffAlgoVersion).toBe(2)
   })
 
+  it('persists preservation + replacement quality detail (SHE-18 PR3)', async () => {
+    await recordTurn({
+      requestId: 'req-q',
+      sessionId: 'session-1',
+      label: 'edit_score_level',
+      handler: 'extend_composition',
+      model: 'claude-sonnet-4-6',
+      latencyMs: 10,
+      finalStatus: 'ok',
+      preservationOk: true,
+      preservationMismatchCount: 0,
+      replacementRetainedIdentityRatio: 0.83,
+      replacementReasons: ['key C → Am', 'meter 4/4 → 5/4'],
+      replacementUserExplicitRewrite: false,
+    })
+    const row = db.select().from(orchestratorTurns).get()
+    expect(row?.preservationOk).toBe(1)
+    expect(row?.preservationMismatchCount).toBe(0)
+    expect(row?.replacementRetainedIdentityRatio).toBeCloseTo(0.83)
+    expect(JSON.parse(row!.replacementReasons!)).toEqual(['key C → Am', 'meter 4/4 → 5/4'])
+    expect(row?.replacementUserExplicitRewrite).toBe(0)
+  })
+
+  it('leaves quality-detail columns NULL when not provided (no before-score)', async () => {
+    await recordTurn({
+      requestId: 'req-q2',
+      sessionId: 'session-1',
+      label: 'compose',
+      handler: 'compose',
+      model: null,
+      latencyMs: 5,
+      finalStatus: 'ok',
+    })
+    const row = db.select().from(orchestratorTurns).get()
+    expect(row?.preservationOk).toBeNull()
+    expect(row?.preservationMismatchCount).toBeNull()
+    expect(row?.replacementRetainedIdentityRatio).toBeNull()
+    expect(row?.replacementReasons).toBeNull()
+    expect(row?.replacementUserExplicitRewrite).toBeNull()
+  })
+
   it('also emits a stdout line alongside the DB insert', async () => {
     await recordTurn({
       requestId: 'req-2',

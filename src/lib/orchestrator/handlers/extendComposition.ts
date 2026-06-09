@@ -611,6 +611,9 @@ export async function runExtendComposition(
     toolUseId: toolResult.toolUseId,
     introText: toolResult.introText,
     appliedOps: [op],
+    // SHE-18 PR3 — surface the preservation-verify result so recordTurn can
+    // persist it (pass/fail + how many original measures diverged).
+    preservation: { ok: verify.ok, mismatchCount: verify.mismatches.length },
     ...(warnings.length > 0 ? { warnings } : {}),
     ...(cadence.detected && (cadence.kind === 'authentic' || cadence.kind === 'plagal')
       ? { cadenceAtBoundary: true }
