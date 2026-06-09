@@ -20,6 +20,12 @@ import { recordProviderCall } from '@/lib/metering/usageMeter'
  *  truncated (finish_reason 'length') and surfaced as OutputTruncatedError. */
 const DEFAULT_MAX_TOKENS = 2_000
 
+/** Hard cap on the unframed SSE read buffer (a single delimiter-free run).
+ *  Legitimate Chat Completions frames are well under a KB; 1 MB is a
+ *  generous protocol-violation ceiling that bounds memory against a
+ *  newline-free or hostile upstream stream. */
+const MAX_SSE_BUFFER_BYTES = 1_048_576
+
 export interface OpenAICompatibleConfig {
   name: ProviderName
   /** API base URL ending in `/v1` (e.g., https://api.groq.com/openai/v1). */
@@ -298,9 +304,31 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
     try {
       reading: for (;;) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
+        // Evaluate the budget/deadline guard once per iteration (not only in
+        // the text-delta branch) so the wall-clock deadline fires even when no
+        // deltas are arriving — keep-alives, empty deltas, or byte-drip.
+        if (guard.shouldAbort(accumulated.length)) {
+          aborted = true
+          break
+        }
+        // Race the read against the deadline so a fully-stalled socket (read
+        // never resolves) can't hold the stream open past the deadline.
+        const read = await this.readWithDeadline(reader, options.streamDeadlineAt)
+        if (read.timedOut) {
+          aborted = true
+          break
+        }
+        if (read.done) break
+        buffer += decoder.decode(read.value, { stream: true })
+        // Cap the unframed buffer: legitimate SSE frames are tiny, so a
+        // newline-free (malicious / buggy) upstream that grows `buffer`
+        // without bound is a protocol violation, not data we should retain.
+        if (buffer.length > MAX_SSE_BUFFER_BYTES) {
+          throw new UpstreamError(
+            `${this.name}: SSE stream exceeded ${MAX_SSE_BUFFER_BYTES} bytes without a frame delimiter`,
+            502,
+          )
+        }
         // SSE frames are newline-delimited `data: {json}` lines; keep the
         // trailing partial line in the buffer for the next chunk.
         const lines = buffer.split('\n')
@@ -310,29 +338,28 @@ export class OpenAICompatibleProvider implements LLMProvider {
           if (!line.startsWith('data:')) continue
           const data = line.slice(5).trim()
           if (data === '' || data === '[DONE]') continue
-          let chunk: OpenAIStreamChunk
+          let frame: OpenAIStreamChunk
           try {
-            chunk = JSON.parse(data) as OpenAIStreamChunk
+            frame = JSON.parse(data) as OpenAIStreamChunk
           } catch {
             continue // ignore keep-alive / malformed frames
           }
-          const choice = chunk.choices?.[0]
+          const choice = frame.choices?.[0]
           const delta = choice?.delta?.content
           if (typeof delta === 'string' && delta.length > 0) {
             accumulated += delta
             yield { type: 'text-delta', delta }
             if (guard.shouldAbort(accumulated.length)) {
               aborted = true
-              await reader.cancel().catch(() => {})
               break reading
             }
           }
           if (choice?.finish_reason) stopReason = choice.finish_reason
-          if (chunk.usage) {
+          if (frame.usage) {
             usage = {
-              inputTokens: chunk.usage.prompt_tokens,
-              cachedInputTokens: chunk.usage.prompt_tokens_details?.cached_tokens,
-              outputTokens: chunk.usage.completion_tokens,
+              inputTokens: frame.usage.prompt_tokens,
+              cachedInputTokens: frame.usage.prompt_tokens_details?.cached_tokens,
+              outputTokens: frame.usage.completion_tokens,
             }
           }
         }
@@ -358,6 +385,42 @@ export class OpenAICompatibleProvider implements LLMProvider {
       }
       const err = e instanceof Error ? e : new Error(`${this.name}: unknown stream error`)
       yield { type: 'error', error: err }
+    } finally {
+      // Release the HTTP stream on EVERY exit path — normal completion,
+      // guard/deadline abort, mid-stream error, AND consumer early `.return()`
+      // (the documented escape hatch). cancel() is a no-op on an already-closed
+      // stream, so double-cancel from the abort paths is harmless.
+      await reader.cancel().catch(() => {})
+    }
+  }
+
+  /**
+   * Read one chunk, racing it against the stream's wall-clock deadline so a
+   * silently-stalled socket can't block past it. Returns `{ timedOut: true }`
+   * when the deadline passes before a chunk arrives.
+   */
+  private async readWithDeadline(
+    reader: ReadableStreamDefaultReader<Uint8Array>,
+    deadlineAt: number | undefined,
+  ): Promise<{ done: boolean; value?: Uint8Array; timedOut: boolean }> {
+    if (deadlineAt === undefined) {
+      const r = await reader.read()
+      return { done: r.done, value: r.value, timedOut: false }
+    }
+    const remaining = deadlineAt - Date.now()
+    if (remaining <= 0) return { done: false, timedOut: true }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<{ timedOut: true }>((resolve) => {
+      timer = setTimeout(() => resolve({ timedOut: true }), remaining)
+    })
+    try {
+      const r = await Promise.race([
+        reader.read().then((x) => ({ done: x.done, value: x.value, timedOut: false as const })),
+        timeout,
+      ])
+      return 'done' in r ? r : { done: false, timedOut: true }
+    } finally {
+      if (timer) clearTimeout(timer)
     }
   }
 

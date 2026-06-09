@@ -123,6 +123,47 @@ describe('OpenAICompatibleProvider.textStream', () => {
     )
   })
 
+  it('releases the reader (cancels the source) on consumer early .return()', async () => {
+    let cancelled = false
+    const encoder = new TextEncoder()
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(encoder.encode(deltaFrame('tick'))) // infinite stream
+      },
+      cancel() {
+        cancelled = true
+      },
+    })
+    fetchMock.mockResolvedValue({ ok: true, status: 200, body, text: async () => '' } as unknown as Response)
+    const provider = makeProvider()
+    const it = provider.textStream({ systemPrompt: 'sys', userText: 'hi' })[Symbol.asyncIterator]()
+    await it.next() // message-start
+    await it.next() // first text-delta
+    await it.return?.() // consumer bails early
+    expect(cancelled).toBe(true)
+  })
+
+  it('caps the SSE buffer: a delimiter-free flood yields an error, not OOM', async () => {
+    const flood = 'x'.repeat(1_100_000) // > 1 MB, no newline
+    fetchMock.mockResolvedValue(sseResponse([flood]))
+    const provider = makeProvider()
+    const events = await collect(provider.textStream({ systemPrompt: 'sys', userText: 'hi' }))
+    const last = events[events.length - 1]
+    expect(last.type).toBe('error')
+    expect((last as { error: Error }).error.message).toMatch(/without a frame delimiter/)
+  })
+
+  it('fires the wall-clock deadline on a stalled stream (read never resolves)', async () => {
+    // A source that never enqueues and never closes — reader.read() hangs.
+    const body = new ReadableStream<Uint8Array>({ pull() {} })
+    fetchMock.mockResolvedValue({ ok: true, status: 200, body, text: async () => '' } as unknown as Response)
+    const provider = makeProvider()
+    const events = await collect(
+      provider.textStream({ systemPrompt: 'sys', userText: 'hi', streamDeadlineAt: Date.now() + 40 }),
+    )
+    expect(events[events.length - 1]).toMatchObject({ type: 'message-stop', stopReason: 'max_tokens' })
+  })
+
   it('yields an error event when the stream body errors mid-flight', async () => {
     // Pull-based so the first read delivers the chunk and the SECOND errors
     // (calling error() right after enqueue in start() discards the queue).
