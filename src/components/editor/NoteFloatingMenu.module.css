@@ -3,6 +3,16 @@
   z-index: var(--z-floating-menu);
   display: flex;
   align-items: center;
+  /* SHE-13: keep the toolbar one scrollable row that never exceeds the
+   * viewport. The row is wider than a phone (Play + accidentals + durations +
+   * category submenus + pitch chips + Chord…), so cap it like the shared
+   * Popover shell and let it scroll horizontally instead of overflowing off
+   * the right edge. Only overflow-x is set — overflow-y stays visible so the
+   * (position:fixed) submenu/Popover dropdowns are not clipped vertically. */
+  flex-wrap: nowrap;
+  max-width: calc(100vw - 2 * var(--gap-2) - var(--safe-l) - var(--safe-r));
+  box-sizing: border-box;
+  overflow-x: auto;
   gap: 4px;
   padding: 6px 8px;
   background: var(--paper);

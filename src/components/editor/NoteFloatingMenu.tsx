@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useChatStore } from '@/lib/chat/state'
+import { useViewportRect } from '@/lib/ui/useViewportRect'
 import type { Accidental, Articulation, Duration, Pitch } from '@/lib/music/types'
 import { smartInsertNote } from '@/lib/music/smartInsertNote'
 import { getStaffEventAt, getStaffMeasureAt } from '@/lib/music/scoreAccessors'
@@ -68,6 +69,30 @@ import type { Span } from '@/lib/music/types'
 import { getVoiceMeasures } from '@/lib/music/scoreAccessors'
 import styles from './NoteFloatingMenu.module.css'
 
+/** Viewport gutter (px) kept on either side of the floating toolbar. */
+export const MENU_GUTTER = 8
+
+/**
+ * Clamp the toolbar's `left` so the measured-width row stays within the
+ * viewport. SHE-13: the old code clamped against a hardcoded 360px assumed
+ * width (`window.innerWidth - 360`), but the real rendered row is far wider,
+ * so on a narrow phone the right portion overflowed off-screen. We now clamp
+ * against the *measured* width so the box's right edge never exceeds
+ * `vw - gutter`; when the row is wider than the viewport the left edge simply
+ * pins at the gutter and the strip scrolls horizontally (see `.menu`
+ * overflow-x in the module CSS).
+ */
+export function clampMenuLeft(
+  anchorX: number,
+  menuWidth: number,
+  viewportWidth: number,
+  gutter: number = MENU_GUTTER,
+): number {
+  const centered = anchorX - menuWidth / 2
+  const rightBound = viewportWidth - menuWidth - gutter
+  return Math.max(gutter, Math.min(centered, rightBound))
+}
+
 const ACCIDENTALS: Array<{ key: Accidental; label: string; title: string }> = [
   { key: 'sharp', label: '♯', title: 'Sharp (=)' },
   { key: 'natural', label: '♮', title: 'Natural (0)' },
@@ -104,6 +129,16 @@ function pitchLabel(p: Pitch): string {
 }
 
 export default function NoteFloatingMenu() {
+  // SHE-13: measure the rendered toolbar width so the left-clamp stays exact
+  // even though the row is far wider than the old hardcoded 360px guess. The
+  // ref is read in a layout effect (post-paint, pre-browser-paint) and stored
+  // in state to re-clamp once the real width is known.
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  const [menuWidth, setMenuWidth] = useState(0)
+  // Reactive viewport size so the clamp re-runs on resize / rotate / mobile
+  // address-bar show-hide (matches Popover's clamp; render-time
+  // window.innerWidth would go stale).
+  const viewport = useViewportRect()
   const selection = useChatStore((s) => s.selection)
   const editedScore = useChatStore((s) => s.editedScore)
   const applyEdit = useChatStore((s) => s.applyEdit)
@@ -448,6 +483,17 @@ export default function NoteFloatingMenu() {
   // openJumpMarkerPopover to snapshot the target measure.
   useShiftLetterPopover('Y', openJumpMarkerPopover, { enabled: !!selection })
 
+  // SHE-13: measure the rendered toolbar after layout so the left-clamp uses
+  // the real width. Re-runs whenever the selection changes (the row's contents
+  // and therefore its width depend on the selected event) and when the
+  // viewport changes (a resize can grow the available width). jsdom reports 0
+  // for offsetWidth, so the clamp gracefully falls back to anchor-centering
+  // until a real width is known.
+  useLayoutEffect(() => {
+    const w = menuRef.current?.offsetWidth ?? 0
+    setMenuWidth((prev) => (prev === w ? prev : w))
+  }, [selection, viewport.width])
+
   if (contextMenu) return null
   if (!selection) return null
 
@@ -463,12 +509,15 @@ export default function NoteFloatingMenu() {
   const ax = selection.anchorX ?? window.innerWidth / 2
   const ay = selection.anchorY ?? 120
 
-  // Keep within the viewport horizontally. After the M-submenu
-  // condensation the inline row is much narrower (core actions +
-  // five category triggers), so the clamp width shrinks from ~460 to
-  // ~360 — chord chips still get headroom but the row no longer needs
-  // ~440px to avoid overflow.
-  const left = Math.max(8, Math.min(ax - 150, window.innerWidth - 360))
+  // Keep within the viewport horizontally. SHE-13: clamp against the actual
+  // measured row width (not a hardcoded 360px guess, which let the wide row
+  // overflow off the right edge of a phone). Until the width is measured
+  // (first paint / jsdom), fall back to centering on the anchor with just the
+  // gutter so the menu still lands near the tap. The `.menu` CSS caps the box
+  // to the viewport and scrolls horizontally when it can't fit.
+  const vw = viewport.width || window.innerWidth
+  const left =
+    menuWidth > 0 ? clampMenuLeft(ax, menuWidth, vw, MENU_GUTTER) : Math.max(MENU_GUTTER, ax - 150)
   const top = Math.max(8, ay - 56)
 
   const topPitch = pitches[pitches.length - 1]
@@ -484,6 +533,7 @@ export default function NoteFloatingMenu() {
 
   return (
     <div
+      ref={menuRef}
       className={styles.menu}
       style={{ left, top }}
       role="toolbar"

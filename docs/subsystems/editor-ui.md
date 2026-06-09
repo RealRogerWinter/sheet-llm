@@ -3,8 +3,8 @@ title: Notation Editor UI & Interactions
 subsystem: editor-ui
 audience: [contributor, ai-agent]
 status: current
-last_verified: 2026-06-03
-verified_against: c717c3d
+last_verified: 2026-06-09
+verified_against: 1729743
 source_paths:
   - src/components/ScorePanel.tsx
   - src/components/ScoreStage.tsx
@@ -65,7 +65,7 @@ so the next gesture resolves against fresh geometry.
 | `src/components/editor/useNoteClickHandler.ts` | The abcjs `clickListener` → selection entry. Built by `ScoreStage`, passed down. |
 | `src/components/editor/keyboardShortcuts.ts:mapKey` | The whole shortcut table (pure). |
 | `src/components/editor/useScoreContextMenu.ts` | The right-click `contextmenu` listener + ContextMenu-key/Shift+F10 opener → classifies the target (`contextTarget.ts`) and opens the `ContextMenu` (M27). Gated by `NEXT_PUBLIC_SL_CONTEXT_MENU`. |
-| `src/components/editor/NoteFloatingMenu.tsx` | Floating toolbar + ~20 popover open-states + Shift-letter + palette-bus wiring hub (~2500 lines). Secondary actions grouped into 5 category `SubMenu`s so the inline row never overflows. |
+| `src/components/editor/NoteFloatingMenu.tsx` | Floating toolbar + ~20 popover open-states + Shift-letter + palette-bus wiring hub (~2500 lines). Secondary actions grouped into 5 category `SubMenu`s. On narrow viewports the inline row is capped to the viewport (`max-width` + `overflow-x: auto`) and becomes a single horizontal-scroll strip; `left` is clamped against the *measured* row width via the exported `clampMenuLeft` helper (SHE-13 — was a hardcoded 360px guess that overflowed phones). |
 | `src/components/editor/EditorToolbar.tsx` + `SubMenu.tsx` | Above-score controls (setup behind a `SubMenu`) + the reusable category-submenu primitive. |
 | `src/components/editor/staffResolver.ts` + `staffGeometry.ts` | The hit-testing / Y→staff / Y→pitch geometry model. |
 
