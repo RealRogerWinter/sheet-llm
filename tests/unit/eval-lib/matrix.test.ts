@@ -74,6 +74,21 @@ describe('eval matrix lib (SHE-15)', () => {
     expect(report.rows[0].regressions).toEqual([])
   })
 
+  it('does not count a candidate INFRA flake on a baseline-pass case as a regression', () => {
+    const baseline = summarizeRun('anthropic:sonnet', [
+      rec({ caseId: 'a', pass: true }),
+      rec({ caseId: 'b', pass: true }),
+    ])
+    const cand = summarizeRun('groq:flaky', [
+      rec({ caseId: 'a', pass: true }),
+      { caseId: 'b', pass: false, status: 'INFRA', model: 'm', estimatedCostUsd: 0 },
+    ])
+    const report = buildParityReport(baseline, [cand])
+    expect(report.rows[0].regressions).toEqual([]) // 'b' was infra, not a model regression
+    expect(report.rows[0].meetsParity).toBe(true)
+    expect(report.rows[0].infraCount).toBe(1)
+  })
+
   it('renderMarkdown includes each model, a parity verdict, and cost', () => {
     const baseline = summarizeRun('anthropic:claude-sonnet-4-6', [rec({ caseId: 'a', pass: true, estimatedCostUsd: 0.03 })])
     const cand = summarizeRun('groq:llama-3.1-8b-instant', [rec({ caseId: 'a', pass: true, estimatedCostUsd: 0.001 })])

@@ -61,7 +61,10 @@ function parseArgs(argv: string[]) {
   for (const a of argv) {
     if (a === '--dry-run') args.dryRun = true
     else if (a === '--full') args.full = true
-    else if (a.startsWith('--cap=')) args.cap = Number(a.slice('--cap='.length))
+    else if (a.startsWith('--cap=')) {
+      const n = Number(a.slice('--cap='.length))
+      if (Number.isFinite(n) && n >= 0) args.cap = n // ignore NaN/negative; keep the safe default
+    }
     else if (a.startsWith('--models=')) args.models = a.slice('--models='.length)
   }
   return args
@@ -77,17 +80,13 @@ function main(): number {
   const resultsDir = path.join(root, 'evals', 'results')
   mkdirSync(resultsDir, { recursive: true })
 
-  // Default live run = 10 cases; --full adds the 2 expensive ones.
+  // Pre-flight ESTIMATE only (the real guard uses post-run actual cost). 12
+  // *.live.eval.ts exist, 2 marked expensive; --full runs all 12, else 10.
   const numCases = args.full ? 12 : 10
 
-  let selected = ALL_CANDIDATES
-  if (args.models) {
-    const want = new Set(args.models.split(',').map((s) => s.trim()))
-    selected = ALL_CANDIDATES.filter((c) => want.has(c.label))
-  } else {
-    // Default sweep: baseline + the cheapest-first trio (not the rungs-up).
-    selected = ALL_CANDIDATES.slice(0, 4)
-  }
+  const want = new Set(args.models.split(',').map((s) => s.trim()).filter(Boolean))
+  // Default sweep: baseline + the cheapest-first trio (not the rungs-up).
+  const selected = args.models ? ALL_CANDIDATES.filter((c) => want.has(c.label)) : ALL_CANDIDATES.slice(0, 4)
 
   const guard = new SpendGuard(args.cap)
   console.log(`\nSHE-15 model matrix — cap $${args.cap}, ${numCases} cases/run, ${selected.length} configs`)
@@ -104,6 +103,15 @@ function main(): number {
   if (args.dryRun) {
     console.log('[dry-run] no eval spawned, no spend. Re-run without --dry-run to execute.')
     return 0
+  }
+
+  if (selected.length === 0) {
+    console.error('ERROR: --models matched no known configs. Known: ' + ALL_CANDIDATES.map((c) => c.label).join(', '))
+    return 2
+  }
+  if (!selected.some((c) => c.isBaseline)) {
+    console.error('ERROR: selection has no baseline; per-case parity requires it. Add "baseline" to --models.')
+    return 2
   }
 
   // Pre-flight key checks for what we're about to run.

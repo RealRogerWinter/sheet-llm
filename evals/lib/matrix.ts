@@ -77,6 +77,8 @@ export interface ParityRow {
   model: string | null
   passCount: number
   total: number
+  /** Cases that errored out (provider 5xx / rate-limit) — excluded from parity. */
+  infraCount: number
   /** Of the baseline-passing cases, how many this model also passes. */
   parityPassCount: number
   /** Baseline-passing cases this model FAILS (the parity-breakers). */
@@ -106,7 +108,11 @@ export function buildParityReport(
   const rows = candidates.map((c): ParityRow => {
     const regressions: string[] = []
     for (const id of baselinePassCases) {
-      if (!c.cases.get(id)?.pass) regressions.push(id)
+      const cc = c.cases.get(id)
+      // An INFRA result (provider 5xx / rate-limit exhausting retries) is no
+      // signal about the model — don't count an infra flake as a regression.
+      if (cc?.status === 'INFRA') continue
+      if (!cc?.pass) regressions.push(id)
     }
     const gains: string[] = []
     for (const [id, r] of c.cases) {
@@ -119,6 +125,7 @@ export function buildParityReport(
       model: c.model,
       passCount: c.passCount,
       total: c.total,
+      infraCount: c.infraCount,
       parityPassCount: baselinePassCases.size - regressions.length,
       regressions,
       gains,
@@ -151,7 +158,8 @@ export function renderMarkdown(report: ParityReport, baseline: ModelRunSummary):
     `| ${baseline.label} (${baseline.model ?? '—'}) | ${baseline.passCount}/${baseline.total} | — | — | — | ${usd(baseline.totalCostUsd / Math.max(1, baseline.total))} | ${usd(baseline.totalCostUsd)} | ${baseline.medianLatencyMs ?? '—'} | baseline |`,
   )
   for (const r of report.rows) {
-    const verdict = r.meetsParity ? '✅ meets parity' : `❌ ${r.regressions.length} regression(s)`
+    const infra = r.infraCount > 0 ? ` (${r.infraCount} infra)` : ''
+    const verdict = (r.meetsParity ? '✅ meets parity' : `❌ ${r.regressions.length} regression(s)`) + infra
     lines.push(
       `| ${r.label} (${r.model ?? '—'}) | ${r.passCount}/${r.total} | ${r.parityPassCount}/${report.baselinePassCases.size} | ${r.regressions.join(', ') || '—'} | ${r.gains.join(', ') || '—'} | ${usd(r.costPerCaseUsd)} | ${usd(r.totalCostUsd)} | ${r.medianLatencyMs ?? '—'} | ${verdict} |`,
     )
@@ -164,6 +172,10 @@ export function renderMarkdown(report: ParityReport, baseline: ModelRunSummary):
     cheapestParity
       ? `**Recommendation:** cheapest model meeting per-case parity = **${cheapestParity.label}** (${cheapestParity.model ?? '—'}) at ${usd(cheapestParity.costPerCaseUsd)}/case.`
       : `**Recommendation:** no candidate met per-case parity with ${baseline.label}. See regressions per row.`,
+  )
+  lines.push('')
+  lines.push(
+    '_Cost is the per-case handler-call estimate (a floor — it excludes the classifier/dispatcher round-trips, which are metered separately); the relative comparison across models is preserved. INFRA cases (provider errors) are excluded from the parity verdict._',
   )
   return lines.join('\n')
 }
