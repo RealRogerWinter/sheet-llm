@@ -26,9 +26,11 @@ export interface ModelPricing {
   inputPerM: number
   /** USD per 1M output tokens. */
   outputPerM: number
-  /** USD per 1M cache-READ (hit) input tokens (= 0.1x input). */
+  /** USD per 1M cache-READ (hit) input tokens. Provider-specific: Anthropic
+   *  = 0.1x input; Groq publishes its own cached rate, or none → == inputPerM. */
   cachedInputPerM: number
-  /** USD per 1M cache-WRITE input tokens, 5-min TTL (= 1.25x input). */
+  /** USD per 1M cache-WRITE input tokens, 5-min TTL. Provider-specific:
+   *  Anthropic = 1.25x input; Groq has no write premium → == inputPerM. */
   cacheWrite5mPerM: number
 }
 
