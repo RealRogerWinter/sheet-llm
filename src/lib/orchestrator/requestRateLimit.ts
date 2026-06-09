@@ -14,7 +14,7 @@
  * `SL_REQUEST_IP_RATE_LIMIT` (default 60 requests / 5 min / IP). Behind N nodes
  * the budget is N× (single-region v1; a Redis swap is the documented P1).
  */
-import { extractClientIp } from '@/lib/auth/clientIp'
+import { extractClientIp } from '@/lib/http/clientIp'
 
 export { extractClientIp }
 

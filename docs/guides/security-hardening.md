@@ -3,11 +3,11 @@ title: Security Hardening & Threat Model
 subsystem: ops
 audience: [contributor, ai-agent]
 status: current
-last_verified: 2026-06-04
-verified_against: 5509a03
+last_verified: 2026-06-09
+verified_against: 4453d42
 source_paths:
   - src/lib/security/turnstile.ts
-  - src/lib/auth/clientIp.ts
+  - src/lib/http/clientIp.ts
   - src/lib/orchestrator/requestRateLimit.ts
   - src/app/api/chat/route.ts
   - src/app/api/turnstile/route.ts
@@ -86,7 +86,7 @@ layers, each independent of Cloudflare's edge controls:
 
 ### Correct client-IP attribution
 
-`src/lib/auth/clientIp.ts` `extractClientIp()` reads **`CF-Connecting-IP`
+`src/lib/http/clientIp.ts` `extractClientIp()` reads **`CF-Connecting-IP`
 first** (unspoofable past Cloudflare, hop-count independent), falling back to a
 hop-aware `X-Forwarded-For` pinned by `TRUSTED_PROXY_HOPS`. This defeats
 leftmost-XFF spoofing: a client-supplied `X-Forwarded-For` cannot move a request

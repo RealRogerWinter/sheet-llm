@@ -6,7 +6,7 @@ import type { OrchestratorScoreStream, ScoreStreamEvent } from '@/lib/orchestrat
 import { installTestDb, TEST_USER_ID } from '../factories/testEnv'
 import { creditHolds, usageLedger, users } from '@/lib/db/schema'
 import { creditWallet, getWallet } from '@/lib/billing/wallet'
-import { recordProviderCall } from '@/lib/billing/usageMeter'
+import { recordProviderCall } from '@/lib/metering/usageMeter'
 import { freePieceBudgetCredits, worstCaseHoldCredits } from '@/lib/billing/valueTier'
 import { policyFor } from '@/lib/orchestrator/generationTier'
 

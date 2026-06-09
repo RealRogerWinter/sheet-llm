@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { extractClientIp } from '@/lib/auth/clientIp'
+import { extractClientIp } from '@/lib/http/clientIp'
 
 afterEach(() => vi.unstubAllEnvs())
 

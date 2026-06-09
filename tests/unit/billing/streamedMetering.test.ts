@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { makeTestDb } from '../../factories/db'
 import { orchestratorTurns } from '@/lib/db/schema'
-import { currentMeterTotals, recordProviderCall, runWithUsageMeter } from '@/lib/billing/usageMeter'
+import { currentMeterTotals, recordProviderCall, runWithUsageMeter } from '@/lib/metering/usageMeter'
 import { updateTurnUsageByRequestId } from '@/lib/orchestrator/observability'
 
 // The load-bearing assumption behind PR-7a's route change: an async generator

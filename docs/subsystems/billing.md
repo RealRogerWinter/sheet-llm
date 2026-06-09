@@ -3,11 +3,11 @@ title: Billing & Prepaid Credits
 subsystem: billing
 audience: [contributor, ai-agent]
 status: current
-last_verified: 2026-06-05
-verified_against: 8227618
+last_verified: 2026-06-09
+verified_against: 4453d42
 source_paths:
-  - src/lib/billing/pricing.ts
-  - src/lib/billing/usageMeter.ts
+  - src/lib/metering/pricing.ts
+  - src/lib/metering/usageMeter.ts
   - src/lib/billing/valueTier.ts
   - src/lib/billing/wallet.ts
   - src/lib/billing/refundPolicy.ts

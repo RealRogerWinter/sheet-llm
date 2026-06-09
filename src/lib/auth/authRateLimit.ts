@@ -84,11 +84,11 @@ export function recordEmailFailure(email: string): void {
   windowed(getStore().emailFail, email, EMAIL_WINDOW_MS, EMAIL_FAIL_LIMIT, true)
 }
 
-// Client-IP extraction lives in one shared module — `./clientIp` — which adds
-// CF-Connecting-IP (the trusted source behind Cloudflare) on top of the
-// hop-aware X-Forwarded-For logic. Re-exported here so existing imports
+// Client-IP extraction lives in one shared module — `@/lib/http/clientIp` —
+// which adds CF-Connecting-IP (the trusted source behind Cloudflare) on top of
+// the hop-aware X-Forwarded-For logic. Re-exported here so existing imports
 // (`@/lib/auth/authRateLimit`) keep working unchanged.
-export { extractClientIp } from './clientIp'
+export { extractClientIp } from '@/lib/http/clientIp'
 
 /** Test-only: clear all buckets. */
 export function __resetForTesting(): void {

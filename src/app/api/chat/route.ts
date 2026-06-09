@@ -49,7 +49,7 @@ import type {
 import { isOrchestratorConverseStream, isOrchestratorScoreStream } from '@/lib/orchestrator/types'
 import { summarizeAction } from '@/lib/orchestrator/summarizeAction'
 import { recordUsage } from '@/lib/orchestrator/budget'
-import { currentMeterTotals, runWithUsageMeter, toMicroUsd } from '@/lib/billing/usageMeter'
+import { currentMeterTotals, runWithUsageMeter, toMicroUsd } from '@/lib/metering/usageMeter'
 import { isPaidGenerationEnabled } from '@/lib/auth/account'
 import { ensureWallet, getWallet, placeHold, refund, releaseHold, settleHold, type SettleResult } from '@/lib/billing/wallet'
 import { maybeReapExpiredHolds } from '@/lib/billing/reap'

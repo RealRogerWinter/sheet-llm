@@ -10,7 +10,7 @@ import type {
 } from './types'
 import { OutputTruncatedError, ProviderRefusalError, ProviderSchemaError } from './types'
 import { flattenSystemPrompt } from './systemBlocks'
-import { recordProviderCall } from '@/lib/billing/usageMeter'
+import { recordProviderCall } from '@/lib/metering/usageMeter'
 
 /** Default per-call output ceiling when a caller doesn't set `maxTokens`.
  *  Lower than Anthropic's 8000 — a Groq emit large enough to exceed this is

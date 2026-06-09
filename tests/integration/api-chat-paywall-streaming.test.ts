@@ -8,7 +8,7 @@ import type {
 import { installTestDb, TEST_USER_ID } from '../factories/testEnv'
 import { creditHolds, usageLedger } from '@/lib/db/schema'
 import { creditWallet, getWallet } from '@/lib/billing/wallet'
-import { recordProviderCall } from '@/lib/billing/usageMeter'
+import { recordProviderCall } from '@/lib/metering/usageMeter'
 
 /**
  * PR-7b-2 — the credit paywall on the STREAMING /api/chat paths (converse +
