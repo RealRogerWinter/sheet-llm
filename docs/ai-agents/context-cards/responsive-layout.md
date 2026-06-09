@@ -4,7 +4,7 @@ subsystem: responsive-layout
 audience: [contributor, ai-agent]
 status: current
 last_verified: 2026-06-09
-verified_against: 3735526
+verified_against: 0cb4458
 source_paths:
   - src/app/globals.css
   - src/app/layout.tsx
