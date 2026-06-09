@@ -164,6 +164,33 @@ describe('OpenAICompatibleProvider.textStream', () => {
     expect(events[events.length - 1]).toMatchObject({ type: 'message-stop', stopReason: 'max_tokens' })
   })
 
+  it('translates a mid-stream abortSignal into a clean max_tokens stop with the partial text', async () => {
+    const controller = new AbortController()
+    const encoder = new TextEncoder()
+    let pulls = 0
+    const body = new ReadableStream<Uint8Array>({
+      pull(c) {
+        pulls += 1
+        if (pulls === 1) c.enqueue(encoder.encode(deltaFrame('partial')))
+        else c.error(new DOMException('The operation was aborted', 'AbortError'))
+      },
+    })
+    fetchMock.mockResolvedValue({ ok: true, status: 200, body, text: async () => '' } as unknown as Response)
+    const provider = makeProvider()
+    const it = provider
+      .textStream({ systemPrompt: 'sys', userText: 'hi', abortSignal: controller.signal })
+      [Symbol.asyncIterator]()
+    await it.next() // message-start
+    await it.next() // text-delta 'partial'
+    controller.abort() // caller cancels mid-stream
+    const stop = await it.next() // next read errors with AbortError -> clean stop
+    expect(stop.value).toMatchObject({
+      type: 'message-stop',
+      stopReason: 'max_tokens',
+      finalText: 'partial',
+    })
+  })
+
   it('yields an error event when the stream body errors mid-flight', async () => {
     // Pull-based so the first read delivers the chunk and the SECOND errors
     // (calling error() right after enqueue in start() discards the queue).
