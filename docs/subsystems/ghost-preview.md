@@ -3,8 +3,8 @@ title: AI Ghost Preview (M24)
 subsystem: ghost-preview
 audience: [contributor, ai-agent]
 status: current
-last_verified: 2026-06-03
-verified_against: 150cb15
+last_verified: 2026-06-09
+verified_against: 36afe91
 source_paths:
   - src/lib/orchestrator/index.ts
   - src/lib/orchestrator/flags.ts
@@ -59,9 +59,9 @@ mutually exclusive with the M3.5 replacement-confirmation gate.
 
 | Path | Role |
 | --- | --- |
-| `src/lib/orchestrator/index.ts` | `maybeAttachGhostProposal(result, input)` — module-private hook. Runs after the replacement gate; computes `scoreDiff`, then **`ensureEventIds(result.score)`** (orchestrator results don't carry ids; backfilled deterministically so `computeAffectedEventIds` can resolve them) + `computeAffectedEventIds`, then sets `result.proposal = { affectedEventIds }` and `result.requiresConfirmation = true`. Five guard clauses (see Invariants). |
+| `src/lib/orchestrator/index.ts` | `maybeAttachGhostProposal(result, input)` — module-private hook. Runs after the replacement gate; computes `scoreDiff`, then **`ensureEventIds(result.score)`** (orchestrator results don't carry ids; backfilled deterministically so `computeAffectedEventIds` can resolve them) + `computeAffectedEventIds`, then sets `result.proposal = { affectedEventIds }` and `result.requiresConfirmation = true`. Five guard clauses (see Invariants); the noDiff guard gates on `diff.hasAnyVoiceChange === false` so a bass / extra-voice-only edit is not treated as no-change (SHE-6). |
 | `src/lib/orchestrator/flags.ts` | `isGhostPreviewEnabled()` = `!readExplicitFalse('SL_GHOST_PREVIEW')`. Default ON; only literal `'0'`/`'false'` opts out. Read per-request (no module caching) so flips take effect without redeploy. |
-| `src/lib/music/scoreDiff.ts` | `computeAffectedEventIds(before, after)` (L273-298). Per-measure `hashMeasure` skip; for overlapping events, `canonEvent` compare; plus all trailing inserted events + all events of inserted measures. Returns **after-score** event ids. `canonEvent` deliberately omits ids. |
+| `src/lib/music/scoreDiff.ts` | `computeAffectedEventIds(before, after)`. Iterates **every (staff, voice) pair** — primary + `secondStaff` + each `extraVoices` — via `getStaffCount`/`getVoiceCount`/`getVoiceMeasures` (mirrors `ensureEventIds`), so a bass-clef edit highlights the bass and a bass-only change never falsely highlights treble (SHE-6). Per voice: per-measure `hashMeasure` skip; for overlapping events, `canonEvent` compare; plus all trailing inserted events + all events of inserted measures. Returns **after-score** event ids. `canonEvent` deliberately omits ids. `scoreDiff` also returns `hasAnyVoiceChange` (all-staff/voice change boolean, null when a side is missing), **separate** from `retainedEventRatio` which stays primary-staff/voice-0 only so the preservation / wholesale-rewrite gate thresholds are unchanged. |
 | `src/lib/shared/types.ts` | Wire contract. `ChatResponse.proposal = { affectedEventIds, candidateVersionId }` (L191-199), mutually exclusive with `replacement`. `ConfirmReplacementRequest` decision is `'accept' \| 'reject' \| 'dont_ask_again_this_session'` (L207-211). |
 | `src/app/api/chat/route.ts` | `gateFired = result.requiresConfirmation === true` ⇒ `appendMessages(..., { skipHeadVersionBump: true })` so the candidate row stays orphan. Response branches: `result.replacement` → `result.proposal` → bare. Proposal payload = `{ affectedEventIds, candidateVersionId: newScoreVersionId }`. |
 | `src/lib/chat/useSubmitPrompt.ts` | Proposal branch (L236-252): when `data.requiresConfirmation && data.proposal && data.scoreJson`, calls `endRequestNoScore()` then `store.setPendingProposal(...)`. `beforeScore = editedScore ?? scoreJson ?? data.scoreJson`. **Does not** swap the live `editedScore`. |
@@ -176,8 +176,12 @@ On reject, the server writes a revert row and the client advances its head point
 - **The five no-op guards** in the hook (silent commit, no proposal): flag off; no
   `input.editedScore` (compose-from-scratch — nothing to diff against); `result.replacement`
   set; `result.requiresConfirmation` already true (preview-mode `regenerate_all`); the diff
-  is a no-op (`retainedEventRatio === 1 && measureCount unchanged && !keyChanged &&
-  !meterChanged && !titleChanged`).
+  is a no-op (`hasAnyVoiceChange === false && retainedEventRatio === 1 && measureCount
+  unchanged && !keyChanged && !meterChanged && !titleChanged`). The
+  `hasAnyVoiceChange === false` conjunct (SHE-6) keeps a bass-clef / extra-voice-only
+  edit out of the no-op bucket — `retainedEventRatio` alone is primary-staff/voice-0
+  only and blind to non-primary staves/voices, so without it a bass-only edit was
+  wrongly suppressed.
 - **`setPendingProposal` clobbers** any existing `pendingProposal` with no guard —
   submitting a *new* prompt implicitly abandons a prior proposal. This is distinct from the
   manual-edit path, which preserves it via `interruptedProposal`.

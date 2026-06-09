@@ -3,8 +3,8 @@ title: AI Ghost Preview (M24) — context card
 subsystem: ghost-preview
 audience: [contributor, ai-agent]
 status: current
-last_verified: 2026-06-03
-verified_against: 150cb15
+last_verified: 2026-06-09
+verified_against: 36afe91
 source_paths:
   - src/lib/orchestrator/index.ts
   - src/lib/orchestrator/flags.ts
@@ -29,9 +29,9 @@ related:
 Every AI score-edit becomes a previewed proposal: touched noteheads recolor warm-amber on the score (`GhostPreviewAmber`, **any** edit size), plus Accept/Reject chrome that varies by size — inline toolbar (≤4 events) or docked diff panel (≥5). Manual-edit interrupt + 30s resume toast. Gated by `SL_GHOST_PREVIEW` (default ON). Mutually exclusive with the M3.5 replacement gate.
 
 ## Key files
-- `src/lib/orchestrator/index.ts` — `maybeAttachGhostProposal(result, input)` (~L162, module-private). Calls `ensureEventIds(result.score)` (orchestrator scores lack ids) then sets `result.proposal={affectedEventIds}` + `requiresConfirmation=true`. 5 no-op guards.
+- `src/lib/orchestrator/index.ts` — `maybeAttachGhostProposal(result, input)` (~L162, module-private). Calls `ensureEventIds(result.score)` (orchestrator scores lack ids) then sets `result.proposal={affectedEventIds}` + `requiresConfirmation=true`. 5 no-op guards. The noDiff guard also checks `diff.hasAnyVoiceChange === false` so a bass/extra-voice-only edit isn't suppressed (SHE-6).
 - `src/lib/orchestrator/flags.ts` — `isGhostPreviewEnabled()` (L112) = `!readExplicitFalse('SL_GHOST_PREVIEW')`.
-- `src/lib/music/scoreDiff.ts` — `computeAffectedEventIds(before, after)` (L273); returns AFTER-score ids; `canonEvent` is id-free.
+- `src/lib/music/scoreDiff.ts` — `computeAffectedEventIds(before, after)`; returns AFTER-score ids; `canonEvent` is id-free. Walks **every (staff, voice) pair** (primary + `secondStaff` + each `extraVoices`) via `getStaffCount`/`getVoiceCount`/`getVoiceMeasures`, so the bass clef highlights and a treble note is never a false positive for a bass change (SHE-6). `scoreDiff` also returns `hasAnyVoiceChange` — an all-voice change signal independent of `retainedEventRatio` (which stays primary-staff/voice-0 only so preservation thresholds are untouched).
 - `src/lib/shared/types.ts` — `ChatResponse.proposal={affectedEventIds,candidateVersionId}` (L191); `ConfirmReplacementRequest.decision='accept'|'reject'|'dont_ask_again_this_session'` (L207).
 - `src/app/api/chat/route.ts` — `gateFired` ⇒ `appendMessages(skipHeadVersionBump:true)`; candidate row stays orphan (~L871-928).
 - `src/lib/chat/useSubmitPrompt.ts` — proposal branch (L236-252): `setPendingProposal`, editor NOT swapped; `beforeScore=editedScore??scoreJson??data.scoreJson`.
@@ -59,6 +59,7 @@ Every AI score-edit becomes a previewed proposal: touched noteheads recolor warm
 - Enter/Esc are capture-phase but bail on TEXTAREA/INPUT/contentEditable focus (else prompt-bar Enter auto-accepts).
 - Diff panel index-pairs ⇒ mid-measure insert shows shifted `old[N]→new[N]`, not `(new)`.
 - Hook backfills ids first: orchestrator scores have no `id`, so `maybeAttachGhostProposal` calls `ensureEventIds(result.score)` (`eventIds.ts`) before `computeAffectedEventIds`, else amber gets `[]` (the #270 fix). Ids never reach the ABC.
+- `retainedEventRatio` is **primary-staff/voice-0 only** by design (preservation + wholesale-rewrite gates depend on its tuned thresholds). A bass-only edit therefore leaves it at 1; the multi-staff `hasAnyVoiceChange` signal is what stops the noDiff gate from suppressing such an edit (SHE-6). Don't widen `retainedEventRatio` to all voices.
 - Amber recolors the VISIBLE shapes (`… path,ellipse,rect`) with `fill`+`stroke !important`, not just the `<g>` (abcjs `fill` doesn't inherit to shapes); the `<g>` adds the drop-shadow glow. `!important` beats abcjs's inline fill; drop-shadow doesn't need it.
 
 ## When editing X, also update Y

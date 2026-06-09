@@ -437,3 +437,140 @@ describe('computeAffectedEventIds (M24-PR-2)', () => {
     expect(computeAffectedEventIds(before, after)).toEqual([])
   })
 })
+
+describe('computeAffectedEventIds — multi-staff / multi-voice (SHE-6)', () => {
+  function makeIded(id: string, ev: Event): Event {
+    return { ...ev, id }
+  }
+
+  it('bass-only change → bass event ids, NO treble false-positive', () => {
+    const trebleM = makeMeasure([makeIded('t0', makeNote('C', 5))])
+    const before = makeScore({
+      measures: [trebleM],
+      secondStaffMeasures: [makeMeasure([makeIded('b0', makeNote('C', 2))])],
+    })
+    const after = makeScore({
+      measures: [trebleM],
+      secondStaffMeasures: [makeMeasure([makeIded('b0', makeNote('E', 2))])], // C2 -> E2
+    })
+    const ids = computeAffectedEventIds(before, after)
+    expect(ids).toEqual(['b0'])
+    expect(ids).not.toContain('t0')
+  })
+
+  it('mixed treble + bass change → both sets of ids', () => {
+    const before = makeScore({
+      measures: [makeMeasure([makeIded('t0', makeNote('C', 5))])],
+      secondStaffMeasures: [makeMeasure([makeIded('b0', makeNote('C', 2))])],
+    })
+    const after = makeScore({
+      measures: [makeMeasure([makeIded('t0', makeNote('D', 5))])], // C5 -> D5
+      secondStaffMeasures: [makeMeasure([makeIded('b0', makeNote('E', 2))])], // C2 -> E2
+    })
+    const ids = computeAffectedEventIds(before, after)
+    expect(ids).toContain('t0')
+    expect(ids).toContain('b0')
+    expect(ids).toHaveLength(2)
+  })
+
+  it('extra voice on primary staff change → that voice id surfaces', () => {
+    const v0 = makeMeasure([makeIded('p0', makeNote('C', 5))])
+    const before = makeScore({
+      measures: [v0],
+      extraVoiceMeasures: [makeMeasure([makeIded('v1', makeNote('G', 4))])],
+    })
+    const after = makeScore({
+      measures: [v0],
+      extraVoiceMeasures: [makeMeasure([makeIded('v1', makeNote('A', 4))])], // G4 -> A4
+    })
+    const ids = computeAffectedEventIds(before, after)
+    expect(ids).toEqual(['v1'])
+    expect(ids).not.toContain('p0')
+  })
+})
+
+describe('scoreDiff — hasAnyVoiceChange (SHE-6)', () => {
+  it('bass-only change → hasAnyVoiceChange true (retainedEventRatio stays primary-only)', () => {
+    const trebleM = makeMeasure([makeNote('C', 5)])
+    const before = makeScore({
+      measures: [trebleM],
+      secondStaffMeasures: [makeMeasure([makeNote('C', 2)])],
+    })
+    const after = makeScore({
+      measures: [trebleM],
+      secondStaffMeasures: [makeMeasure([makeNote('E', 2)])],
+    })
+    const d = scoreDiff(before, after)
+    expect(d.hasAnyVoiceChange).toBe(true)
+    // Primary staff unchanged → primary-only retention is still 1.
+    expect(d.retainedEventRatio).toBe(1)
+  })
+
+  it('extra-voice-only change → hasAnyVoiceChange true', () => {
+    const v0 = makeMeasure([makeNote('C', 5)])
+    const before = makeScore({
+      measures: [v0],
+      extraVoiceMeasures: [makeMeasure([makeNote('G', 4)])],
+    })
+    const after = makeScore({
+      measures: [v0],
+      extraVoiceMeasures: [makeMeasure([makeNote('A', 4)])],
+    })
+    const d = scoreDiff(before, after)
+    expect(d.hasAnyVoiceChange).toBe(true)
+    expect(d.retainedEventRatio).toBe(1)
+  })
+
+  it('truly identical grand-staff score → hasAnyVoiceChange false', () => {
+    const before = makeScore({
+      measures: [makeMeasure([makeNote('C', 5)])],
+      secondStaffMeasures: [makeMeasure([makeNote('C', 2)])],
+    })
+    const after = makeScore({
+      measures: [makeMeasure([makeNote('C', 5)])],
+      secondStaffMeasures: [makeMeasure([makeNote('C', 2)])],
+    })
+    expect(scoreDiff(before, after).hasAnyVoiceChange).toBe(false)
+  })
+
+  it('primary-staff change is also reflected in hasAnyVoiceChange', () => {
+    const before = makeScore({ measures: [makeMeasure([makeNote('C')])] })
+    const after = makeScore({ measures: [makeMeasure([makeNote('D')])] })
+    expect(scoreDiff(before, after).hasAnyVoiceChange).toBe(true)
+  })
+
+  it('measure-count change across voices → hasAnyVoiceChange true', () => {
+    const m = makeMeasure([makeNote('C')])
+    const before = makeScore({ measures: [m] })
+    const after = makeScore({ measures: [m, makeMeasure([makeNote('D')])] })
+    expect(scoreDiff(before, after).hasAnyVoiceChange).toBe(true)
+  })
+
+  it('missing side → hasAnyVoiceChange null (no two operands to compare)', () => {
+    // Mirrors keyChanged/meterChanged/titleChanged: with only one
+    // operand "did anything change?" is undefined, not false. The gate
+    // treats `=== false` so a null never suppresses a proposal.
+    const after = makeScore({ measures: [makeMeasure([makeRest()])] })
+    expect(scoreDiff(undefined, after).hasAnyVoiceChange).toBeNull()
+    expect(scoreDiff(after, undefined).hasAnyVoiceChange).toBeNull()
+  })
+})
+
+describe('scoreDiff — retainedEventRatio is primary-staff-only (SHE-6 guard)', () => {
+  // Pin: a bass-only edit must NOT move retainedEventRatio, because the
+  // preservation / wholesale-rewrite gates consume it and changing its
+  // semantics would shift those thresholds. The new all-voice signal
+  // lives in hasAnyVoiceChange instead.
+  it('bass-only edit leaves retainedEventRatio at primary-staff value (1)', () => {
+    const trebleM = makeMeasure([makeNote('C', 5)])
+    const before = makeScore({
+      measures: [trebleM],
+      secondStaffMeasures: [makeMeasure([makeNote('C', 2)])],
+    })
+    const after = makeScore({
+      measures: [trebleM],
+      secondStaffMeasures: [makeMeasure([makeNote('E', 2)])],
+    })
+    expect(scoreDiff(before, after).retainedEventRatio).toBe(1)
+  })
+})
