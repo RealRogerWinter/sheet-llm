@@ -309,6 +309,29 @@ export const orchestratorTurns = sqliteTable(
      * gate noise vs. real-replacement frequency in production.
      */
     replacementBlocked: integer('replacement_blocked').notNull().default(0),
+    /**
+     * SHE-18 PR2 — the user's explicit decision on this turn's emitted
+     * score: 'accepted' (head advanced to it), 'reverted' (rejected at the
+     * confirmation modal, or undone later), or 'superseded' (derived at
+     * export — an un-accepted candidate later replaced). NULL until a
+     * decision arrives. Written by `recordTurnOutcome` from the
+     * confirm-replacement / revert routes, keyed on `afterScoreVersionId`
+     * (the turn id is minted inside recordTurn and never returned, so the
+     * emitted score version is the only join key reachable from those sibling
+     * endpoints — and PR1 made that FK actually populated). This is the
+     * highest-value quality signal for filtering training data — keep only
+     * what the user actually kept. The TS union lives in
+     * `src/lib/orchestrator/turnOutcome.ts`.
+     *
+     * Migration 0016 enforces the allowed set with a column-level CHECK.
+     * Intentionally NO Drizzle table-level `check()` here (unlike
+     * `score_versions.source` / `final_status`, whose checks were declared at
+     * table-CREATE time): adding one now would make `drizzle-kit generate`
+     * emit a full SQLite table REBUILD just to attach a constraint the 0016
+     * `ADD COLUMN ... CHECK` already enforces. The migration is the runtime
+     * source of truth; this asymmetry is deliberate, not an omission.
+     */
+    outcome: text('outcome'),
   },
   (table) => [
     index('orchestrator_turns_session_created').on(table.sessionId, table.createdAt),

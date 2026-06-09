@@ -12,7 +12,47 @@ vi.mock('@/lib/auth/session', () => mockAuthSession())
 
 const { POST } = await import('@/app/api/chat/confirm-replacement/route')
 const { createConversation, appendMessages } = await import('@/lib/llm/conversations')
-const { sessions, scoreVersions } = await import('@/lib/db/schema')
+const { sessions, scoreVersions, orchestratorTurns } = await import('@/lib/db/schema')
+
+/**
+ * Seed the orchestrator_turns row that the /api/chat turn left behind for an
+ * emitted candidate (after_score_version_id = candidate) — exactly what PR1's
+ * linkTurnScoreVersion now writes in production. These tests seed it directly
+ * to pin the confirm-replacement route's recordTurnOutcome write in isolation;
+ * the FULL non-seeded chain (gated /api/chat → link → confirm → outcome) is
+ * covered end-to-end in api-chat-orchestrator-phase0.test.ts.
+ */
+async function seedTurnFor(
+  db: ReturnType<typeof installTestDb>['getDb'],
+  chatId: string,
+  candidateId: string,
+): Promise<void> {
+  await db()
+    .insert(orchestratorTurns)
+    .values({
+      id: crypto.randomUUID(),
+      sessionId: chatId,
+      requestId: 'r-test',
+      createdAt: 0,
+      latencyMs: 1,
+      finalStatus: 'ok',
+      afterScoreVersionId: candidateId,
+    })
+    .run()
+}
+
+async function outcomeFor(
+  db: ReturnType<typeof installTestDb>['getDb'],
+  candidateId: string,
+): Promise<string | null> {
+  return (
+    (await db()
+      .select({ outcome: orchestratorTurns.outcome })
+      .from(orchestratorTurns)
+      .where(eq(orchestratorTurns.afterScoreVersionId, candidateId))
+      .get())?.outcome ?? null
+  )
+}
 
 const BASE_SCORE: Score = {
   title: 'Original',
@@ -195,6 +235,40 @@ describe('/api/chat/confirm-replacement POST', () => {
       .get()
     expect(after!.head).toBe(candidateId)
     expect(after!.sup).toBe(1)
+  })
+
+  it('accept → labels the emitting turn outcome=accepted (SHE-18 PR1)', async () => {
+    const { chatId, candidateId } = await seedSessionWithCandidate(getDb)
+    await seedTurnFor(getDb, chatId, candidateId)
+    const res = await POST(
+      makePostRequest({ chatId, candidateVersionId: candidateId, decision: 'accept' }),
+    )
+    expect(res.status).toBe(200)
+    expect(await outcomeFor(getDb, candidateId)).toBe('accepted')
+  })
+
+  it('dont_ask_again → also labels the emitting turn outcome=accepted (SHE-18 PR1)', async () => {
+    const { chatId, candidateId } = await seedSessionWithCandidate(getDb)
+    await seedTurnFor(getDb, chatId, candidateId)
+    const res = await POST(
+      makePostRequest({
+        chatId,
+        candidateVersionId: candidateId,
+        decision: 'dont_ask_again_this_session',
+      }),
+    )
+    expect(res.status).toBe(200)
+    expect(await outcomeFor(getDb, candidateId)).toBe('accepted')
+  })
+
+  it('reject → labels the emitting turn outcome=reverted (SHE-18 PR1)', async () => {
+    const { chatId, candidateId } = await seedSessionWithCandidate(getDb)
+    await seedTurnFor(getDb, chatId, candidateId)
+    const res = await POST(
+      makePostRequest({ chatId, candidateVersionId: candidateId, decision: 'reject' }),
+    )
+    expect(res.status).toBe(200)
+    expect(await outcomeFor(getDb, candidateId)).toBe('reverted')
   })
 
   it('returns 404 for unknown chatId', async () => {
