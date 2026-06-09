@@ -20,6 +20,8 @@
  * its body to read a per-user entitlement, and no call site changes.
  */
 
+import type { TierPolicy } from './types'
+
 export type GenerationTier = 'free' | 'pro'
 
 export interface GenerationPolicy {
@@ -72,6 +74,25 @@ const POLICY: Record<GenerationTier, GenerationPolicy> = {
 
 export function policyFor(tier: GenerationTier): GenerationPolicy {
   return POLICY[tier]
+}
+
+/**
+ * SHE-8 — map the resolved product tier to the kernel's injected `TierPolicy`.
+ * This is the SaaS adapter: the orchestrator no longer imports `policyFor`;
+ * `route.ts` calls this and injects the result. Fail-closed by construction —
+ * an unresolved request resolves to `free` (see `resolveGenerationTier`), which
+ * yields the capped, bounded policy. `free` routes fresh generation through the
+ * bounded handler (`useBoundedFallback`); `pro` runs the full pipeline.
+ */
+export function toTierPolicy(tier: GenerationTier): TierPolicy {
+  const p = POLICY[tier]
+  return {
+    allowSectional: p.allowSectional,
+    allowWholeScore: p.allowWholeScore,
+    maxBars: p.maxBars,
+    emitCeiling: p.maxOutputTokens,
+    useBoundedFallback: p.tier === 'free',
+  }
 }
 
 /**

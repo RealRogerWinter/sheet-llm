@@ -71,6 +71,7 @@ import { computeDeadlineAt } from '@/lib/orchestrator/deadline'
 import {
   resolveGenerationTier,
   policyFor,
+  toTierPolicy,
   isTierOverrideAllowed,
   isAdvancedComposerEnabled,
   BOUNDED_EMIT_CEILING,
@@ -714,6 +715,10 @@ async function handleChat(
         ...(parsed.targetRegion ? { targetRegion: parsed.targetRegion } : {}),
         deadlineAt,
         generationTier,
+        // SHE-8 — the orchestrator reads ONLY this injected policy for
+        // paywall/scope decisions (it no longer imports policyFor). Built from
+        // the resolved tier, so the hosted paywall stays fail-closed here.
+        tierPolicy: toTierPolicy(generationTier),
         advancedComposer,
       })
     }

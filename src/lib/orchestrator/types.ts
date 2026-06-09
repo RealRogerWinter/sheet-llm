@@ -61,6 +61,33 @@ export interface Classification {
 
 export type OrchestratorFinalStatus = 'ok' | 'refused' | 'fell_through' | 'error'
 
+/**
+ * The resolved scope + ceiling budget for a single orchestrator run, INJECTED
+ * by the caller. SHE-8 keystone: the kernel no longer imports the SaaS paywall
+ * (`generationTier` / `policyFor`) — it only honors what it is handed.
+ *
+ *  - `allowSectional`     — may a fresh from-scratch gen use the unbounded
+ *                           multi-call sectional pump (vs. one capped pass)?
+ *  - `allowWholeScore`    — may a wholesale `regenerate_all` rewrite run?
+ *  - `maxBars`            — per-call clamp on extend / insert growth.
+ *  - `emitCeiling`        — `max_tokens` kill-switch when the bounded handler runs.
+ *  - `useBoundedFallback` — route a fresh from-scratch gen through the bounded
+ *                           single-call handler (the SaaS free tier) instead of
+ *                           classify / dispatch.
+ *
+ * The SaaS route resolves entitlement and injects a capped policy, fail-closed
+ * (`toTierPolicy` in `generationTier.ts`). An OSS / headless caller injects
+ * nothing and gets `UNCAPPED_TIER_POLICY` (see `index.ts`) — no restrictions,
+ * never bounded. Distinct from the provider model-size `Tier` in `providers/*`.
+ */
+export interface TierPolicy {
+  allowSectional: boolean
+  allowWholeScore: boolean
+  maxBars: number
+  emitCeiling: number
+  useBoundedFallback: boolean
+}
+
 export interface OrchestratorInput {
   requestId: string
   /**
@@ -101,6 +128,15 @@ export interface OrchestratorInput {
    * model-size `Tier` in `providers/*`.
    */
   generationTier?: import('./generationTier').GenerationTier
+  /**
+   * SHE-8 — the resolved scope + ceiling budget for this run, injected by the
+   * caller. The orchestrator reads ONLY this for paywall/scope decisions (it no
+   * longer imports `policyFor`). The SaaS route maps the resolved tier to a
+   * capped policy and always injects it (fail-closed); when absent the run is
+   * uncapped (`UNCAPPED_TIER_POLICY`) — the OSS / headless default. Optional for
+   * back-compat with test fixtures.
+   */
+  tierPolicy?: TierPolicy
   /**
    * PR-8 Advanced Composer — the RESOLVED Opus-routing entitlement for this
    * turn. When true, the heavy single-pass compositional call (generateComplex /

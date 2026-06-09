@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { Score } from '@/lib/music/types'
+import { toTierPolicy } from '@/lib/orchestrator/generationTier'
 
 /**
  * M3.5-PR-6 — migration test: verifies that the native tool-use
@@ -343,6 +344,7 @@ describe('M26 — free-tier scope gate (runDispatchedHandler)', () => {
       editedScore: BASE_SCORE,
       history: [],
       generationTier: 'free',
+      tierPolicy: toTierPolicy('free'),
     })
     expect(result && 'refused' in result).toBe(true)
     if (result && 'refused' in result) {
@@ -362,6 +364,7 @@ describe('M26 — free-tier scope gate (runDispatchedHandler)', () => {
       editedScore: BASE_SCORE,
       history: [],
       generationTier: 'pro',
+      tierPolicy: toTierPolicy('pro'),
     })
     expect(result && 'refused' in result).toBe(false)
     expect(runComposeMock).toHaveBeenCalledTimes(1)
@@ -376,6 +379,7 @@ describe('M26 — free-tier scope gate (runDispatchedHandler)', () => {
       editedScore: BASE_SCORE,
       history: [],
       generationTier: 'free',
+      tierPolicy: toTierPolicy('free'),
     })
     // Clamped down to the free policy's maxBars (4).
     expect(runExtendCompositionMock.mock.calls[0][0].targetBars).toBe(4)
@@ -392,6 +396,7 @@ describe('M26 — free-tier scope gate (runDispatchedHandler)', () => {
       editedScore: BASE_SCORE,
       history: [],
       generationTier: 'pro',
+      tierPolicy: toTierPolicy('pro'),
     })
     expect(runExtendCompositionMock.mock.calls[0][0].targetBars).toBe(16)
   })
