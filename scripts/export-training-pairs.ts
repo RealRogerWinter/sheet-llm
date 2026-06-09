@@ -24,14 +24,31 @@
  * follow-up. And per the SHE-18 decision, this data must not feed a training
  * run until a ToS/legal review clears it.
  */
-import { writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { ensureMigrationsApplied, getDb } from '@/lib/db'
 import { exportTrainingPairs } from '@/lib/training/trainingExport'
+
+/** Read a watermark file as a non-negative finite number, or undefined when
+ *  absent/empty/garbage (degrade to a full export rather than NaN). */
+function readWatermark(path: string): number | undefined {
+  if (!existsSync(path)) return undefined
+  const n = Number(readFileSync(path, 'utf8').trim())
+  return Number.isFinite(n) && n >= 0 ? n : undefined
+}
+
+/** Persist the watermark atomically (temp + rename) so an interrupted or
+ *  overlapping run can't leave a torn value the next run would misread. */
+function writeWatermark(path: string, value: number): void {
+  const tmp = `${path}.tmp`
+  writeFileSync(tmp, String(value))
+  renameSync(tmp, path)
+}
 
 interface CliArgs {
   since?: number
   limit?: number
   out?: string
+  watermarkFile?: string
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -49,9 +66,10 @@ function parseArgs(argv: string[]): CliArgs {
     if (a === '--since') args.since = numArg('--since', argv[++i])
     else if (a === '--limit') args.limit = numArg('--limit', argv[++i])
     else if (a === '--out') args.out = argv[++i]
+    else if (a === '--watermark-file') args.watermarkFile = argv[++i]
     else if (a === '--help' || a === '-h') {
       console.error(
-        'Usage: pnpm export-training-pairs [--since <captured_at_ms>] [--limit <n>] [--out <file>]',
+        'Usage: pnpm export-training-pairs [--since <ms>] [--limit <n>] [--out <file>] [--watermark-file <path>]',
       )
       process.exit(0)
     } else if (a.startsWith('--')) {
@@ -67,8 +85,15 @@ function main(): void {
   const db = getDb()
   ensureMigrationsApplied(db)
 
+  // --watermark-file makes the export a single idempotent cron command: read
+  // the last watermark from the file (explicit --since wins if both given),
+  // export only newer rows, then persist the new watermark back. First run
+  // (no file yet) starts from 0.
+  const priorWatermark = args.watermarkFile ? readWatermark(args.watermarkFile) : undefined
+  const since = args.since ?? priorWatermark
+
   const { rows, watermark, skipped } = exportTrainingPairs(db, {
-    ...(args.since !== undefined ? { sinceCapturedAt: args.since } : {}),
+    ...(since !== undefined ? { sinceCapturedAt: since } : {}),
     ...(args.limit !== undefined ? { limit: args.limit } : {}),
   })
 
@@ -85,6 +110,11 @@ function main(): void {
   console.error(
     `export-training-pairs: rows=${rows.length} skipped=${skipped} watermark=${watermark}`,
   )
+  // Persist the new watermark for the next scheduled run. Only advance it
+  // (never move backward) so a manual --since re-run can't rewind the cron.
+  if (args.watermarkFile) {
+    writeWatermark(args.watermarkFile, Math.max(priorWatermark ?? 0, watermark))
+  }
 }
 
 const isEntry =
