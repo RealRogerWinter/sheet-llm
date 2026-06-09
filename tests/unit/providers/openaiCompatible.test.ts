@@ -104,6 +104,54 @@ describe('OpenAICompatibleProvider', () => {
     expect(body.tool_choice).toMatchObject({ type: 'function', function: { name: 'test_tool' } })
   })
 
+  it('history-mode: converts neutral history to OpenAI messages instead of throwing (SHE-17)', async () => {
+    fetchMock.mockResolvedValue(chatCompletionsResponse({ x: 'a', y: 1 }))
+    const provider = makeProvider()
+    // Previously this threw "history-mode not yet implemented"; the score-emit
+    // validation-retry loop (scoreRetry) sends exactly this shape, so on Groq
+    // it surfaced as NO_SCORE. History-mode fixes that.
+    await provider.toolCall(
+      { name: 'test_tool', inputSchema: SimpleSchema, inputSchemaJson: {} },
+      {
+        systemPrompt: 'sys',
+        toolChoice: 'required',
+        history: [
+          { role: 'user', content: [{ type: 'text', text: 'make a scale' }] },
+          {
+            role: 'assistant',
+            content: [
+              { type: 'text', text: 'ok' },
+              { type: 'tool_use', id: 'call_1', name: 'test_tool', input: { x: 'a', y: 1 } },
+            ],
+          },
+          {
+            role: 'user',
+            content: [
+              { type: 'tool_result', toolUseId: 'call_1', isError: true, content: 'failed validation' },
+            ],
+          },
+        ],
+      },
+    )
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(body.messages.map((m: { role: string }) => m.role)).toEqual([
+      'system',
+      'user',
+      'assistant',
+      'tool',
+    ])
+    expect(body.messages[2].tool_calls[0]).toMatchObject({
+      id: 'call_1',
+      type: 'function',
+      function: { name: 'test_tool', arguments: '{"x":"a","y":1}' },
+    })
+    expect(body.messages[3]).toEqual({
+      role: 'tool',
+      tool_call_id: 'call_1',
+      content: 'failed validation',
+    })
+  })
+
   it('parses tool_call.function.arguments (JSON string) into a typed object', async () => {
     fetchMock.mockResolvedValue(chatCompletionsResponse({ x: 'hello', y: 42 }))
     const provider = makeProvider()
