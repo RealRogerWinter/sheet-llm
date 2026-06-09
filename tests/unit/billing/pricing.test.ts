@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { estimateCostUsd } from '@/lib/billing/pricing'
+import { estimateCostUsd } from '@/lib/metering/pricing'
 
 // SHE-15: Groq candidate models must be priced so the eval cost telemetry is
 // not silently $0. Rates verified at groq.com/pricing on 2026-06-09.

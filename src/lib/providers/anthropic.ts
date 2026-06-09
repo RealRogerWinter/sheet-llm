@@ -13,7 +13,7 @@ import type {
 import { OutputTruncatedError, ProviderSchemaError } from './types'
 import { toSystemBlocks } from './systemBlocks'
 import { makeOutputBudgetGuard } from './streamGuard'
-import { recordProviderCall } from '@/lib/billing/usageMeter'
+import { recordProviderCall } from '@/lib/metering/usageMeter'
 
 /** Per-call output ceiling when the caller doesn't set one. High enough
  *  that a forgotten `maxTokens` won't silently truncate a score. */

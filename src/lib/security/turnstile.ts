@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers'
 import crypto from 'node:crypto'
-import { extractClientIp } from '@/lib/auth/clientIp'
+import { extractClientIp } from '@/lib/http/clientIp'
 
 /**
  * Cloudflare Turnstile bot-gate for the LLM-cost routes (`/api/chat`,

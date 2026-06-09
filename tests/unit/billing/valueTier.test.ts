@@ -17,7 +17,7 @@ import {
   WORST_MODEL_STANDARD,
   worstCaseHoldCredits,
 } from '@/lib/billing/valueTier'
-import { PRICING } from '@/lib/billing/pricing'
+import { PRICING } from '@/lib/metering/pricing'
 import { getModelEntry } from '@/lib/providers/registry'
 
 describe('costToCredits (cost-plus, round UP, 1-credit floor)', () => {

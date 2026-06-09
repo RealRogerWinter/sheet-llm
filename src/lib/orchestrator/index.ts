@@ -1,5 +1,5 @@
 import { recordTurn, type RecordTurnFields } from './observability'
-import { runWithUsageMeter, currentMeterTotals, toMicroUsd } from '@/lib/billing/usageMeter'
+import { runWithUsageMeter, currentMeterTotals, toMicroUsd } from '@/lib/metering/usageMeter'
 import { checkCopyright } from './copyright/filter'
 import { classify, ClassifierSchemaError } from './classifier'
 import { isDeadlineApproaching } from './deadline'

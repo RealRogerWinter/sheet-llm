@@ -6,7 +6,7 @@ import type { OrchestratorScoreStream } from '@/lib/orchestrator/types'
 import { installTestDb, TEST_USER_ID } from '../factories/testEnv'
 import { creditHolds, usageLedger, users } from '@/lib/db/schema'
 import { creditWallet, getWallet } from '@/lib/billing/wallet'
-import { recordProviderCall } from '@/lib/billing/usageMeter'
+import { recordProviderCall } from '@/lib/metering/usageMeter'
 
 /**
  * PR-7b-3 — the one-time free full piece. A VERIFIED account's FIRST from-scratch

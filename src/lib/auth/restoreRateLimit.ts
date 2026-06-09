@@ -87,12 +87,12 @@ export function checkSub(sub: string): { ok: boolean; retryAfterSec?: number } {
 }
 
 // Client-IP extraction is shared with the auth + chat/import limiters — see
-// `./clientIp`. Re-exported so `@/lib/auth/restoreRateLimit` imports keep
-// working. NOTE: this REPLACES the previous always-leftmost-XFF behavior, which
-// was spoofable behind a proxy/CDN (an attacker rotating X-Forwarded-For got a
-// fresh per-IP bucket every request). The shared helper honors CF-Connecting-IP
-// / TRUSTED_PROXY_HOPS just like the auth limiter.
-export { extractClientIp } from './clientIp'
+// `@/lib/http/clientIp`. Re-exported so `@/lib/auth/restoreRateLimit` imports
+// keep working. NOTE: this REPLACES the previous always-leftmost-XFF behavior,
+// which was spoofable behind a proxy/CDN (an attacker rotating X-Forwarded-For
+// got a fresh per-IP bucket every request). The shared helper honors
+// CF-Connecting-IP / TRUSTED_PROXY_HOPS just like the auth limiter.
+export { extractClientIp } from '@/lib/http/clientIp'
 
 /** Test-only: clear all buckets. */
 export function __resetForTesting(): void {

@@ -14,7 +14,7 @@
  *
  * DARK with the rest of billing — the route only calls this when Stripe is on.
  */
-import { extractClientIp } from '@/lib/auth/clientIp'
+import { extractClientIp } from '@/lib/http/clientIp'
 
 export { extractClientIp }
 

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { isJsonRequest, isSameOriginStrict } from '@/lib/auth/httpGuards'
-import { extractClientIp } from '@/lib/auth/clientIp'
+import { extractClientIp } from '@/lib/http/clientIp'
 import { getEmailProvider } from '@/lib/auth/email'
 
 export const runtime = 'nodejs'

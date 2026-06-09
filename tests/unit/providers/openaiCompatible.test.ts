@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { OpenAICompatibleProvider } from '@/lib/providers/openaiCompatible'
 import { ProviderSchemaError, ProviderRefusalError, OutputTruncatedError } from '@/lib/providers/types'
 import { RateLimitedError, UpstreamError } from '@/lib/llm/errors'
-import { runWithUsageMeter, currentMeterTotals } from '@/lib/billing/usageMeter'
+import { runWithUsageMeter, currentMeterTotals } from '@/lib/metering/usageMeter'
 
 const SimpleSchema = z.object({ x: z.string(), y: z.number() })
 
