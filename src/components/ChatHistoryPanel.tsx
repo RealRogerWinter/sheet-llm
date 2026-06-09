@@ -83,7 +83,12 @@ interface SheetDrag {
   dragging: boolean
   /** Attach to the grabber/header drag handle. */
   onPointerDown: (e: ReactPointerEvent) => void
+  /** Tap/keyboard close — suppressed right after a real drag (see below). */
+  onClick: () => void
 }
+
+// Movement (px) past which a pointer interaction is a drag, not a tap.
+const TAP_SLOP_PX = 6
 
 /**
  * Pointer-drag controller for the sheet-mode grabber/header. Tracks the
@@ -103,11 +108,34 @@ function useSheetDrag(onDismiss: () => void, reduceMotion: boolean): SheetDrag {
   const lastYRef = useRef(0)
   const lastTRef = useRef(0)
   const velocityRef = useRef(0)
+  // True once a pointer interaction moves past the tap slop — distinguishes a
+  // drag from a tap, and is consumed by onClick to suppress the synthesized
+  // click a drag emits (otherwise a snap-back drag would also close the sheet).
+  const movedRef = useRef(false)
+  // Re-entrancy guard: ignore a second pointerdown (multi-touch / second finger)
+  // while a drag is live, so its shared geometry refs aren't corrupted.
+  const activeRef = useRef(false)
+  // Live window listeners, kept in refs so an unmount-mid-drag effect can remove
+  // them (they're attached imperatively inside onPointerDown).
+  const moveRef = useRef<((e: PointerEvent) => void) | null>(null)
+  const upRef = useRef<((e: PointerEvent) => void) | null>(null)
+
+  const teardown = useCallback(() => {
+    if (moveRef.current) window.removeEventListener('pointermove', moveRef.current)
+    if (upRef.current) {
+      window.removeEventListener('pointerup', upRef.current)
+      window.removeEventListener('pointercancel', upRef.current)
+    }
+    moveRef.current = null
+    upRef.current = null
+  }, [])
 
   const onPointerDown = useCallback(
     (e: ReactPointerEvent) => {
       // Primary button / touch only; let the close button etc. pass through.
       if (e.button !== 0) return
+      if (activeRef.current) return // a drag is already in flight — ignore extra pointers
+      activeRef.current = true
       const target = e.currentTarget as HTMLElement
       try {
         target.setPointerCapture(e.pointerId)
@@ -118,6 +146,7 @@ function useSheetDrag(onDismiss: () => void, reduceMotion: boolean): SheetDrag {
       lastYRef.current = e.clientY
       lastTRef.current = e.timeStamp
       velocityRef.current = 0
+      movedRef.current = false
       setDragging(true)
 
       const sheetHeight =
@@ -126,6 +155,7 @@ function useSheetDrag(onDismiss: () => void, reduceMotion: boolean): SheetDrag {
 
       const handleMove = (ev: PointerEvent) => {
         const raw = ev.clientY - startYRef.current
+        if (Math.abs(raw) > TAP_SLOP_PX) movedRef.current = true
         // Track instantaneous velocity (px/ms) for the flick threshold.
         const dt = ev.timeStamp - lastTRef.current
         if (dt > 0) velocityRef.current = (ev.clientY - lastYRef.current) / dt
@@ -135,34 +165,53 @@ function useSheetDrag(onDismiss: () => void, reduceMotion: boolean): SheetDrag {
       }
 
       const handleUp = (ev: PointerEvent) => {
-        window.removeEventListener('pointermove', handleMove)
-        window.removeEventListener('pointerup', handleUp)
-        window.removeEventListener('pointercancel', handleUp)
+        teardown()
         try {
           target.releasePointerCapture(ev.pointerId)
         } catch {
           /* ignore */
         }
-        const dragOffsetPx = ev.clientY - startYRef.current
+        activeRef.current = false
+        setDragging(false)
+        setOffset(0)
+        // A tap (no real movement) is handled by onClick — which also covers
+        // keyboard Enter/Space on the grabber button. Only a genuine drag is
+        // resolved through the snap model here.
+        if (!movedRef.current) return
         const next = resolveSheetDrag({
-          dragOffsetPx,
+          dragOffsetPx: ev.clientY - startYRef.current,
           velocityPxPerMs: velocityRef.current,
           sheetHeightPx: sheetHeight,
           currentState: 'expanded',
         })
-        setDragging(false)
-        setOffset(0)
         if (next === 'dismissed') onDismiss()
       }
 
+      moveRef.current = handleMove
+      upRef.current = handleUp
       window.addEventListener('pointermove', handleMove)
       window.addEventListener('pointerup', handleUp)
       window.addEventListener('pointercancel', handleUp)
     },
-    [onDismiss, reduceMotion],
+    [onDismiss, reduceMotion, teardown],
   )
 
-  return { offset, dragging, onPointerDown }
+  // Tap-to-close + keyboard activation. Suppressed (and the flag consumed) right
+  // after a real drag so a snap-back drag's synthesized click doesn't also close
+  // the panel the user just chose to keep open.
+  const onClick = useCallback(() => {
+    if (movedRef.current) {
+      movedRef.current = false
+      return
+    }
+    onDismiss()
+  }, [onDismiss])
+
+  // Remove any live drag listeners if the panel unmounts mid-drag (e.g. the
+  // score is cleared or the dock yields to the AI-diff panel).
+  useEffect(() => teardown, [teardown])
+
+  return { offset, dragging, onPointerDown, onClick }
 }
 
 export default function ChatHistoryPanel() {
@@ -231,7 +280,7 @@ export default function ChatHistoryPanel() {
             type="button"
             className={styles.grabber}
             onPointerDown={sheetDrag.onPointerDown}
-            onClick={() => setPanelOpen(false)}
+            onClick={sheetDrag.onClick}
             aria-label="Drag to resize, or tap to close the conversation panel"
           >
             <span className={styles.grabberPill} aria-hidden="true" />
