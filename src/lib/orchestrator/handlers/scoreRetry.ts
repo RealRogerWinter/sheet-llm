@@ -86,6 +86,11 @@ export async function callWithScoreRetry(
     ...(opts.providerOptions !== undefined ? { providerOptions: opts.providerOptions } : {}),
   }
 
+  // ProviderCallOptions.history is the neutral IR — every block built here
+  // must be neutral-modelable (text / tool_use / tool_result), since the
+  // Anthropic adapter (toAnthropicMessages), not the API, is now the shape
+  // gate. Built from scratch from app strings + the current call's parsed
+  // output; no stored/DB history flows in.
   let history: NeutralMessage[] | undefined = undefined
   let lastError: ValidationError | undefined
 

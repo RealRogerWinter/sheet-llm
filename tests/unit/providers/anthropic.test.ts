@@ -269,7 +269,10 @@ describe('AnthropicProvider', () => {
           { role: 'user', content: [{ type: 'text', text: 'make a scale' }] },
           {
             role: 'assistant',
+            // introText + tool_use: pins the [text, tool_use] block ORDER
+            // that scoreRetry emits when result.introText is present.
             content: [
+              { type: 'text', text: 'here you go' },
               { type: 'tool_use', id: 'toolu_1', name: 'test_tool', input: { x: 'a', y: 1 } },
             ],
           },
@@ -283,8 +286,9 @@ describe('AnthropicProvider', () => {
       },
     )
     const call = anthropicCreateMock.mock.calls[0][0]
-    // Assistant tool_use is reconstructed in Anthropic shape.
-    expect(call.messages[1].content[0]).toEqual({
+    // Assistant block order [text, tool_use] is preserved, both in Anthropic shape.
+    expect(call.messages[1].content[0]).toEqual({ type: 'text', text: 'here you go' })
+    expect(call.messages[1].content[1]).toEqual({
       type: 'tool_use',
       id: 'toolu_1',
       name: 'test_tool',
