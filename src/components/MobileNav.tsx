@@ -75,15 +75,31 @@ export default function MobileNav() {
     setOpen(false)
   }
 
+  // Anchor the portaled dropdown under the trigger's current rect.
+  const reposition = useCallback(() => {
+    const r = buttonRef.current?.getBoundingClientRect()
+    if (r) setPos({ top: r.bottom + 8, right: Math.max(8, window.innerWidth - r.right) })
+  }, [])
+
   function toggle() {
     setOpen((wasOpen) => {
-      if (!wasOpen && buttonRef.current) {
-        const r = buttonRef.current.getBoundingClientRect()
-        setPos({ top: r.bottom + 8, right: Math.max(8, window.innerWidth - r.right) })
-      }
+      if (!wasOpen) reposition()
       return !wasOpen
     })
   }
+
+  // Keep the portaled dropdown anchored if the viewport changes while it's open
+  // (rotation, mobile address-bar collapse, resize) — pos is otherwise frozen
+  // at open time.
+  useEffect(() => {
+    if (!open) return
+    window.addEventListener('resize', reposition)
+    window.addEventListener('orientationchange', reposition)
+    return () => {
+      window.removeEventListener('resize', reposition)
+      window.removeEventListener('orientationchange', reposition)
+    }
+  }, [open, reposition])
 
   // Outside-press + Escape close, both restoring focus to the trigger. We listen
   // on `pointerdown` (not `mousedown` like the desktop HeaderMenu/NewMenu) so a
@@ -175,7 +191,10 @@ export default function MobileNav() {
   }
 
   function onToggleTheme() {
-    const next = theme === 'dark' ? 'light' : 'dark'
+    // Read the live attribute (not the hook value, which is null on the server
+    // snapshot) so the toggle always flips relative to the REAL current theme.
+    const current = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'
+    const next = current === 'dark' ? 'light' : 'dark'
     document.documentElement.setAttribute('data-theme', next)
     try {
       localStorage.setItem(THEME_STORAGE_KEY, next)
@@ -220,112 +239,126 @@ export default function MobileNav() {
             style={{ top: pos.top, right: pos.right }}
             onKeyDown={onMenuKeyDown}
           >
-            <p className={styles.section} aria-hidden="true">Compose</p>
-            <button
-              type="button"
-              role="menuitem"
-              className={styles.item}
-              onClick={onFromPrompt}
-              disabled={busy || !hasContent}
-            >
-              New from prompt
-            </button>
-            <button type="button" role="menuitem" className={styles.item} onClick={onBlankScore} disabled={busy}>
-              New blank score
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              className={styles.item}
-              onClick={onImport}
-              disabled={pending}
-            >
-              Import a score
-            </button>
+            {/* Sections are real ARIA groups (role="group" + aria-labelledby)
+                so screen-reader users get the same "Compose / App / Account /
+                More" structure sighted users see, instead of a flat 10-item
+                list. The label <p> is referenced, not a menuitem, so roving
+                focus skips it. */}
+            <div role="group" aria-labelledby="mnav-compose">
+              <p id="mnav-compose" className={styles.section}>Compose</p>
+              <button
+                type="button"
+                role="menuitem"
+                className={styles.item}
+                onClick={onFromPrompt}
+                disabled={busy || !hasContent}
+              >
+                New from prompt
+              </button>
+              <button type="button" role="menuitem" className={styles.item} onClick={onBlankScore} disabled={busy}>
+                New blank score
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className={styles.item}
+                onClick={onImport}
+                disabled={pending}
+              >
+                Import a score
+              </button>
+            </div>
 
             <div className={styles.rule} role="separator" />
-            <p className={styles.section} aria-hidden="true">App</p>
-            <button type="button" role="menuitem" className={styles.item} onClick={onHelp}>
-              Help &amp; quick start
-            </button>
-            <button type="button" role="menuitem" className={styles.item} onClick={onToggleTheme}>
-              {theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-            </button>
-            <Link href="/pricing" role="menuitem" className={`${styles.item} ${styles.accent}`} onClick={closeAndFocus}>
-              Pricing &amp; credits
-            </Link>
+            <div role="group" aria-labelledby="mnav-app">
+              <p id="mnav-app" className={styles.section}>App</p>
+              <button type="button" role="menuitem" className={styles.item} onClick={onHelp}>
+                Help &amp; quick start
+              </button>
+              <button type="button" role="menuitem" className={styles.item} onClick={onToggleTheme}>
+                {theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+              </button>
+              <Link href="/pricing" role="menuitem" className={`${styles.item} ${styles.accent}`} onClick={closeAndFocus}>
+                Pricing &amp; credits
+              </Link>
+            </div>
 
             {showAuth && (
               <>
                 <div className={styles.rule} role="separator" />
-                <p className={styles.section} aria-hidden="true">Account</p>
-                {authStatus === 'authed' ? (
-                  <>
-                    <Link href="/settings" role="menuitem" className={styles.item} onClick={closeAndFocus} title={email ?? ''}>
-                      {email ?? 'Account'}
-                    </Link>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className={styles.item}
-                      onClick={() => {
-                        closeAndFocus()
-                        void logout()
-                      }}
-                    >
-                      Log out
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className={styles.item}
-                      onClick={() => {
-                        closeForModal()
-                        openLogin()
-                      }}
-                    >
-                      Log in
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className={styles.item}
-                      onClick={() => {
-                        closeForModal()
-                        openSignup()
-                      }}
-                    >
-                      Sign up
-                    </button>
-                  </>
-                )}
+                <div role="group" aria-labelledby="mnav-account">
+                  <p id="mnav-account" className={styles.section}>Account</p>
+                  {authStatus === 'authed' ? (
+                    <>
+                      <Link href="/settings" role="menuitem" className={styles.item} onClick={closeAndFocus} title={email ?? ''}>
+                        {email ?? 'Account'}
+                      </Link>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={styles.item}
+                        onClick={() => {
+                          closeAndFocus()
+                          void logout()
+                        }}
+                      >
+                        Log out
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={styles.item}
+                        onClick={() => {
+                          closeForModal()
+                          openLogin()
+                        }}
+                      >
+                        Log in
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={styles.item}
+                        onClick={() => {
+                          closeForModal()
+                          openSignup()
+                        }}
+                      >
+                        Sign up
+                      </button>
+                    </>
+                  )}
+                </div>
               </>
             )}
 
             <div className={styles.rule} role="separator" />
-            {legalEnabled && (
-              <>
-                <Link href="/terms" role="menuitem" className={styles.item} onClick={closeAndFocus}>
-                  Terms of Service
-                </Link>
-                <Link href="/privacy" role="menuitem" className={styles.item} onClick={closeAndFocus}>
-                  Privacy Policy
-                </Link>
-              </>
-            )}
-            <a
-              href={GITHUB_URL}
-              role="menuitem"
-              className={styles.item}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={closeAndFocus}
-            >
-              GitHub
-            </a>
+            <div role="group" aria-labelledby="mnav-more">
+              <p id="mnav-more" className={styles.section}>More</p>
+              {legalEnabled && (
+                <>
+                  <Link href="/terms" role="menuitem" className={styles.item} onClick={closeAndFocus}>
+                    Terms of Service
+                  </Link>
+                  <Link href="/privacy" role="menuitem" className={styles.item} onClick={closeAndFocus}>
+                    Privacy Policy
+                  </Link>
+                </>
+              )}
+              <a
+                href={GITHUB_URL}
+                role="menuitem"
+                className={styles.item}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={closeAndFocus}
+              >
+                GitHub
+              </a>
+            </div>
           </div>,
           document.body,
         )}

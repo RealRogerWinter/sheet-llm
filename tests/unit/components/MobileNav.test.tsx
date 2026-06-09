@@ -183,6 +183,15 @@ describe('<MobileNav />', () => {
 
   // ── Focus management (WCAG 2.4.3) ──────────────────────────────────────────
 
+  it('exposes labelled ARIA groups for each section', () => {
+    useAuthStore.setState({ status: 'authed', email: 'a@b.com' })
+    render(<MobileNav />)
+    const menu = openMenu()
+    for (const name of ['Compose', 'App', 'Account', 'More']) {
+      expect(within(menu).getByRole('group', { name })).toBeInTheDocument()
+    }
+  })
+
   it('moves focus to the first enabled item on open (skips a disabled item)', () => {
     render(<MobileNav />) // no content → "New from prompt" is disabled
     const menu = openMenu()
