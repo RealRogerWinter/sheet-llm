@@ -2,6 +2,7 @@ import type { Score } from '@/lib/music/types'
 import type { ChatMessage } from '@/lib/llm/wrapper'
 import { run as runOrchestrator } from '@/lib/orchestrator'
 import type { OrchestratorRunOutcome } from '@/lib/orchestrator'
+import { toTierPolicy } from '@/lib/orchestrator/generationTier'
 import { RateLimitedError, UpstreamError } from '@/lib/llm/errors'
 import { estimateCostUsd } from './pricing'
 
@@ -127,6 +128,9 @@ export async function runLiveCase(
         ...(input.initialScore !== undefined ? { editedScore: input.initialScore } : {}),
         history: input.history ?? [],
         ...(input.modelOverride !== undefined ? { modelOverride: input.modelOverride } : {}),
+        // SHE-8: preserve the pre-inversion default (absent tier ⇒ 'free') now
+        // that the orchestrator reads an injected policy, not generationTier.
+        tierPolicy: toTierPolicy('free'),
       })
 
       const tel = extractTelemetry(outcome)

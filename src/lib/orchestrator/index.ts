@@ -53,7 +53,7 @@ import { isOrchestratorConverseStream, isOrchestratorScoreStream } from './types
  * this default — `route.ts` always injects a resolved, fail-closed policy
  * (`toTierPolicy`), so a SaaS request never relies on it.
  */
-const UNCAPPED_TIER_POLICY: TierPolicy = {
+export const UNCAPPED_TIER_POLICY: TierPolicy = {
   allowSectional: true,
   allowWholeScore: true,
   maxBars: Number.MAX_SAFE_INTEGER,

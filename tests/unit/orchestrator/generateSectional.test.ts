@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { CLASSIFY_TOOL_NAME } from '@/lib/orchestrator/classifierPrompt'
 import { isOrchestratorScoreStream } from '@/lib/orchestrator/types'
 import type { ScoreStreamEvent } from '@/lib/orchestrator/types'
+import { toTierPolicy } from '@/lib/orchestrator/generationTier'
 
 // Shared Anthropic SDK stub: every provider call (plan / seed / extend /
 // classifier) routes through this. We sequence responses per call.
@@ -226,6 +227,9 @@ describe('orchestrator wiring: generate_complex -> sectional (M25-PR-3)', () => 
       userText: 'a 12-bar piece in two sections',
       history: [],
       generationTier: 'pro',
+      // SHE-8: pin the sectional path on the injected pro policy's allowSectional,
+      // not the uncapped default — generationTier no longer drives routing.
+      tierPolicy: toTierPolicy('pro'),
     })
 
     // The orchestrator returns a streaming outcome; the generator runs

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { Measure, Score } from '@/lib/music/types'
 import { assertScoreInvariants } from '../../lib/assertions'
+import { toTierPolicy } from '@/lib/orchestrator/generationTier'
 
 /**
  * M3.5-PR-3 fix verified — the bug repro now PASSES.
@@ -236,6 +237,7 @@ describe('eval: additive — triplet demo extend (M3.5-PR-3 fix verified)', () =
       userText: TRIPLET_DEMO_EXTEND_CASE.userText,
       editedScore: TRIPLET_DEMO_EXTEND_CASE.initialScore,
       history: [],
+      tierPolicy: toTierPolicy('free'),
     })
 
     expect(

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { Score } from '@/lib/music/types'
 import { assertScoreInvariants } from '../../lib/assertions'
+import { toTierPolicy } from '@/lib/orchestrator/generationTier'
 
 /**
  * M3.5-PR-4 — second positive case in the suite. Validates the
@@ -166,6 +167,7 @@ describe('eval: destructive — wholesale-replace gate (M3.5-PR-4)', () => {
       userText: 'make this jazz',
       editedScore: TRIPLET_DEMO_4_BARS,
       history: [],
+      tierPolicy: toTierPolicy('free'),
     })
 
     expect(

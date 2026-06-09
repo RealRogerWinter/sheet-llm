@@ -69,16 +69,30 @@ export type OrchestratorFinalStatus = 'ok' | 'refused' | 'fell_through' | 'error
  *  - `allowSectional`     — may a fresh from-scratch gen use the unbounded
  *                           multi-call sectional pump (vs. one capped pass)?
  *  - `allowWholeScore`    — may a wholesale `regenerate_all` rewrite run?
- *  - `maxBars`            — per-call clamp on extend / insert growth.
- *  - `emitCeiling`        — `max_tokens` kill-switch when the bounded handler runs.
+ *  - `maxBars`            — per-call clamp on the EDIT-path extend / insert
+ *                           growth only. It does NOT resize the bounded
+ *                           fresh-gen handler, which enforces its own fixed bar
+ *                           limit governed by `emitCeiling` (`toTierPolicy`
+ *                           keeps the two consistent: free → maxBars 4).
+ *  - `emitCeiling`        — `max_tokens` kill-switch read ONLY when the bounded
+ *                           handler runs (i.e. when `useBoundedFallback`); inert
+ *                           on the sectional / whole-score paths, which pin their
+ *                           own ≥8000 ceiling.
  *  - `useBoundedFallback` — route a fresh from-scratch gen through the bounded
  *                           single-call handler (the SaaS free tier) instead of
  *                           classify / dispatch.
  *
  * The SaaS route resolves entitlement and injects a capped policy, fail-closed
- * (`toTierPolicy` in `generationTier.ts`). An OSS / headless caller injects
- * nothing and gets `UNCAPPED_TIER_POLICY` (see `index.ts`) — no restrictions,
- * never bounded. Distinct from the provider model-size `Tier` in `providers/*`.
+ * (`toTierPolicy` in `generationTier.ts`, kept in lockstep with `policyFor`'s
+ * `POLICY` map by `generationTier.test.ts`). An OSS / headless caller passes the
+ * exported `UNCAPPED_TIER_POLICY` (or injects nothing, which resolves to it) —
+ * no restrictions, never bounded.
+ *
+ * SECURITY NOTE: an absent policy is uncapped (fail-OPEN) — correct for the
+ * SaaS-free kernel (an OSS engine has no paywall to enforce). The HOSTED paywall
+ * is fail-closed at the route boundary, which always injects the capped policy;
+ * `route.ts` is the only production caller of `run()`. Distinct from the
+ * provider model-size `Tier` in `providers/*`.
  */
 export interface TierPolicy {
   allowSectional: boolean
