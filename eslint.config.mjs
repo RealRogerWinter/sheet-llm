@@ -44,6 +44,33 @@ const eslintConfig = defineConfig([
       ],
     },
   },
+  // SHE-8 — OSS↔SaaS build-graph boundary (fast editor-time mirror of the
+  // authoritative .dependency-cruiser.cjs check). The platform-portable core
+  // (music/abc/providers) and the headless orchestrator must not import the
+  // SaaS surface (billing/auth). Usage/cost → @/lib/metering; request helpers →
+  // @/lib/http (both allowed by simply not being in the forbidden group).
+  {
+    files: [
+      "src/lib/music/**/*.{ts,tsx}",
+      "src/lib/abc/**/*.{ts,tsx}",
+      "src/lib/providers/**/*.{ts,tsx}",
+      "src/lib/orchestrator/**/*.{ts,tsx}",
+    ],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/lib/billing", "@/lib/billing/*", "@/lib/auth", "@/lib/auth/*"],
+              message:
+                "Core/render/orchestrator code must not import billing or auth (SaaS surface). Use @/lib/metering for usage/cost and @/lib/http for request helpers. See SHE-8 boundary (.dependency-cruiser.cjs).",
+            },
+          ],
+        },
+      ],
+    },
+  },
 ]);
 
 export default eslintConfig;

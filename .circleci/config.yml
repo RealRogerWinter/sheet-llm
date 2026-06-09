@@ -6,8 +6,9 @@ version: 2.1
 #   the VPS over SSH. Trivy fails the build on a fixable CRITICAL CVE (deps +
 #   Dockerfile + secrets per-branch; OS/library CVEs in the built image on main).
 #
-# Pre-existing-on-main, so REPORT-ONLY (not blocking) until fixed upstream:
-#   - `pnpm lint` has one ESLint error (src/components/editor/useShiftLetterPopover.ts)
+# SHE-8: `pnpm lint` is now BLOCKING (the useShiftLetterPopover error is fixed) and
+# the lint job also runs the blocking build-graph boundary check (`pnpm lint:boundaries`).
+# Still REPORT-ONLY (pre-existing-on-main, not blocking) until fixed upstream:
 #   - `pnpm docs:check` references pre-squash `verified_against` SHAs
 #
 # Contexts (create in CircleCI, restrict to trusted members):
@@ -54,8 +55,11 @@ jobs:
       - attach_workspace: { at: ~/app }
       - setup_pnpm
       - run:
-          name: ESLint (report-only — one pre-existing upstream error)
-          command: pnpm lint || true
+          name: ESLint (blocking)
+          command: pnpm lint
+      - run:
+          name: Build-graph boundary (SHE-8 — core/orchestrator must not import billing/auth)
+          command: pnpm lint:boundaries
       - run:
           name: docs-freshness (report-only — pre-squash verified_against SHAs)
           command: pnpm docs:check || true
