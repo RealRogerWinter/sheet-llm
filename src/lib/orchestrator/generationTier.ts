@@ -21,6 +21,7 @@
  */
 
 import type { TierPolicy } from './types'
+import { isFlagEnabled } from '@/lib/env/flag'
 
 export type GenerationTier = 'free' | 'pro'
 
@@ -112,8 +113,7 @@ export function getGenerationTier(): GenerationTier {
  * no redeploy.
  */
 export function isForceFreeTier(): boolean {
-  const v = process.env.SL_FORCE_FREE_TIER
-  return v === '1' || v?.toLowerCase() === 'true'
+  return isFlagEnabled('SL_FORCE_FREE_TIER')
 }
 
 /**
@@ -123,8 +123,7 @@ export function isForceFreeTier(): boolean {
  * default applies to everyone (current behavior). Read fresh; no redeploy.
  */
 export function isEntitlementsDbEnabled(): boolean {
-  const v = process.env.SL_ENTITLEMENTS_DB
-  return v === '1' || v?.toLowerCase() === 'true'
+  return isFlagEnabled('SL_ENTITLEMENTS_DB')
 }
 
 /**
@@ -140,8 +139,7 @@ export function isEntitlementsDbEnabled(): boolean {
  * toggle is ignored and every turn stays on Sonnet.
  */
 export function isAdvancedComposerEnabled(): boolean {
-  const v = process.env.SL_ADVANCED_COMPOSER
-  return v === '1' || v?.toLowerCase() === 'true'
+  return isFlagEnabled('SL_ADVANCED_COMPOSER')
 }
 
 /**
@@ -164,6 +162,8 @@ export function isTierOverrideAllowed(): boolean {
   const env = process.env.NODE_ENV
   if (env === 'development' || env === 'test') return true
   // Any other context (production, staging, unset) requires an explicit opt-in.
+  // Kept strict (1/true only) — a security-sensitive override should not widen
+  // to the looser isFlagEnabled truthy set.
   const v = process.env.SL_ALLOW_TIER_OVERRIDE
   return v === '1' || v?.toLowerCase() === 'true'
 }
@@ -202,6 +202,8 @@ export function isByokKeyAccepted(): boolean {
   const env = process.env.NODE_ENV
   if (env === 'development' || env === 'test') return true
   // Any other context (production, staging, unset) requires an explicit opt-in.
+  // Kept strict (1/true only) — a security-sensitive override should not widen
+  // to the looser isFlagEnabled truthy set.
   const v = process.env.SL_BYOK_ALLOWED
   return v === '1' || v?.toLowerCase() === 'true'
 }

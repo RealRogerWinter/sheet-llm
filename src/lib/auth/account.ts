@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { getDb } from '@/lib/db'
 import { users } from '@/lib/db/schema'
+import { isFlagEnabled } from '@/lib/env/flag'
 
 type Db = ReturnType<typeof getDb>
 
@@ -11,8 +12,7 @@ type Db = ReturnType<typeof getDb>
  * signup/login/etc. surface is gated.) Read fresh per request.
  */
 export function isAccountsEnabled(): boolean {
-  const v = process.env.SL_ACCOUNTS_ENABLED
-  return v === '1' || v?.toLowerCase() === 'true'
+  return isFlagEnabled('SL_ACCOUNTS_ENABLED')
 }
 
 /**
@@ -24,8 +24,7 @@ export function isAccountsEnabled(): boolean {
  * fresh per request; no redeploy. Mirrors {@link isAccountsEnabled}.
  */
 export function isPaidGenerationEnabled(): boolean {
-  const v = process.env.SL_PAID_GENERATION
-  return v === '1' || v?.toLowerCase() === 'true'
+  return isFlagEnabled('SL_PAID_GENERATION')
 }
 
 /**
