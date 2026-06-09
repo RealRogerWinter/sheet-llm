@@ -183,6 +183,44 @@ function warnTierOverrideHonoredInProd(): void {
 }
 
 /**
+ * SHE-8 — is a client-supplied BYOK API key (`debug.apiKey`) allowed to be
+ * honored for this request? The chat route plumbs `debug.apiKey` into the
+ * provider as `apiKeyOverride`. Honoring it UNCONDITIONALLY on the shared hosted
+ * demo is a key-laundering / billing-evasion primitive (a caller routes traffic
+ * through our infra on someone else's key, or sidesteps our metering), so it is
+ * default-DENY, fail-closed — exactly like `isTierOverrideAllowed`.
+ *
+ * Honored only in dev/test, or when an operator running their OWN single-tenant
+ * instance (OSS / desktop / self-host) opts in via `SL_BYOK_ALLOWED`. We
+ * deliberately do NOT use `NODE_ENV !== 'production'` (it fails OPEN on an unset
+ * or `staging` NODE_ENV). There is no edition primitive in the codebase yet, so
+ * this explicit opt-in IS the OSS/desktop signal; the hosted demo leaves it
+ * unset and BYOK stays off. Read fresh; no redeploy. Also gates the sibling
+ * `debug.modelOverride` (same client-trust boundary).
+ */
+export function isByokKeyAccepted(): boolean {
+  const env = process.env.NODE_ENV
+  if (env === 'development' || env === 'test') return true
+  // Any other context (production, staging, unset) requires an explicit opt-in.
+  const v = process.env.SL_BYOK_ALLOWED
+  return v === '1' || v?.toLowerCase() === 'true'
+}
+
+// Warn at most once per process if a production deployment is honoring a
+// CLIENT-supplied BYOK key (SL_BYOK_ALLOWED set under NODE_ENV=production) — fine
+// for a single-tenant self-host/desktop box, dangerous on the shared demo.
+let warnedByokHonoredInProd = false
+export function warnByokHonoredInProd(): void {
+  if (warnedByokHonoredInProd) return
+  warnedByokHonoredInProd = true
+  console.warn(
+    '[generationTier] SL_BYOK_ALLOWED is honoring a CLIENT-supplied BYOK API key ' +
+      'in production — only enable this on a single-tenant self-hosted/desktop ' +
+      'instance, never on the shared hosted demo.',
+  )
+}
+
+/**
  * Resolve the product tier for a request. Precedence (highest first):
  *   1. operator force-free kill switch (`SL_FORCE_FREE_TIER`) → always free
  *   2. per-request debug override (the debug panel's paywall toggle) — ONLY

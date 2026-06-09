@@ -96,6 +96,19 @@ export interface LogTurnFields {
 }
 
 /**
+ * SHE-8 never-log invariant — strip anything that looks like a provider API key
+ * from a string before it is logged or persisted. The BYOK seam plumbs a
+ * client-supplied `debug.apiKey` into provider calls; this is the defence so a
+ * key can NEVER surface in the orchestrator turn log or the `error` column, even
+ * if a future field (or an upstream provider error message) carries one. Covers
+ * Anthropic (`sk-ant-…`), OpenAI (`sk-…`/`sk-proj-…`), and Groq (`gsk_…`) shapes.
+ */
+const SECRET_RE = /(sk-ant-[A-Za-z0-9_-]{6,}|sk-(?:proj-)?[A-Za-z0-9_-]{16,}|gsk_[A-Za-z0-9]{16,})/g
+export function redactSecrets(s: string): string {
+  return s.replace(SECRET_RE, '[redacted]')
+}
+
+/**
  * Structured one-line JSON log per orchestrator turn. Captured by
  * Vercel/Node stdout. Intentionally minimal — no transport, no
  * external observability vendor. Test runs silence output via
@@ -108,7 +121,9 @@ export function logTurn(fields: LogTurnFields): void {
     ts: new Date().toISOString(),
     ...fields,
   }
-  console.log(JSON.stringify(payload))
+  // Redact the FULL serialized line so the never-log invariant holds for every
+  // field (incl. `error` and any future addition), not just known ones.
+  console.log(redactSecrets(JSON.stringify(payload)))
 }
 
 /**
@@ -161,10 +176,12 @@ export async function recordTurn(fields: RecordTurnFields): Promise<void> {
   const hasDiffInputs = beforeScore !== undefined || afterScore !== undefined
   const diff = hasDiffInputs ? scoreDiff(beforeScore, afterScore) : null
 
+  // Redact before truncate so a key can't survive into the persisted column.
+  const redactedError = fields.error ? redactSecrets(fields.error) : fields.error
   const truncatedError =
-    fields.error && fields.error.length > ERROR_MAX_LEN
-      ? fields.error.slice(0, ERROR_MAX_LEN)
-      : fields.error
+    redactedError && redactedError.length > ERROR_MAX_LEN
+      ? redactedError.slice(0, ERROR_MAX_LEN)
+      : redactedError
 
   try {
     getDb()
@@ -347,5 +364,5 @@ export function logShadowDivergence(fields: LogShadowDivergenceFields): void {
     ts: new Date().toISOString(),
     ...fields,
   }
-  console.log(JSON.stringify(payload))
+  console.log(redactSecrets(JSON.stringify(payload)))
 }

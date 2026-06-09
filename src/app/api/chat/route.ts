@@ -65,6 +65,7 @@ import {
   worstCaseHoldCredits,
 } from '@/lib/billing/valueTier'
 import { checkRequestIp, extractClientIp } from '@/lib/orchestrator/requestRateLimit'
+import { checkByokIp } from '@/lib/orchestrator/byokRateLimit'
 import { hasClearance } from '@/lib/security/turnstile'
 import { scoreHash } from '@/lib/orchestrator/scoreVersion'
 import { computeDeadlineAt } from '@/lib/orchestrator/deadline'
@@ -73,6 +74,8 @@ import {
   policyFor,
   toTierPolicy,
   isTierOverrideAllowed,
+  isByokKeyAccepted,
+  warnByokHonoredInProd,
   isAdvancedComposerEnabled,
   BOUNDED_EMIT_CEILING,
 } from '@/lib/orchestrator/generationTier'
@@ -529,6 +532,19 @@ async function handleChat(
   // Honored only in the trusted dev/test context (or the explicit
   // SL_ALLOW_TIER_OVERRIDE opt-in), mirroring resolveGenerationTier's gate.
   const debugMode = isTierOverrideAllowed() ? parsed.debug?.orchestrator : undefined
+  // SHE-8 — BYOK gate. `debug.apiKey` / `debug.modelOverride` are CLIENT-supplied
+  // (DebugOverridesSchema); honoring `apiKey` unconditionally on the shared demo
+  // is a key-laundering / billing-evasion primitive. Accept only in dev/test or
+  // with the explicit SL_BYOK_ALLOWED self-host opt-in (fail-closed on hosted).
+  const byokAccepted = isByokKeyAccepted()
+  const byok = byokAccepted && !!parsed.debug?.apiKey
+  if (byok && process.env.NODE_ENV === 'production') warnByokHonoredInProd()
+  // A BYOK request is OFF our token-spend path (it pays its own provider bill)
+  // but still consumes shared infra — bound it on a SEPARATE per-IP limiter so a
+  // BYOK abuser can't evade the cost limiter's brake.
+  if (byok && !checkByokIp(extractClientIp(request)).ok) {
+    return errorResponse('rate_limited', 429, 'Too many requests — please slow down and try again shortly.')
+  }
   const mode: OrchestratorMode =
     debugMode === 'on'
       ? 'primary'
@@ -568,8 +584,12 @@ async function handleChat(
   // PR-13: reserveFreePiece now returns the per-claim OWNER TOKEN (or null). Keep
   // `freePiece` as the boolean the rest of handleChat reads, and thread the token
   // to the release sites so an un-claim is scoped to THIS request's reservation.
+  // SHE-8 — a BYOK request pays its own provider bill, so it is OFF our money
+  // path: never reserve/consume the free-piece grant for it.
   const freePieceToken =
-    isPaidGenerationEnabled() && authenticated && !orchestratorScore ? reserveFreePiece(userId) : null
+    isPaidGenerationEnabled() && authenticated && !orchestratorScore && !byok
+      ? reserveFreePiece(userId)
+      : null
   const freePiece = freePieceToken !== null
   if (freePiece) generationTier = 'pro'
 
@@ -621,8 +641,10 @@ async function handleChat(
   // respondWithScoreStream). The START GATE stays at the non-streaming worst case:
   // a non-streaming turn has NO abort, so the hold must always cover it. A crashed
   // request self-heals via reapExpiredHolds.
+  // SHE-8 — `!byok`: a BYOK request bills the user's own provider key, so it must
+  // NOT enter the credit money path (no placeHold / settle against our wallet).
   const paidGeneration =
-    isPaidGenerationEnabled() && authenticated && generationTier === 'pro' && !freePiece
+    isPaidGenerationEnabled() && authenticated && generationTier === 'pro' && !freePiece && !byok
   // PR-8 Advanced Composer (Opus). The client toggle is honored ONLY for a paid
   // Pro generation — so it is forced OFF for the free tier AND the free piece (we
   // never eat a free Opus run) — and behind SL_ADVANCED_COMPOSER. It only raises
@@ -710,8 +732,10 @@ async function handleChat(
         userText: parsed.message,
         editedScore: orchestratorScore,
         history: messagesForLLM,
-        modelOverride: parsed.debug?.modelOverride,
-        ...(parsed.debug?.apiKey ? { apiKeyOverride: parsed.debug.apiKey } : {}),
+        // SHE-8 — both are CLIENT-supplied debug fields, gated behind the BYOK
+        // acceptance check (dev/test or SL_BYOK_ALLOWED); ignored on hosted.
+        modelOverride: byokAccepted ? parsed.debug?.modelOverride : undefined,
+        ...(byok && parsed.debug?.apiKey ? { apiKeyOverride: parsed.debug.apiKey } : {}),
         ...(parsed.targetRegion ? { targetRegion: parsed.targetRegion } : {}),
         deadlineAt,
         generationTier,

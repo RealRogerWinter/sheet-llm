@@ -42,6 +42,37 @@ describe('orchestrator/observability', () => {
     vi.unstubAllEnvs()
   })
 
+  // SHE-8 never-log invariant — a BYOK provider key must never reach the turn
+  // log, even when it leaks into an `error` string from an upstream provider.
+  it('redacts a provider API key from the logTurn line (never-log invariant)', () => {
+    const KEY = 'sk-ant-api03-ABCDEF0123456789abcdef'
+    logTurn({
+      requestId: 'req-secret',
+      label: 'compose',
+      handler: 'generateComplex',
+      model: 'claude-sonnet-4-6',
+      latencyMs: 9,
+      finalStatus: 'error',
+      error: `Anthropic 401: invalid x-api-key ${KEY} rejected`,
+    })
+    const line = logSpy.mock.calls[0][0] as string
+    expect(line).not.toContain('sk-ant-')
+    expect(line).not.toContain(KEY)
+    expect(line).toContain('[redacted]')
+  })
+
+  it('redacts a provider API key from the logShadowDivergence line', () => {
+    logShadowDivergence({
+      requestId: 'req-shadow',
+      // a contrived field carrying a key (any future field could)
+      // @ts-expect-error — exercising the full-line redaction, not the typed shape
+      note: 'leaked gsk_ABCDEF0123456789abcdef in shadow path',
+    })
+    const line = logSpy.mock.calls[0][0] as string
+    expect(line).not.toContain('gsk_ABCDEF')
+    expect(line).toContain('[redacted]')
+  })
+
   it('emits a single JSON line to stdout with the orchestrator marker', () => {
     logTurn({
       requestId: 'req-abc',
