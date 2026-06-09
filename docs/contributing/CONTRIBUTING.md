@@ -4,7 +4,7 @@ subsystem: cross-cutting
 audience: [contributor, ai-agent]
 status: current
 last_verified: 2026-06-09
-verified_against: 881aa3b
+verified_against: 60d0bbe
 source_paths:
   - package.json
   - drizzle.config.ts
@@ -114,18 +114,19 @@ the audit trail.
 ## 2. The required checks
 
 Run these locally before pushing a PR against `main`. Run them **in
-order** and stop at the first failure. All seven should be green before
+order** and stop at the first failure. All eight should be green before
 you open the PR:
 
 | # | Gate                     | Command              | Needs API key? |
 | - | ------------------------ | -------------------- | -------------- |
-| 1 | Lint                     | `pnpm lint`          | no             |
-| 2 | Typecheck                | `pnpm typecheck`     | no             |
-| 3 | **Schema drift**         | `pnpm db:generate` + git-status diff | no |
-| 4 | abcjs Node spike         | `pnpm abcjs:spike`   | no             |
-| 5 | Unit + integration tests | `pnpm test`          | no             |
-| 6 | Smoke evals (4 cases)    | `pnpm eval:smoke`    | **yes** (~$0.01/run) |
-| 7 | E2E tests                | `pnpm test:e2e`      | no¹            |
+| 1 | Lint (**blocking**)      | `pnpm lint`          | no             |
+| 2 | Build-graph boundary     | `pnpm lint:boundaries` | no           |
+| 3 | Typecheck                | `pnpm typecheck`     | no             |
+| 4 | **Schema drift**         | `pnpm db:generate` + git-status diff | no |
+| 5 | abcjs Node spike         | `pnpm abcjs:spike`   | no             |
+| 6 | Unit + integration tests | `pnpm test`          | no             |
+| 7 | Smoke evals (4 cases)    | `pnpm eval:smoke`    | **yes** (~$0.01/run) |
+| 8 | E2E tests                | `pnpm test:e2e`      | no¹            |
 
 ¹ The LLM-driven e2e specs (e.g. `drag-tagging.spec.ts`) auto-skip when
 `ANTHROPIC_API_KEY` is unset; the import-driven regressions still run.
@@ -133,19 +134,19 @@ you open the PR:
 **The deterministic checks need no API key** — run them on every change:
 
 ```sh
-pnpm lint && pnpm typecheck && pnpm test
+pnpm lint && pnpm lint:boundaries && pnpm typecheck && pnpm test
 ```
 
 A few check-specific things worth knowing:
 
-- **Schema-drift (step 3)** is the one most likely to surprise you.
+- **Schema-drift (step 4)** is the one most likely to surprise you.
   Migrations in `drizzle/*.sql` are *generated* from
   `src/lib/db/schema.ts`, never hand-edited. If you touch the schema:
   `pnpm db:generate`, then commit **both** the schema and the new
   numbered `drizzle/NNNN_*.sql` (migrations are append-only — never edit
   a committed one). Forget this and your schema and committed migrations
   drift. Full detail: development-workflow §"The schema-drift guard".
-- **Smoke evals (step 6)** call the real Anthropic API, so they need
+- **Smoke evals (step 7)** call the real Anthropic API, so they need
   `ANTHROPIC_API_KEY` set — skip them without a key, and skip them for
   doc-only changes (the harness also recognizes a `[skip-live-eval]`
   marker; see `evals/README.md`).
