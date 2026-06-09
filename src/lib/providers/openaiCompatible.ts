@@ -7,10 +7,12 @@ import type {
   ProviderTool,
   ProviderToolResult,
   ProviderUsage,
+  TextStreamEvent,
 } from './types'
 import { OutputTruncatedError, ProviderRefusalError, ProviderSchemaError } from './types'
 import { flattenSystemPrompt } from './systemBlocks'
 import { toOpenAIMessages } from './openaiConversation'
+import { makeOutputBudgetGuard } from './streamGuard'
 import { recordProviderCall } from '@/lib/metering/usageMeter'
 
 /** Default per-call output ceiling when a caller doesn't set `maxTokens`.
@@ -50,6 +52,19 @@ interface OpenAIChatCompletionResponse {
         function?: { name?: string; arguments?: string }
       }>
     }
+  }>
+  usage?: {
+    prompt_tokens?: number
+    completion_tokens?: number
+    prompt_tokens_details?: { cached_tokens?: number }
+  }
+}
+
+/** One SSE chunk from a `stream: true` Chat Completions response. */
+interface OpenAIStreamChunk {
+  choices?: Array<{
+    delta?: { content?: string | null }
+    finish_reason?: string | null
   }>
   usage?: {
     prompt_tokens?: number
@@ -209,6 +224,140 @@ export class OpenAICompatibleProvider implements LLMProvider {
           ? message.content
           : undefined,
       usage,
+    }
+  }
+
+  /**
+   * Stream a text-only (non-tool) completion via OpenAI Chat Completions
+   * SSE (`stream: true`). Mirrors AnthropicProvider.textStream's event
+   * contract so converse/Q&A is provider-agnostic: yields `message-start`,
+   * zero-or-more `text-delta`, then exactly one `message-stop` or `error`.
+   *
+   * Pre-stream failures (rate limit, 4xx/5xx, no body) THROW (same channel
+   * as toolCall); mid-stream failures are yielded as `{ type: 'error' }` so
+   * the caller can persist partial output. The secondary output-budget /
+   * deadline guard aborts mid-flight (inert unless opted in), and an
+   * external `abortSignal` cancels cleanly — both surface as a
+   * truncation-style `message-stop` (stopReason 'max_tokens'), not an error.
+   */
+  async *textStream(options: ProviderCallOptions): AsyncIterable<TextStreamEvent> {
+    const apiKey = this.resolveApiKey()
+    const model = options.modelOverride ?? this.config.defaultModel
+    const messages = this.buildMessages(options)
+
+    yield { type: 'message-start', model }
+
+    const body: Record<string, unknown> = {
+      model,
+      messages,
+      max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
+      stream: true,
+      // Ask OpenAI-compatible backends (Groq) to include usage in the final
+      // chunk; absent on backends that don't support it (we just skip metering).
+      stream_options: { include_usage: true },
+      ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+    }
+
+    const headers: Record<string, string> = { 'content-type': 'application/json' }
+    if (apiKey) headers.authorization = `Bearer ${apiKey}`
+
+    let response: Response
+    try {
+      response = await fetch(`${this.config.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        ...(options.abortSignal ? { signal: options.abortSignal } : {}),
+      })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'network error'
+      throw new UpstreamError(`${this.name}: ${msg}`, 502)
+    }
+
+    if (!response.ok) {
+      if (response.status === 429) throw new RateLimitedError(`${this.name}: rate limited`)
+      const text = await response.text().catch(() => '')
+      throw new UpstreamError(`${this.name} ${response.status}: ${text.slice(0, 300)}`, response.status)
+    }
+    if (!response.body) {
+      throw new UpstreamError(`${this.name}: streaming response has no body`, 502)
+    }
+
+    const guard = makeOutputBudgetGuard({
+      ...(options.outputTokenBudget !== undefined ? { outputTokenBudget: options.outputTokenBudget } : {}),
+      ...(options.streamDeadlineAt !== undefined ? { deadlineAt: options.streamDeadlineAt } : {}),
+    })
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let accumulated = ''
+    let stopReason: string | undefined
+    let usage: ProviderUsage | undefined
+    let aborted = false
+
+    try {
+      reading: for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        // SSE frames are newline-delimited `data: {json}` lines; keep the
+        // trailing partial line in the buffer for the next chunk.
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+        for (const raw of lines) {
+          const line = raw.trim()
+          if (!line.startsWith('data:')) continue
+          const data = line.slice(5).trim()
+          if (data === '' || data === '[DONE]') continue
+          let chunk: OpenAIStreamChunk
+          try {
+            chunk = JSON.parse(data) as OpenAIStreamChunk
+          } catch {
+            continue // ignore keep-alive / malformed frames
+          }
+          const choice = chunk.choices?.[0]
+          const delta = choice?.delta?.content
+          if (typeof delta === 'string' && delta.length > 0) {
+            accumulated += delta
+            yield { type: 'text-delta', delta }
+            if (guard.shouldAbort(accumulated.length)) {
+              aborted = true
+              await reader.cancel().catch(() => {})
+              break reading
+            }
+          }
+          if (choice?.finish_reason) stopReason = choice.finish_reason
+          if (chunk.usage) {
+            usage = {
+              inputTokens: chunk.usage.prompt_tokens,
+              cachedInputTokens: chunk.usage.prompt_tokens_details?.cached_tokens,
+              outputTokens: chunk.usage.completion_tokens,
+            }
+          }
+        }
+      }
+
+      if (aborted) {
+        yield { type: 'message-stop', finalText: accumulated, stopReason: 'max_tokens' }
+        return
+      }
+      if (usage) recordProviderCall(model, usage)
+      yield {
+        type: 'message-stop',
+        finalText: accumulated,
+        stopReason,
+        ...(usage ? { usage } : {}),
+      }
+    } catch (e) {
+      // External abort (caller's abortSignal) surfaces here as an AbortError —
+      // translate to a clean truncation-style stop, not an error event.
+      if (options.abortSignal?.aborted) {
+        yield { type: 'message-stop', finalText: accumulated, stopReason: 'max_tokens' }
+        return
+      }
+      const err = e instanceof Error ? e : new Error(`${this.name}: unknown stream error`)
+      yield { type: 'error', error: err }
     }
   }
 
