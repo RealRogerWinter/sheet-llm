@@ -248,14 +248,19 @@ export const STAFF_MEASURE_PROPERTIES = {
           items: {
             type: 'object',
             additionalProperties: false,
-            required: ['step', 'octave', 'accidental'],
+            // `accidental` is intentionally NOT required — it is optional in the
+            // canonical Zod PitchSchema (music/types.ts) and an omitted value means
+            // natural. Forcing it in `required` made providers that validate tool
+            // args against this JSON schema server-side (Groq: strictJsonSchema)
+            // 400 when a model legitimately omitted it for an unaltered pitch.
+            required: ['step', 'octave'],
             properties: {
               step: { type: 'string', enum: ['C', 'D', 'E', 'F', 'G', 'A', 'B', 'rest'] },
               octave: { type: 'integer' },
               accidental: {
                 type: 'string',
                 enum: ['natural', 'sharp', 'flat', 'dblsharp', 'dblflat', 'none'],
-                description: 'Required; emit "none" for unaltered pitches and key-signature defaults.',
+                description: 'Optional; emit "sharp"/"flat"/etc. for altered pitches. Omit (or "none") for unaltered pitches and key-signature defaults.',
               },
               tied_to_next: {
                 type: 'boolean',
@@ -375,7 +380,8 @@ export const STAFF_MEASURE_PROPERTIES = {
                 items: {
                   type: 'object',
                   additionalProperties: false,
-                  required: ['step', 'octave', 'accidental'],
+                  // See note above — `accidental` optional (natural when omitted).
+                  required: ['step', 'octave'],
                   properties: {
                     step: { type: 'string', enum: ['C', 'D', 'E', 'F', 'G', 'A', 'B'] },
                     octave: { type: 'integer' },

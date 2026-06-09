@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { z } from 'zod'
-import { OpenAICompatibleProvider } from '@/lib/providers/openaiCompatible'
+import {
+  OpenAICompatibleProvider,
+  recoverToolArgsFromFailedGeneration,
+  extractFirstJsonObject,
+} from '@/lib/providers/openaiCompatible'
 import { ProviderSchemaError, ProviderRefusalError, OutputTruncatedError } from '@/lib/providers/types'
 import { RateLimitedError, UpstreamError } from '@/lib/llm/errors'
 import { runWithUsageMeter, currentMeterTotals } from '@/lib/metering/usageMeter'
@@ -58,6 +62,78 @@ function chatCompletionsResponse(args: unknown, opts: { id?: string; content?: s
   } as unknown as Response
 }
 
+/** Build a Groq 400 `tool_use_failed` error Response with the given raw model output. */
+function toolUseFailedResponse(failedGeneration: string) {
+  const errBody = {
+    error: {
+      message: "Failed to call a function. Please adjust your prompt. See 'failed_generation' for more details.",
+      type: 'invalid_request_error',
+      code: 'tool_use_failed',
+      failed_generation: failedGeneration,
+    },
+  }
+  return {
+    ok: false,
+    status: 400,
+    json: async () => errBody,
+    text: async () => JSON.stringify(errBody),
+  } as unknown as Response
+}
+
+describe('extractFirstJsonObject', () => {
+  it('returns the first balanced object, ignoring trailing junk', () => {
+    expect(extractFirstJsonObject('prefix {"a":1} </function> trailing')).toBe('{"a":1}')
+  })
+  it('respects braces inside string literals', () => {
+    expect(extractFirstJsonObject('{"s":"a}{b","n":2}')).toBe('{"s":"a}{b","n":2}')
+  })
+  it('handles nested objects', () => {
+    expect(extractFirstJsonObject('{"a":{"b":{"c":1}}}x')).toBe('{"a":{"b":{"c":1}}}')
+  })
+  it('returns null when the object never closes (truncated)', () => {
+    expect(extractFirstJsonObject('{"a":1, "b":')).toBeNull()
+  })
+  it('returns null when there is no object', () => {
+    expect(extractFirstJsonObject('no braces here')).toBeNull()
+  })
+})
+
+describe('recoverToolArgsFromFailedGeneration', () => {
+  const body = (fg: string) => JSON.stringify({ error: { code: 'tool_use_failed', failed_generation: fg } })
+
+  it('recovers args from the Hermes <function=NAME>{json} envelope', () => {
+    expect(recoverToolArgsFromFailedGeneration(body('<function=edit_score> {"ops":[{"kind":"x"}]}'))).toEqual({
+      ops: [{ kind: 'x' }],
+    })
+  })
+  it('recovers from <function=NAME>{json}</function> with a closing tag', () => {
+    expect(recoverToolArgsFromFailedGeneration(body('<function=t>{"x":"a","y":1}</function>'))).toEqual({ x: 'a', y: 1 })
+  })
+  it('recovers bare JSON args (no function tag)', () => {
+    expect(recoverToolArgsFromFailedGeneration(body('{"x":"a","y":2}'))).toEqual({ x: 'a', y: 2 })
+  })
+  it('unwraps an OpenAI-style {name, arguments:"<stringified>"} envelope', () => {
+    expect(
+      recoverToolArgsFromFailedGeneration(body('{"name":"t","arguments":"{\\"x\\":\\"a\\"}"}')),
+    ).toEqual({ x: 'a' })
+  })
+  it('unwraps a {parameters:{...}} envelope', () => {
+    expect(recoverToolArgsFromFailedGeneration(body('{"name":"t","parameters":{"x":"a"}}'))).toEqual({ x: 'a' })
+  })
+  it('returns null for non-tool_use_failed error bodies', () => {
+    expect(recoverToolArgsFromFailedGeneration(JSON.stringify({ error: { code: 'rate_limited' } }))).toBeNull()
+  })
+  it('returns null for a non-JSON body', () => {
+    expect(recoverToolArgsFromFailedGeneration('upstream 503 gateway error')).toBeNull()
+  })
+  it('returns null when failed_generation has no recoverable JSON', () => {
+    expect(recoverToolArgsFromFailedGeneration(body('I cannot do that.'))).toBeNull()
+  })
+  it('returns null on truncated (unbalanced) JSON', () => {
+    expect(recoverToolArgsFromFailedGeneration(body('<function=t>{"x":"a",'))).toBeNull()
+  })
+})
+
 describe('OpenAICompatibleProvider', () => {
   let fetchMock: ReturnType<typeof vi.fn>
 
@@ -71,6 +147,31 @@ describe('OpenAICompatibleProvider', () => {
   afterEach(() => {
     vi.unstubAllEnvs()
     vi.restoreAllMocks()
+  })
+
+  it('recovers a tool call from a Groq 400 tool_use_failed (malformed envelope)', async () => {
+    fetchMock.mockResolvedValue(toolUseFailedResponse('<function=test_tool> {"x":"a","y":7}'))
+    const provider = makeProvider()
+    const res = await provider.toolCall(
+      { name: 'test_tool', inputSchema: SimpleSchema, inputSchemaJson: { type: 'object' } },
+      { systemPrompt: 'sys', userText: 'usr', toolChoice: 'required' },
+    )
+    expect(res.input).toEqual({ x: 'a', y: 7 })
+    expect(res.stopReason).toBe('tool_use_recovered')
+    expect(res.toolUseId).toContain('groq_recovered_')
+  })
+
+  it('throws UpstreamError when the recovered args fail schema validation', async () => {
+    // Valid JSON, but the wrong shape for SimpleSchema (y must be a number) —
+    // recovery must NOT smuggle a malformed call through.
+    fetchMock.mockResolvedValue(toolUseFailedResponse('<function=test_tool> {"x":"a","y":"nope"}'))
+    const provider = makeProvider()
+    await expect(
+      provider.toolCall(
+        { name: 'test_tool', inputSchema: SimpleSchema, inputSchemaJson: { type: 'object' } },
+        { systemPrompt: 'sys', userText: 'usr', toolChoice: 'required' },
+      ),
+    ).rejects.toBeInstanceOf(UpstreamError)
   })
 
   it('POSTs to baseUrl/chat/completions with Bearer auth', async () => {
