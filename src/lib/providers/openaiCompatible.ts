@@ -10,6 +10,7 @@ import type {
 } from './types'
 import { OutputTruncatedError, ProviderRefusalError, ProviderSchemaError } from './types'
 import { flattenSystemPrompt } from './systemBlocks'
+import { toOpenAIMessages } from './openaiConversation'
 import { recordProviderCall } from '@/lib/metering/usageMeter'
 
 /** Default per-call output ceiling when a caller doesn't set `maxTokens`.
@@ -243,20 +244,17 @@ export class OpenAICompatibleProvider implements LLMProvider {
   }
 
   /**
-   * Build OpenAI-style messages. PR C: only handles single-shot
-   * (system + user text). Multi-turn history support (for generateSimple
-   * once it migrates) lands in a follow-up — needs ChatMessage→OpenAI
-   * conversion for tool_use / tool_result blocks.
+   * Build OpenAI-style messages. Single-shot uses `userText`; multi-turn
+   * uses the neutral history (SHE-17), adapted to OpenAI's message model
+   * via `toOpenAIMessages` (assistant `tool_calls` + `role:'tool'` results).
+   * History-mode is what lets a cheap Groq model run the score-emit
+   * validation-retry loop instead of failing it as NO_SCORE.
    */
   private buildMessages(options: ProviderCallOptions): Array<Record<string, unknown>> {
+    const system = { role: 'system', content: flattenSystemPrompt(options.systemPrompt) }
     if (options.history) {
-      throw new Error(
-        `${this.name}: history-mode toolCall not yet implemented for OpenAI-compatible providers`,
-      )
+      return [system, ...toOpenAIMessages(options.history)]
     }
-    return [
-      { role: 'system', content: flattenSystemPrompt(options.systemPrompt) },
-      { role: 'user', content: options.userText ?? '' },
-    ]
+    return [system, { role: 'user', content: options.userText ?? '' }]
   }
 }
