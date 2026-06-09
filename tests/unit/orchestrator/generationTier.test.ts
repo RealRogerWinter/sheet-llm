@@ -173,3 +173,33 @@ describe('toTierPolicy (SHE-8 injected-policy adapter)', () => {
     })
   })
 })
+
+// SHE-8 BYOK correctness — the free-tier bounded ceilings are env-overridable.
+describe('bounded ceilings — env-parameterized', () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  it('default to 2600 / 4 and honor SL_BOUNDED_EMIT_CEILING / SL_BOUNDED_MAX_BARS', () => {
+    expect(policyFor('free').maxOutputTokens).toBe(2600)
+    expect(policyFor('free').maxBars).toBe(4)
+    vi.stubEnv('SL_BOUNDED_EMIT_CEILING', '5000')
+    vi.stubEnv('SL_BOUNDED_MAX_BARS', '8')
+    expect(policyFor('free').maxOutputTokens).toBe(5000)
+    expect(policyFor('free').maxBars).toBe(8)
+    // …and the override flows into the injected TierPolicy the route hands the kernel.
+    expect(toTierPolicy('free')).toMatchObject({ emitCeiling: 5000, maxBars: 8 })
+  })
+
+  it('ignore a non-positive / non-integer / empty override (keep the default)', () => {
+    for (const v of ['0', '-5', 'abc', '', '2.5']) {
+      vi.stubEnv('SL_BOUNDED_EMIT_CEILING', v)
+      expect(policyFor('free').maxOutputTokens).toBe(2600)
+    }
+  })
+
+  it('do not affect the pro tier', () => {
+    vi.stubEnv('SL_BOUNDED_EMIT_CEILING', '5000')
+    vi.stubEnv('SL_BOUNDED_MAX_BARS', '8')
+    expect(policyFor('pro').maxOutputTokens).toBe(8000)
+    expect(policyFor('pro').maxBars).toBe(64)
+  })
+})

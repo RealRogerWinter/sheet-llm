@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getLLMClient } from '@/lib/llm'
 import { completeWithRetry } from '@/lib/llm/messages'
-import { RateLimitedError, UpstreamError } from '@/lib/llm/errors'
+import { RateLimitedError, UpstreamError, ProviderNotConfiguredError } from '@/lib/llm/errors'
 import { OutputTruncatedError, ProviderSchemaError } from '@/lib/providers/types'
 import { RENDER_SCORE_TOOL_NAME } from '@/lib/llm/renderScoreTool'
 import {
@@ -78,7 +78,7 @@ import {
   isByokKeyAccepted,
   warnByokHonoredInProd,
   isAdvancedComposerEnabled,
-  BOUNDED_EMIT_CEILING,
+  resolveBoundedEmitCeiling,
 } from '@/lib/orchestrator/generationTier'
 import type { GenerationTier } from '@/lib/orchestrator/generationTier'
 import { evaluateRequestQuota, isDailyQuotaEnabled } from '@/lib/orchestrator/dailyQuota'
@@ -153,6 +153,28 @@ export function errorResponse(
   if (chatId) body.chatId = chatId
   if (cta) body.cta = cta
   return NextResponse.json(body, { status })
+}
+
+/**
+ * SHE-8 BYOK correctness — a clean onboarding response for a request that hit a
+ * provider with no API key configured (and no BYOK override). Replaces the raw
+ * `<ENV_VAR> is not set` 5xx with an actionable CTA to configure a key in
+ * Settings. The user message never names the env var.
+ */
+function providerNotConfiguredResponse(chatId?: string) {
+  return errorResponse(
+    'provider_not_configured',
+    503,
+    'No AI provider is configured yet. Add an API key in Settings to start generating.',
+    chatId,
+    {
+      kind: 'onboarding',
+      title: 'Set up your AI provider',
+      body: 'sheet-llm needs an API key to generate music. Add your own provider key (Anthropic, Groq, …) in Settings — it stays on this device/server.',
+      primaryLabel: 'Open Settings',
+      primaryHref: '/settings',
+    },
+  )
 }
 
 export function checkSameOrigin(request: Request): { ok: true } | { ok: false; res: ReturnType<typeof errorResponse> } {
@@ -768,6 +790,8 @@ async function handleChat(
       orchestratorOutcome = null
     } else if (e instanceof RateLimitedError) {
       return errorResponse('rate_limited', 503, e.message, chatId)
+    } else if (e instanceof ProviderNotConfiguredError) {
+      return providerNotConfiguredResponse(chatId)
     } else if (e instanceof UpstreamError) {
       return errorResponse('upstream_error', e.status === 500 ? 502 : e.status, e.message, chatId)
     } else if (e instanceof ValidationError) {
@@ -939,7 +963,7 @@ async function handleChat(
       getLLMClient(),
       {
         messages: messagesForLLM,
-        ...(legacyBounded ? { maxTokens: BOUNDED_EMIT_CEILING } : {}),
+        ...(legacyBounded ? { maxTokens: resolveBoundedEmitCeiling() } : {}),
       },
       legacyBounded ? { maxRetries: 1 } : {},
     )
@@ -949,6 +973,9 @@ async function handleChat(
     }
     if (e instanceof RateLimitedError) {
       return errorResponse('rate_limited', 503, e.message, chatId)
+    }
+    if (e instanceof ProviderNotConfiguredError) {
+      return providerNotConfiguredResponse(chatId)
     }
     if (e instanceof UpstreamError) {
       return errorResponse('upstream_error', e.status === 500 ? 502 : e.status, e.message, chatId)

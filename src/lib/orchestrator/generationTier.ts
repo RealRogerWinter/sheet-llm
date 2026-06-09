@@ -56,6 +56,26 @@ export const BOUNDED_EMIT_CEILING = 2_600
 /** At most 4 bars (measures) per bounded generation. */
 export const BOUNDED_MAX_BARS = 4
 
+function intEnvFresh(name: string, def: number): number {
+  const n = Number(process.env[name])
+  return Number.isInteger(n) && n > 0 ? n : def
+}
+
+/**
+ * SHE-8 BYOK correctness — the bounded free-tier ceilings are env-overridable
+ * (read fresh per call, no redeploy), defaulting to the constants above. A
+ * self-host / desktop BYOK operator can raise them (their own key, their own
+ * cost) without a code change. `SL_BOUNDED_EMIT_CEILING` is deliberately NOT
+ * named `*_MAX_TOKENS` so it stays clear of the whole-score drift guard in
+ * `tokenBudget.test.ts`.
+ */
+export function resolveBoundedEmitCeiling(): number {
+  return intEnvFresh('SL_BOUNDED_EMIT_CEILING', BOUNDED_EMIT_CEILING)
+}
+export function resolveBoundedMaxBars(): number {
+  return intEnvFresh('SL_BOUNDED_MAX_BARS', BOUNDED_MAX_BARS)
+}
+
 const POLICY: Record<GenerationTier, GenerationPolicy> = {
   free: {
     tier: 'free',
@@ -74,6 +94,14 @@ const POLICY: Record<GenerationTier, GenerationPolicy> = {
 }
 
 export function policyFor(tier: GenerationTier): GenerationPolicy {
+  if (tier === 'free') {
+    // Free-tier ceilings are env-overridable (read fresh); pro is static.
+    return {
+      ...POLICY.free,
+      maxOutputTokens: resolveBoundedEmitCeiling(),
+      maxBars: resolveBoundedMaxBars(),
+    }
+  }
   return POLICY[tier]
 }
 
@@ -86,7 +114,7 @@ export function policyFor(tier: GenerationTier): GenerationPolicy {
  * bounded handler (`useBoundedFallback`); `pro` runs the full pipeline.
  */
 export function toTierPolicy(tier: GenerationTier): TierPolicy {
-  const p = POLICY[tier]
+  const p = policyFor(tier)
   return {
     allowSectional: p.allowSectional,
     allowWholeScore: p.allowWholeScore,

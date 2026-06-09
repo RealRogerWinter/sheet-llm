@@ -449,6 +449,10 @@ export type ChatErrorCode =
   // 402, with a plain `error`; the buy-credits CTA card lands with the wallet
   // UI (PR-12).
   | 'insufficient_credits'
+  // SHE-8 BYOK correctness — no AI provider key is configured (and no BYOK
+  // override). 503, carries an `onboarding` `cta` pointing at Settings, instead
+  // of leaking the raw `<ENV_VAR> is not set` upstream error.
+  | 'provider_not_configured'
 
 /**
  * A structured call-to-action attached to a quota/login error so the chat UI can
@@ -459,7 +463,7 @@ export type ChatErrorCode =
  * card/modal lands in a later PR; the server emits this now.)
  */
 export interface ChatCta {
-  kind: 'signup' | 'waitlist' | 'login' | 'busy'
+  kind: 'signup' | 'waitlist' | 'login' | 'busy' | 'onboarding'
   title: string
   body: string
   primaryLabel: string
