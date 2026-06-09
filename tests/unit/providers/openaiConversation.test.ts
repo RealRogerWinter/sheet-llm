@@ -92,4 +92,11 @@ describe('toOpenAIMessages (neutral IR -> OpenAI chat messages)', () => {
   it('handles empty history', () => {
     expect(toOpenAIMessages([])).toEqual([])
   })
+
+  it('never emits an assistant message with neither content nor tool_calls (uses empty-string content)', () => {
+    // Unreachable via scoreRetry, but the adapter must not produce a message
+    // OpenAI/Groq would reject.
+    const h: NeutralMessage[] = [{ role: 'assistant', content: [] }]
+    expect(toOpenAIMessages(h)).toEqual([{ role: 'assistant', content: '' }])
+  })
 })

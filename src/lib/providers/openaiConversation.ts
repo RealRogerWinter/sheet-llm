@@ -24,6 +24,11 @@
  * `is_error` has no OpenAI equivalent on a `tool` message; the failure text
  * already lives in `content` (the app embeds the validator complaint there),
  * so the model still sees it.
+ *
+ * Caller invariants (held by the sole producer, scoreRetry): the history is
+ * built from validated/app-controlled data (not a persisted transcript), is
+ * non-empty, and pairs each `tool_use` id with a following `tool_result`.
+ * This adapter does not re-validate those; it is a structural mapping.
  */
 import type { NeutralMessage } from './conversation'
 
@@ -59,11 +64,12 @@ export function toOpenAIMessages(
         })
       }
     }
-    const assistant: Record<string, unknown> = {
-      role: 'assistant',
-      // OpenAI permits null content when tool_calls are present.
-      content: texts.length > 0 ? texts.join('') : null,
-    }
+    // OpenAI permits null content when tool_calls are present, but rejects a
+    // message with neither content nor tool_calls — emit '' for that
+    // (unreachable today) case so the adapter never produces an invalid msg.
+    const content: string | null =
+      texts.length > 0 ? texts.join('') : toolCalls.length > 0 ? null : ''
+    const assistant: Record<string, unknown> = { role: 'assistant', content }
     if (toolCalls.length > 0) assistant.tool_calls = toolCalls
     out.push(assistant)
   }
