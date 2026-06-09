@@ -28,6 +28,16 @@ self-hosted/local installs — never enable it by default. Architecture, config,
 threat model, and the Cloudflare runbook are in
 [`docs/subsystems/daily-quota.md`](docs/subsystems/daily-quota.md).
 
+## Training-data capture (hosted-only, off by default)
+
+`recordTurn` optionally marks each turn for a training corpus (a thin
+`training_pairs` consent row) when `SL_CAPTURE_TRAINING` is on — **sheetllm.com
+ONLY**, **off by default**, so self-hosted/local installs never capture.
+`orchestrator_turns` is the source of truth; `pnpm export-training-pairs` emits an
+anonymized JSONL. ⚠️ Exported data must not feed any training run until a ToS/legal
+review clears it. Architecture, anonymization policy, retention, and the export
+runbook are in [`docs/subsystems/training-capture.md`](docs/subsystems/training-capture.md).
+
 ### Code Intelligence
 
 Prefer LSP over Grep/Read for code navigation — it's faster, precise, and avoids reading entire files:
