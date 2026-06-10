@@ -4,7 +4,7 @@ subsystem: providers-llm
 audience: [contributor, ai-agent]
 status: current
 last_verified: 2026-06-10
-verified_against: 8c99094
+verified_against: ccacc19
 source_paths:
   - src/lib/providers/types.ts
   - src/lib/providers/registry.ts

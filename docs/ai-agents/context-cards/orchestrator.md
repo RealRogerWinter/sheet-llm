@@ -4,7 +4,7 @@ subsystem: orchestrator
 audience: [ai-agent, contributor]
 status: current
 last_verified: 2026-06-10
-verified_against: 8c99094
+verified_against: ccacc19
 source_paths:
   - src/lib/orchestrator/index.ts
   - src/lib/orchestrator/toolDispatch.ts
