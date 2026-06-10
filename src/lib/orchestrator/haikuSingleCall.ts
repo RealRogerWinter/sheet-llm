@@ -31,8 +31,10 @@
  * A non-Anthropic resolved provider throws `MultiToolUnsupportedError`; the
  * call site in `index.ts` logs it and falls back to the 2-call dispatch path.
  *
- * Gated by `isHaikuSingleCallEnabled()` (default OFF) AND `getGenerationTier()
- * === 'free'` at the call site. The result flows through the SAME
+ * Gated by `isHaikuSingleCallEnabled()` (default OFF) AND the per-request free
+ * tier (`effectiveTierPolicy(input).useBoundedFallback`) at the call site. Only
+ * the 4 structural edit tools are exposed — `render_score` (regenerate_all) is
+ * Pro-only and stays on the 2-call path. The result flows through the SAME
  * `finalizeDispatchResult` seam the 2-call path uses, so the measure-hash
  * preservation check and replacement-as-confirmation gate apply unchanged.
  */
