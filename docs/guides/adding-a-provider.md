@@ -3,8 +3,8 @@ title: Adding an LLM Provider
 subsystem: providers-llm
 audience: [contributor, ai-agent]
 status: current
-last_verified: 2026-06-03
-verified_against: c078040
+last_verified: 2026-06-10
+verified_against: ccacc19
 source_paths:
   - src/lib/providers/types.ts
   - src/lib/providers/registry.ts
@@ -18,6 +18,7 @@ source_paths:
   - src/lib/providers/ollama.ts
   - src/lib/providers/anthropic.ts
   - src/lib/orchestrator/keyStatus.ts
+  - src/lib/providers/modelClass.ts
   - src/lib/orchestrator/handlers/editIntraMeasure.ts
 related:
   - providers-llm
@@ -275,16 +276,24 @@ Once registered, no handler edits are needed — routing is env-driven. The
 canonical consumer is the intra-measure edit handler:
 
 ```ts
-// src/lib/orchestrator/handlers/editIntraMeasure.ts:1174
-const selected = selectProvider('medium', input.chatId)
+// src/lib/orchestrator/handlers/editIntraMeasure.ts:1175
+const selected = selectProvider(
+  resolveModelClass({ callType: 'edit', complexity: input.classification.complexity }),
+  input.chatId,
+)
 // ...
-// :1192
 toolResult = await callWithFailover(
   { ...selected, chatId: input.chatId },
   { name, description, inputSchema, inputSchemaJson },
   { systemPrompt, userText, toolChoice: 'required', maxTokens, temperature: 0 },
 )
 ```
+
+`resolveModelClass` (SHE-19, `src/lib/providers/modelClass.ts`) defaults to
+`small` (Haiku) and escalates to `medium` (Sonnet) when
+`complexity === 'complex'`. Hardcoding a tier string like `'medium'` is the
+legacy pattern — new handlers should route through `resolveModelClass` so the
+tier follows the complexity signal rather than being fixed.
 
 `selectProvider(tier, chatId)` (`src/lib/providers/select.ts:76`) resolves
 `sticky ?? PROVIDER_<TIER> ?? 'anthropic'`, applies the degradation override and

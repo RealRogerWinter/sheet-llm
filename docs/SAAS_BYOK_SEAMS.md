@@ -3,8 +3,8 @@ title: SaaS / BYOK Seams & the OSS↔SaaS Layering Invariant
 subsystem: cross-cutting
 audience: [contributor, ai-agent]
 status: current
-last_verified: 2026-06-09
-verified_against: 881aa3b
+last_verified: 2026-06-10
+verified_against: ccacc19
 source_paths:
   - src/lib/env/flag.ts
   - src/lib/orchestrator/flags.ts

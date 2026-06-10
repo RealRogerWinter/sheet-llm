@@ -2,62 +2,45 @@
 import { describe, expect, it } from 'vitest'
 import { resolveModelClass, type ModelCallType } from '@/lib/providers/modelClass'
 
-// PR-8 — the Advanced Composer (Opus) routing seam. `large` is returned ONLY
-// for a heavy compositional call with the resolved Advanced toggle on; every
-// other combination stays on `medium` (Sonnet). This is the single choke point
-// the credit hold sizing (billing/valueTier.ts) is kept in sync with.
-
+// SHE-19 — the seam now DEFAULTS to the cheapest tier (Haiku/small) and escalates:
+//   advanced + heavy compositional  -> large (Opus)
+//   complexity === 'complex'        -> medium (Sonnet)
+//   otherwise                       -> small (Haiku)  [the new default]
 const HEAVY: ModelCallType[] = ['whole_score', 'extend']
-const NON_HEAVY: ModelCallType[] = [
-  'section',
-  'edit',
-  'plan',
-  'dispatch',
-  'classify',
-  'converse',
-  'bounded',
-]
+const NON_HEAVY: ModelCallType[] = ['section', 'edit', 'plan', 'dispatch', 'classify', 'converse', 'bounded']
+const ALL: ModelCallType[] = [...HEAVY, ...NON_HEAVY]
 
 describe('resolveModelClass', () => {
-  it('routes heavy compositional calls to Opus (large) when Advanced is on', () => {
+  it('defaults every call type to small (Haiku) when complexity is absent / simple', () => {
+    for (const callType of ALL) {
+      expect(resolveModelClass({ callType })).toBe('small')
+      expect(resolveModelClass({ callType, complexity: 'simple' })).toBe('small')
+    }
+  })
+
+  it('escalates to medium (Sonnet) when complexity is complex (no advanced toggle)', () => {
+    for (const callType of ALL) {
+      expect(resolveModelClass({ callType, complexity: 'complex' })).toBe('medium')
+    }
+  })
+
+  it('routes heavy compositional calls to Opus (large) only with Advanced on', () => {
     for (const callType of HEAVY) {
       expect(resolveModelClass({ advancedComposer: true, callType })).toBe('large')
+      expect(resolveModelClass({ advancedComposer: true, callType, complexity: 'complex' })).toBe('large')
     }
   })
 
-  it('keeps heavy calls on Sonnet (medium) when Advanced is OFF / absent', () => {
-    for (const callType of HEAVY) {
-      expect(resolveModelClass({ advancedComposer: false, callType })).toBe('medium')
-      expect(resolveModelClass({ callType })).toBe('medium')
-    }
-  })
-
-  it('NEVER routes a non-heavy call to Opus, even with Advanced on', () => {
-    // Selective routing: classify/plan/dispatch/converse/edit, the bounded free
-    // handler, AND the sectional seed/extend loop stay on Sonnet regardless.
+  it('never routes a NON-heavy call to Opus, even with Advanced on', () => {
     for (const callType of NON_HEAVY) {
-      expect(resolveModelClass({ advancedComposer: true, callType })).toBe('medium')
+      expect(resolveModelClass({ advancedComposer: true, callType })).toBe('small')
+      expect(resolveModelClass({ advancedComposer: true, callType, complexity: 'complex' })).toBe('medium')
     }
   })
 
-  it('only an explicit boolean true engages Opus (no truthy coercion surprises)', () => {
-    // The route resolves advancedComposer to a real boolean; guard against a
-    // future caller passing a truthy non-boolean and silently unlocking Opus.
-    expect(
-      resolveModelClass({
-        advancedComposer: undefined,
-        callType: 'whole_score',
-      }),
-    ).toBe('medium')
+  it('only an explicit boolean true engages Opus (no truthy coercion)', () => {
+    expect(resolveModelClass({ advancedComposer: undefined, callType: 'whole_score' })).toBe('small')
     // @ts-expect-error — a non-boolean must not be accepted as "on".
-    expect(resolveModelClass({ advancedComposer: 1, callType: 'whole_score' })).toBe('medium')
-  })
-
-  it('never returns small (the classifier/planner pick that explicitly)', () => {
-    const all: ModelCallType[] = [...HEAVY, ...NON_HEAVY]
-    for (const callType of all) {
-      expect(resolveModelClass({ advancedComposer: true, callType })).not.toBe('small')
-      expect(resolveModelClass({ advancedComposer: false, callType })).not.toBe('small')
-    }
+    expect(resolveModelClass({ advancedComposer: 1, callType: 'whole_score' })).toBe('small')
   })
 })

@@ -14,6 +14,7 @@ import { validateScore } from '@/lib/music/validateScore'
 import { ValidationError } from '@/lib/music/errors'
 import type { Classification, OrchestratorResult } from '../types'
 import { selectProvider } from '@/lib/providers/select'
+import { resolveModelClass } from '@/lib/providers/modelClass'
 import { callWithFailover } from '@/lib/providers/callWithFailover'
 import { ProviderSchemaError } from '@/lib/providers/types'
 import type { ProviderToolResult } from '@/lib/providers/types'
@@ -1157,9 +1158,9 @@ function buildUserText(
 }
 
 /**
- * Author + apply precise intra-measure edits via the medium-tier
- * provider with a per-call tool schema bounded to the live score's
- * measure count. Stateless single-shot — score is passed inline.
+ * Author + apply precise intra-measure edits via the seam-driven tier
+ * (SHE-19: Haiku for simple edits, Sonnet for complex). Stateless
+ * single-shot — score is passed inline.
  */
 export async function runEditIntraMeasure(
   input: RunEditIntraMeasureInput,
@@ -1171,7 +1172,7 @@ export async function runEditIntraMeasure(
     )
   }
 
-  const selected = selectProvider('medium', input.chatId)
+  const selected = selectProvider(resolveModelClass({ callType: 'edit', complexity: input.classification.complexity }), input.chatId)
 
   // Validation-retry loop (M3.5-PR-5b): re-prompt once on ValidationError
   // with the failure message threaded into the user text. Only retries

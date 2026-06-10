@@ -1,5 +1,6 @@
 import type { ChatMessage } from '@/lib/llm/wrapper'
 import { selectProvider } from '@/lib/providers/select'
+import { resolveModelClass } from '@/lib/providers/modelClass'
 import { fromAnthropicMessagesLenient } from '@/lib/providers/anthropicConversation'
 import { renderScoreTool } from '@/lib/llm/renderScoreTool'
 import { SYSTEM_PROMPT } from '@/lib/llm/systemPrompt'
@@ -40,7 +41,11 @@ export async function runGenerateSimple(
 ): Promise<OrchestratorResult> {
   const t0 = Date.now()
 
-  const selected = selectProvider('medium', input.chatId)
+  // SHE-19: fresh generation defaults to Haiku; complexity escalates to Sonnet.
+  const selected = selectProvider(
+    resolveModelClass({ callType: 'whole_score', complexity: input.classification.complexity }),
+    input.chatId,
+  )
   const effectiveModel = input.modelOverride ?? selected.model
 
   const history = fromAnthropicMessagesLenient(input.history)

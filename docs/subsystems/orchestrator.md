@@ -3,14 +3,15 @@ title: LLM Orchestrator
 subsystem: orchestrator
 audience: [contributor, ai-agent]
 status: current
-last_verified: 2026-06-03
-verified_against: 150cb15
+last_verified: 2026-06-10
+verified_against: ccacc19
 source_paths:
   - src/lib/orchestrator/index.ts
   - src/lib/orchestrator/toolDispatch.ts
   - src/lib/orchestrator/handlers/converse.ts
   - src/lib/orchestrator/classifier.ts
   - src/lib/orchestrator/flags.ts
+  - src/lib/orchestrator/generationTier.ts
   - src/lib/orchestrator/types.ts
   - src/lib/orchestrator/replacementDetect.ts
   - src/lib/orchestrator/preservationVerifier.ts
@@ -20,6 +21,7 @@ source_paths:
   - src/lib/orchestrator/scoreVersion.ts
   - src/lib/orchestrator/keyStatus.ts
   - src/lib/orchestrator/copyright/filter.ts
+  - src/lib/providers/modelClass.ts
   - src/lib/music/scoreDiff.ts
   - src/app/api/chat/route.ts
 related:
@@ -69,11 +71,11 @@ synchronous score result.
 | Path | Role |
 | --- | --- |
 | `src/lib/orchestrator/index.ts` | `run()`: deadline guards, copyright short-circuit, new-vs-legacy path selection, `dispatch()` (legacy switch), `runDispatchedHandler()` (new path), the `maybeApplyReplacementGate` + `maybeAttachGhostProposal` hooks, and every `recordTurn()` call. |
-| `src/lib/orchestrator/toolDispatch.ts` | The 6-tool dispatcher (5 edit/structural tools + read-only `answer_question`). One `dispatch_to_handler` tool with a **flat** top-level schema (a `tool` enum + all per-tool fields hoisted to the top level), `toolChoice:'required'`, temp 0, `maxTokens:300`, ephemeral cache, `medium` tier. `repairBranchArgs` fills safe defaults for an empty branch; per-tool zod re-validation via `validateBranchArgs`; on a validation failure `run()` reroutes to `edit_intra_measure` (conf 0.6) rather than throwing. Optional `targetRegion` (D5) injects a structured selected-range hint. `DispatchToolName`, `DispatchToolNames`, `ToolDispatchError`, `STRING_CAP`=2000. |
+| `src/lib/orchestrator/toolDispatch.ts` | The 6-tool dispatcher (5 edit/structural tools + read-only `answer_question`). One `dispatch_to_handler` tool with a **flat** top-level schema (a `tool` enum + all per-tool fields hoisted to the top level), `toolChoice:'required'`, temp 0, `maxTokens:300`, ephemeral cache, `small` tier (Haiku — `resolveModelClass({callType:'dispatch'})` defaults to `small`). `repairBranchArgs` fills safe defaults for an empty branch; per-tool zod re-validation via `validateBranchArgs`; on a validation failure `run()` reroutes to `edit_intra_measure` (conf 0.6) rather than throwing. Optional `targetRegion` (D5) injects a structured selected-range hint. `DispatchToolName`, `DispatchToolNames`, `ToolDispatchError`, `STRING_CAP`=2000. |
 | `src/lib/orchestrator/classifier.ts` | Legacy Haiku classifier (`classify()`, `ClassifierSchemaError`, `_resetClassifierClient()`). |
 | `src/lib/orchestrator/classifierPrompt.ts` | `CLASSIFIER_SYSTEM_PROMPT`, `classifyTool`, `CLASSIFY_TOOL_NAME`. |
 | `src/lib/orchestrator/flags.ts` | All env-flag accessors, read fresh every call (no caching). `getOrchestratorMode`, `isOrchestratorEnabled`, `isNewToolDispatchEnabled`, `isReplacementGateEnabled`, `isGhostPreviewEnabled`, `isSectionalGenEnabled`, `isBoundedGenEnabled` (M26), `isStreamAbortEnabled` (M26 PR-2, default-off), `isComposePatchDispatchEnabled` (deprecated). |
-| `src/lib/orchestrator/generationTier.ts` | M26 product/paywall tier (`GenerationTier = 'free' | 'pro'`), ORTHOGONAL to the provider model-size `Tier`. `policyFor` → `GenerationPolicy` (`maxOutputTokens`/`maxBars`/`allowSectional`/`allowWholeScore`); `resolveGenerationTier` (force-free kill > dev-only client override > `SL_GENERATION_TIER` default > per-user entitlement); `BOUNDED_EMIT_CEILING`=2600, `BOUNDED_MAX_BARS`=4. Both tiers stay on medium (Sonnet 4.6). |
+| `src/lib/orchestrator/generationTier.ts` | M26 product/paywall tier (`GenerationTier = 'free' | 'pro'`), ORTHOGONAL to the provider model-size `Tier`. Gates SCOPE and per-request ceilings, NOT model quality. `policyFor` → `GenerationPolicy` (`maxOutputTokens`/`maxBars`/`allowSectional`/`allowWholeScore`); `resolveGenerationTier` (force-free kill > dev-only client override > `SL_GENERATION_TIER` default > per-user entitlement); `BOUNDED_EMIT_CEILING`=2600, `BOUNDED_MAX_BARS`=4. The MODEL is chosen independently by `resolveModelClass` (`providers/modelClass.ts`): defaults to `small` (Haiku), escalates to `medium` (Sonnet) on `complexity:'complex'`, to `large` (Opus) only for heavy compositional calls with the Advanced Composer entitlement. |
 | `src/lib/orchestrator/replacementDetect.ts` | Pure `detectReplacement()` gate decision + `REWRITE_KEYWORDS`, `ReplacementDecision`, `DetectReplacementInput`, `DispatchToolName`. |
 | `src/lib/orchestrator/preservationVerifier.ts` | `verifyPreservation` / `verifyAllOriginalsPreserved` — re-hash retained measures via `hashMeasure`. |
 | `src/lib/orchestrator/observability.ts` | `logTurn` / `recordTurn` / `logShadowDivergence`; `ERROR_MAX_LEN`=500, `RECOVERY_ERROR_MAX_LEN`=200. Inserts `orchestrator_turns` rows. |

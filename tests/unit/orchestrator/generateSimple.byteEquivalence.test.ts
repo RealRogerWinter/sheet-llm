@@ -33,7 +33,7 @@ describe('runGenerateSimple — byte-equivalence with the legacy realClient requ
     vi.stubEnv('PROVIDER_MEDIUM', 'anthropic') // default-tier provider for generate_simple
   })
 
-  it('sends the SAME Anthropic request the legacy path sent (default Sonnet)', async () => {
+  it('sends the correct Anthropic request with Haiku for simple complexity (SHE-19)', async () => {
     const chatId = `chat-${'be-1'}`
     clearStickyForChat(chatId)
 
@@ -56,9 +56,10 @@ describe('runGenerateSimple — byte-equivalence with the legacy realClient requ
       }),
     ).rejects.toBeTruthy()
 
-    // The exact request the legacy realClient (src/lib/llm/client.ts) produced.
+    // SHE-19: simple complexity → small tier (Haiku). Only the model id changed from the
+    // legacy Sonnet path; system prompt / tool / cache_control are byte-identical.
     const legacyEquivalent = {
-      model: 'claude-sonnet-4-6',
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 8_000,
       system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
       tools: [

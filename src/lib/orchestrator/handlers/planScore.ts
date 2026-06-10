@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { selectProvider } from '@/lib/providers/select'
+import { resolveModelClass } from '@/lib/providers/modelClass'
 import { callWithFailover } from '@/lib/providers/callWithFailover'
 import { ProviderSchemaError } from '@/lib/providers/types'
 
@@ -265,10 +266,10 @@ export function totalPlannedBars(plan: ScorePlan): number {
  * Run the planner LLM call. Resilient: on any provider/parse failure it
  * returns a deterministic `fallbackPlan` (model='fallback') rather than
  * throwing, so the generation pipeline never dead-ends at the planning
- * stage. Tier: 'medium' (the plan is cheap — small bounded output).
+ * stage. Tier: seam-driven (SHE-19: defaults to Haiku; plan has no complexity → small).
  */
 export async function runPlanScore(input: RunPlanScoreInput): Promise<PlanScoreResult> {
-  const selected = selectProvider('medium', input.chatId)
+  const selected = selectProvider(resolveModelClass({ callType: 'plan' }), input.chatId)
   try {
     const result = await callWithFailover<z.infer<typeof ScorePlanSchema>>(
       { ...selected, chatId: input.chatId },

@@ -6,6 +6,7 @@ import { validateScore } from '@/lib/music/validateScore'
 import { ValidationError } from '@/lib/music/errors'
 import type { Classification, OrchestratorResult } from '../types'
 import { selectProvider } from '@/lib/providers/select'
+import { resolveModelClass } from '@/lib/providers/modelClass'
 import { callWithFailover } from '@/lib/providers/callWithFailover'
 import { ProviderSchemaError, type ProviderToolResult } from '@/lib/providers/types'
 
@@ -120,7 +121,11 @@ export async function runInsertMeasures(
     throw new InsertMeasuresError(`count must be in [1..64] (got ${input.count})`)
   }
 
-  const selected = selectProvider('medium', input.chatId)
+  // SHE-19: edit handlers default to Haiku; complexity escalates to Sonnet.
+  const selected = selectProvider(
+    resolveModelClass({ callType: 'edit', complexity: input.classification.complexity }),
+    input.chatId,
+  )
 
   // Validation-retry loop (M3.5-PR-5b): re-prompt once on ValidationError
   // with the failure message threaded back into the user text. Only

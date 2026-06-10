@@ -331,6 +331,14 @@ interface RawDispatchOutput {
  * validates against the per-tool zod schemas.
  */
 async function callDispatch(input: ToolDispatchInput): Promise<RawDispatchOutput> {
+  // SHE-19: the dispatcher deliberately stays on the `medium` (Sonnet) tier
+  // rather than defaulting to Haiku like the rest of the orchestrator. Its
+  // system + tool prefix is ~3.2k tokens (verified via count_tokens) — that
+  // CACHES on Sonnet (4.6 min cacheable prefix = 2048) but falls BELOW Haiku
+  // 4.5's 4096-token cache floor, so on Haiku the dispatcher would run UNcached.
+  // Since this call fires on every edit turn, a Sonnet cached-read (~$0.30/M)
+  // beats a Haiku uncached read ($1/M) ~3x. PR2's single-call collapse removes
+  // this dispatch call on the free tier, superseding the trade-off.
   const selected = selectProvider('medium', input.chatId)
   // We need tool_choice='auto', not 'required' for a specific tool, so
   // we can't use callWithFailover<T>(tool, ...) directly — it assumes

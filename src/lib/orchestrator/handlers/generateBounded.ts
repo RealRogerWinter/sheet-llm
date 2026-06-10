@@ -1,6 +1,7 @@
 import { recordUsage, exceedsBudget } from '../budget'
 import type { Classification, OrchestratorResult } from '../types'
 import { selectProvider } from '@/lib/providers/select'
+import { resolveModelClass } from '@/lib/providers/modelClass'
 import {
   BOUNDED_GENERATION_RULES,
   MULTI_STAFF_REFERENCE,
@@ -70,8 +71,11 @@ export async function runGenerateBounded(
     throw new GenerateBoundedError('session_budget_exceeded')
   }
 
-  // No Opus (user directive + cost): both tiers stay on the medium tier (Sonnet).
-  const selected = selectProvider('medium', input.chatId)
+  // SHE-19: free-tier bounded generation defaults to Haiku (was Sonnet).
+  const selected = selectProvider(
+    resolveModelClass({ callType: 'bounded', complexity: input.classification.complexity }),
+    input.chatId,
+  )
   const result = await callWithScoreRetry(
     { ...selected, chatId: input.chatId },
     {

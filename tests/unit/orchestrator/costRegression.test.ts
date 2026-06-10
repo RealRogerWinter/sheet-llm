@@ -56,7 +56,7 @@ describe('cost regression — model id per orchestrator path', () => {
     expect(model).not.toMatch(/opus/i)
   })
 
-  it('editIntraMeasure uses ONLY Sonnet, never Opus', async () => {
+  it('editIntraMeasure uses Haiku for simple complexity, never Opus (SHE-19)', async () => {
     anthropicCreateMock.mockResolvedValue({
       content: [
         {
@@ -82,8 +82,10 @@ describe('cost regression — model id per orchestrator path', () => {
       editedScore: VALID_SCORE,
     })
     const model = anthropicCreateMock.mock.calls[0][0].model as string
-    expect(model).toMatch(/sonnet/i)
+    // SHE-19: simple complexity → small tier (Haiku)
+    expect(model).toMatch(/haiku/i)
     expect(model).not.toMatch(/opus/i)
+    expect(model).not.toMatch(/sonnet/i)
   })
 
   it('generateComplex uses ONLY Sonnet, never Opus or Haiku (no-Opus directive)', async () => {

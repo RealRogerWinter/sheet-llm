@@ -3,8 +3,8 @@ title: Environment Flags & Config Reference
 subsystem: cross-cutting
 audience: [contributor, ai-agent]
 status: current
-last_verified: 2026-06-09
-verified_against: 77d336d
+last_verified: 2026-06-10
+verified_against: ccacc19
 source_paths:
   - src/lib/orchestrator/flags.ts
   - src/lib/orchestrator/generationTier.ts
@@ -257,7 +257,7 @@ per request (the janitor interval is read at boot). Full design:
 | `SL_PAID_GENERATION` | unset (**off**) | bool (`1`/`true`) | Master switch for the credit paywall. Off → `/api/chat` never holds or debits; the wallet engine is inert. On → an authenticated **Pro** request places a worst-case hold pre-dispatch (fail-CLOSED) and settles to the cost-plus charge. `account.ts:isPaidGenerationEnabled` |
 | `SL_MAX_GEN_HOLD_CREDITS` | `1500` | positive int | Cap (credits; 1cr = 1¢) on the pre-dispatch hold = the most a single sectional generation can spend before the pump aborts at budget. `valueTier.ts:maxGenerationHoldCredits` |
 | `SL_FREE_PIECE_BUDGET_CREDITS` | `250` | positive int | Per-run cost ceiling for the one-time free full piece (it has no hold, so this bounds its spend). `valueTier.ts:freePieceBudgetCredits` |
-| `SL_ADVANCED_COMPOSER` | unset (off) | bool (`1`/`true`) | Enables the **Advanced Composer** (Opus) Pro toggle — a paid Pro turn may route its heavy compositional call to Opus (self-funding via the higher metered cost; no premium markup). Honored only for a paid Pro generation (never free / free-piece). `generationTier.ts:isAdvancedComposerEnabled` |
+| `SL_ADVANCED_COMPOSER` | unset (off) | bool (`1`/`true`) | Enables the **Advanced Composer** (Opus) Pro toggle — a paid Pro turn may route its heavy compositional call to Opus via `resolveModelClass` (self-funding via the higher metered cost; no premium markup). Honored only for a paid Pro generation (never free / free-piece). Off → the toggle is ignored and `resolveModelClass` never reaches the `large` tier. `generationTier.ts:isAdvancedComposerEnabled` |
 
 ### Stripe (money-in)
 
