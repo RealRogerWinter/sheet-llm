@@ -65,7 +65,7 @@ describe('orchestrator/handlers/editIntraMeasure', () => {
     vi.stubEnv('ORCHESTRATOR_LOG_SILENT', '1')
   })
 
-  it('calls Sonnet with a score-grounded edit_score tool', async () => {
+  it('calls Haiku with a score-grounded edit_score tool (simple complexity)', async () => {
     anthropicCreateMock.mockResolvedValue(
       intraMeasureResponse([{ kind: 'setAccidental', target: { measureIdx: 0, eventIdx: 0 }, accidental: 'sharp' }]),
     )
@@ -80,7 +80,7 @@ describe('orchestrator/handlers/editIntraMeasure', () => {
       editedScore: BASE_SCORE,
     })
     const call = anthropicCreateMock.mock.calls[0][0]
-    expect(call.model).toMatch(/sonnet/i)
+    expect(call.model).toMatch(/haiku/i)
     expect(call.tool_choice).toMatchObject({ type: 'tool', name: 'edit_score' })
     // Schema is per-request — should expose maxMeasureIdx based on BASE_SCORE
     expect(call.tools[0].name).toBe('edit_score')
@@ -223,7 +223,8 @@ describe('orchestrator/handlers/editIntraMeasure', () => {
       },
     })
     expect(result.score.measures[0].events[0].duration).toBe('half')
-    expect(result.model).toMatch(/sonnet/i)
+    // SHE-19: simple complexity → Haiku (was Sonnet)
+    expect(result.model).toMatch(/haiku/i)
   })
 
   it('throws when editedScore is missing', async () => {
@@ -301,7 +302,7 @@ describe('orchestrator/handlers/editIntraMeasure', () => {
     expect(userText).toContain('"key":"C"')
   })
 
-  it('pins the Sonnet model id with date suffix', async () => {
+  it('pins the Haiku model id with date suffix (SHE-19: simple complexity → small tier)', async () => {
     anthropicCreateMock.mockResolvedValue(
       intraMeasureResponse([{ kind: 'setAccidental', target: { measureIdx: 0, eventIdx: 0 }, accidental: 'sharp' }]),
     )
@@ -316,7 +317,7 @@ describe('orchestrator/handlers/editIntraMeasure', () => {
       editedScore: BASE_SCORE,
     })
     const call = anthropicCreateMock.mock.calls[0][0]
-    expect(call.model).toBe('claude-sonnet-4-6')
+    expect(call.model).toBe('claude-haiku-4-5-20251001')
   })
 
   it('per-call edit_score schema exposes the new per-note marking op fields', async () => {

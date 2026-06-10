@@ -1,6 +1,7 @@
 import type { Score } from '@/lib/music/types'
 import type { ChatMessage } from '@/lib/llm/wrapper'
 import { selectProvider } from '@/lib/providers/select'
+import { resolveModelClass } from '@/lib/providers/modelClass'
 import type { TextStreamEvent } from '@/lib/providers/types'
 import type { Classification, OrchestratorConverseStream } from '../types'
 import { isStreamAbortEnabled } from '../flags'
@@ -65,12 +66,11 @@ function buildUserText(userText: string, score: Score): string {
  * the route owns lifecycle so it can persist accumulated text on stop /
  * error / client-abort.
  *
- * Tier: 'medium' (Sonnet 4.6) — matches edit_intra_measure. Music
- * theory answers benefit from Sonnet over Haiku without needing Opus.
+ * Tier: seam-driven (SHE-19); defaults to Haiku, escalates to Sonnet for complex queries.
  */
 export function runConverse(input: RunConverseInput): OrchestratorConverseStream {
   const t0 = Date.now()
-  const selected = selectProvider('medium', input.chatId)
+  const selected = selectProvider(resolveModelClass({ callType: 'converse', complexity: input.classification.complexity }), input.chatId)
 
   if (!selected.provider.textStream) {
     throw new Error(

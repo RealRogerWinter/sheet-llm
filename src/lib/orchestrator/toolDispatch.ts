@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { Score, Event } from '@/lib/music/types'
 import type { ChatMessage } from '@/lib/llm/wrapper'
 import { selectProvider } from '@/lib/providers/select'
+import { resolveModelClass } from '@/lib/providers/modelClass'
 import { callWithFailover } from '@/lib/providers/callWithFailover'
 import { ProviderSchemaError } from '@/lib/providers/types'
 
@@ -331,7 +332,8 @@ interface RawDispatchOutput {
  * validates against the per-tool zod schemas.
  */
 async function callDispatch(input: ToolDispatchInput): Promise<RawDispatchOutput> {
-  const selected = selectProvider('medium', input.chatId)
+  // SHE-19: dispatch has no classification complexity → defaults to small (Haiku).
+  const selected = selectProvider(resolveModelClass({ callType: 'dispatch' }), input.chatId)
   // We need tool_choice='auto', not 'required' for a specific tool, so
   // we can't use callWithFailover<T>(tool, ...) directly — it assumes
   // a single named tool. We'll wire this via the AnthropicProvider

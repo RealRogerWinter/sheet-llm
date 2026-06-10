@@ -6,6 +6,7 @@ import type {
   ScoreStreamEvent,
 } from '../types'
 import { selectProvider } from '@/lib/providers/select'
+import { resolveModelClass } from '@/lib/providers/modelClass'
 import type { SystemBlock } from '@/lib/providers/types'
 import { OutputTruncatedError } from '@/lib/providers/types'
 import { MULTI_STAFF_REFERENCE } from '@/lib/llm/systemPrompt'
@@ -174,11 +175,10 @@ export async function* sectionalEvents(
     `plan: ${plan.grandStaff ? 'grand-staff ' : ''}${plan.key} ${plan.meter}, ${queue.reduce((n, w) => n + w.bars, 0)} bars in ${queue.length} chunk(s)`,
   )
 
-  // Generate every section on the medium tier (Sonnet): bounded sections
-  // don't need Opus, it's ~2x faster (the Opus seed was taking minutes and
-  // its verbosity overflowed the token budget), and it matches the extend
-  // path so the whole piece is one consistent voice.
-  const selected = selectProvider('medium', input.chatId)
+  // SHE-19: the seam now drives the tier (Haiku for simple, Sonnet for complex sections).
+  // Bounded sections don't need Opus; this matches the extend path so the whole
+  // piece is one consistent voice.
+  const selected = selectProvider(resolveModelClass({ callType: 'section', complexity: input.classification.complexity }), input.chatId)
   const seedModel = input.modelOverride ?? selected.model
 
   let score: Score | undefined
@@ -317,7 +317,8 @@ export function runGenerateSectionalStream(
 ): OrchestratorScoreStream {
   const t0 = Date.now()
   // Best-effort header model (the real per-section model rides on `done`).
-  const headerModel = input.modelOverride ?? selectProvider('medium', input.chatId).model
+  // SHE-19: seam-driven tier (Haiku for simple, Sonnet for complex sections).
+  const headerModel = input.modelOverride ?? selectProvider(resolveModelClass({ callType: 'section', complexity: input.classification.complexity }), input.chatId).model
   return {
     outcomeKind: 'score_stream',
     classification: input.classification,

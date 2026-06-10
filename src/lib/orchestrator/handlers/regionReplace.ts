@@ -7,6 +7,7 @@ import { ValidationError } from '@/lib/music/errors'
 import { detectSeveredSpans } from '@/lib/music/structuralOps'
 import type { Classification, OrchestratorResult } from '../types'
 import { selectProvider } from '@/lib/providers/select'
+import { resolveModelClass } from '@/lib/providers/modelClass'
 import { callWithFailover } from '@/lib/providers/callWithFailover'
 import { ProviderSchemaError, type ProviderToolResult } from '@/lib/providers/types'
 import { STAFF_MEASURE_PROPERTIES } from '@/lib/llm/renderScoreTool'
@@ -283,7 +284,11 @@ export async function runRegionReplace(
     input.endMeasureIdx,
   )
 
-  const selected = selectProvider('medium', input.chatId)
+  // SHE-19: edit handlers default to Haiku; complexity escalates to Sonnet.
+  const selected = selectProvider(
+    resolveModelClass({ callType: 'edit', complexity: input.classification.complexity }),
+    input.chatId,
+  )
 
   // Validation-retry loop (M3.5-PR-5b): re-prompt once on ValidationError
   // with the failure message threaded into the user text.
