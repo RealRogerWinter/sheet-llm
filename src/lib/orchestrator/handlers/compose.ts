@@ -47,9 +47,9 @@ export interface RunComposeInput {
  * generateComplex, then composer-specific guidance + copyright + per-
  * measure constraints).
  */
-const COMPOSE_ROLE = `You are the composer for sheet-llm. The user provides an existing musical line and asks you to add counterpoint, harmonization, or voice-leading. Always emit via the render_score tool.`
+export const COMPOSE_ROLE = `You are the composer for sheet-llm. The user provides an existing musical line and asks you to add counterpoint, harmonization, or voice-leading. Always emit via the render_score tool.`
 
-const COMPOSE_GUIDANCE = `GUIDANCE:
+export const COMPOSE_GUIDANCE = `GUIDANCE:
 - When asked for counterpoint, observe consonance / dissonance rules appropriate to the user's stated style (species counterpoint, free counterpoint, etc.). For independent contrapuntal lines, use \`extraVoices\` on the appropriate staff rather than chord stacks.
 - When asked for harmonization, ensure chord changes align with the melody's strong beats. A chordal accompaniment that moves in block harmony belongs as chord stacks; an independent harmonized line belongs as a second voice.
 - When asked for voice-leading, prefer stepwise motion and resolved leading tones.

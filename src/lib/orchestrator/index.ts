@@ -18,10 +18,13 @@ import { runRegionReplace, RegionReplaceError } from './handlers/regionReplace'
 import {
   isBoundedGenEnabled,
   isGhostPreviewEnabled,
+  isHaikuSingleCallEnabled,
   isNewToolDispatchEnabled,
   isReplacementGateEnabled,
   isSectionalGenEnabled,
 } from './flags'
+import { runHaikuSingleCall } from './haikuSingleCall'
+import { getGenerationTier } from './generationTier'
 import {
   detectReplacement,
   type DispatchToolName,
@@ -35,7 +38,11 @@ import {
   type DispatchDecision,
 } from './toolDispatch'
 import { RateLimitedError, UpstreamError } from '@/lib/llm/errors'
-import { OutputTruncatedError, ProviderSchemaError } from '@/lib/providers/types'
+import {
+  MultiToolUnsupportedError,
+  OutputTruncatedError,
+  ProviderSchemaError,
+} from '@/lib/providers/types'
 import { ValidationError } from '@/lib/music/errors'
 import type {
   Classification,
@@ -861,11 +868,56 @@ async function runInner(input: OrchestratorInput): Promise<OrchestratorRunOutcom
     }
   }
 
+  // SHE-19 PR2 — free-tier single-call collapse. When enabled AND the request
+  // is on the `free` product tier AND we have an editedScore, route the whole
+  // edit through ONE Haiku `tool_choice:'auto'` call (pick the action + emit the
+  // final ops) instead of the 2-call dispatcher→handler path. The unified result
+  // flows through the SAME `finalizeDispatchResult` seam the 2-call path uses, so
+  // the measure-hash preservation check and replacement-as-confirmation gate
+  // apply to the single-call output too. Sits BEFORE the dispatcher so it fully
+  // replaces it. Default OFF (hosted free-tier opts in via env); Anthropic-only
+  // (a non-Anthropic provider throws MultiToolUnsupportedError). A malformed
+  // single call MUST NOT drop the turn — on ANY error we log and fall through to
+  // the 2-call dispatch path below.
+  if (input.editedScore && getGenerationTier() === 'free' && isHaikuSingleCallEnabled()) {
+    try {
+      const unified = await runHaikuSingleCall({
+        userText: input.userText,
+        editedScore: input.editedScore,
+        ...(input.chatId !== undefined ? { chatId: input.chatId } : {}),
+        ...(input.modelOverride !== undefined ? { modelOverride: input.modelOverride } : {}),
+        ...(input.apiKeyOverride !== undefined ? { apiKeyOverride: input.apiKeyOverride } : {}),
+      })
+      // Synthesize the minimal DispatchDecision finalize needs (it reads
+      // `tool`/`confidence`/`model` for the turn row; the gate + preservation
+      // verify key off `result.dispatchTool`/`result.preservation`, already set
+      // by runHaikuSingleCall). A prose (converse) reply has no dispatchTool.
+      const syntheticDecision: DispatchDecision = {
+        tool: (unified.dispatchTool ?? 'answer_question') as DispatchDecision['tool'],
+        args: {} as DispatchDecision['args'],
+        confidence: unified.classification.confidence,
+        model: unified.model ?? 'claude-haiku-4-5',
+        toolUseId: unified.toolUseId ?? '',
+        ...(unified.usage ? { usage: unified.usage } : {}),
+      }
+      return await finalizeDispatchResult(unified, input, t0, syntheticDecision)
+    } catch (e) {
+      // Fall through to the 2-call dispatch path — never drop the turn.
+      const errMsg = e instanceof Error ? e.message : String(e)
+      if (process.env.ORCHESTRATOR_LOG_SILENT !== '1') {
+        console.warn(
+          `[haikuSingleCall] single-call collapse failed (${e instanceof MultiToolUnsupportedError ? 'unsupported provider' : 'error'}); falling back to 2-call dispatch: ${errMsg.slice(0, 200)}`,
+        )
+      }
+    }
+  }
+
   // M3.5-PR-3 — native tool-use dispatch path. When enabled (and we
   // have an editedScore to reason about), call the dispatcher LLM
   // first; it picks the right handler with full prompt + score context
   // and emits validated args. Otherwise fall through to the legacy
   // classifier path. PR-6 flips the default on.
+
   if (input.editedScore && isNewToolDispatchEnabled()) {
     let decision: DispatchDecision
     try {

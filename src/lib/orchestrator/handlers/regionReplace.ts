@@ -29,7 +29,7 @@ import { STAFF_MEASURE_PROPERTIES } from '@/lib/llm/renderScoreTool'
  *    structurally, but warn that the user's original tie semantics
  *    were lost.
  */
-function detectAndResolveBoundaryTies(
+export function detectAndResolveBoundaryTies(
   beforeScore: Score,
   startMeasureIdx: number,
   endMeasureIdx: number,
@@ -210,7 +210,7 @@ const MEASURE_JSON = {
   properties: STAFF_MEASURE_PROPERTIES,
 } as const
 
-const REGION_SYSTEM_PROMPT = `You are REPLACING a contiguous run of measures in an existing score with new content. The user has supplied a Score and asks you to rewrite a specific range.
+export const REGION_SYSTEM_PROMPT = `You are REPLACING a contiguous run of measures in an existing score with new content. The user has supplied a Score and asks you to rewrite a specific range.
 
 CRITICAL RULES:
 1. You do NOT emit a new Score. You emit only the REPLACEMENT measures.

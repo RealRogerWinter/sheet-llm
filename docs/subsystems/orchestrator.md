@@ -4,10 +4,11 @@ subsystem: orchestrator
 audience: [contributor, ai-agent]
 status: current
 last_verified: 2026-06-10
-verified_against: ccacc19
+verified_against: ec1a154
 source_paths:
   - src/lib/orchestrator/index.ts
   - src/lib/orchestrator/toolDispatch.ts
+  - src/lib/orchestrator/haikuSingleCall.ts
   - src/lib/orchestrator/handlers/converse.ts
   - src/lib/orchestrator/classifier.ts
   - src/lib/orchestrator/flags.ts
@@ -312,6 +313,7 @@ is the route's job** — once execution is inside `run()`, it always runs.
 | `SL_GHOST_PREVIEW` | **on** | AI ghost preview (M24). `0`/`false` → silent commit, no proposal. `isGhostPreviewEnabled`. |
 | `SL_SECTIONAL_GEN` | **on** | Sectional streaming generation for fresh scores (M25). `0`/`false` → falls back to single-shot `runGenerateComplex`. `isSectionalGenEnabled` (`!readExplicitFalse`). |
 | `SL_BOUNDED_GEN` | **on** | M26 free-tier bounded ≤4-bar single-call generation. `0`/`false` → reverts free users to the legacy/sectional path WITHOUT opening the paywall. `isBoundedGenEnabled` (`!readExplicitFalse`). |
+| `SL_HAIKU_SINGLE_CALL` | off | **SHE-19 PR2** free-tier single-call collapse for EDITS. `1` → an edit on the `free` tier (editedScore present) runs as ONE Haiku `tool_choice:'auto'` call (`haikuSingleCall.ts:runHaikuSingleCall`) that picks the action AND emits the ops, replacing the 2-call dispatcher→handler path; result still flows through `finalizeDispatchResult` (preservation + replacement gate). Off by default, hosted-free-tier-only; Anthropic-only; any throw falls back to the 2-call path. `isHaikuSingleCallEnabled` (`readBool`). |
 | `SL_STREAM_ABORT` | off | M26 PR-2 secondary streaming kill-switch (the `streamGuard` wired into the Anthropic `textStream`). `1` → enforce mid-stream output-token / wall-clock cut-off on converse/text. `isStreamAbortEnabled` (`readBool`). |
 | `SL_GENERATION_TIER` | free | Instance-wide product tier (`generationTier.ts:getGenerationTier`). `free` = paywall closed (bounded gen, whole-score Pro-only); `pro` = opens whole-score/sectional generation for everyone. |
 | `SL_FORCE_FREE_TIER` | unset | Operator kill switch — `1`/`true` forces `free` for the whole instance regardless of any default/entitlement (`isForceFreeTier`). Highest precedence in `resolveGenerationTier`. |
@@ -327,8 +329,9 @@ is the route's job** — once execution is inside `run()`, it always runs.
 
 Note `SL_NEW_TOOL_DISPATCH`, `SL_REPLACEMENT_GATE`, `SL_GHOST_PREVIEW`,
 `SL_SECTIONAL_GEN`, and `SL_BOUNDED_GEN` all use `readExplicitFalse` (default-on;
-only an explicit `0`/`false` flips them), whereas `SL_STREAM_ABORT` and
-`SL_COMPOSE_PATCH_DISPATCH` use `readBool` (default-off). The product-tier flags
+only an explicit `0`/`false` flips them), whereas `SL_STREAM_ABORT`,
+`SL_HAIKU_SINGLE_CALL`, and `SL_COMPOSE_PATCH_DISPATCH` use `readBool`
+(default-off). The product-tier flags
 (`SL_GENERATION_TIER`, `SL_FORCE_FREE_TIER`, `SL_ALLOW_TIER_OVERRIDE`,
 `SL_ENTITLEMENTS_DB`) live in `generationTier.ts`, not `flags.ts`.
 
@@ -349,7 +352,11 @@ only an explicit `0`/`false` flips them), whereas `SL_STREAM_ABORT` and
   fields after the fact, since a flat schema can't conditionally require fields
   per `tool`.) The "pick one of six tools" framing in the README and prompt is a
   documentation abstraction over this single tool. (The code comments still
-  mention `tool_choice='auto'`; the actual call passes `'required'`.)
+  mention `tool_choice='auto'`; the actual call passes `'required'`.) **The ONE
+  genuine `tool_choice:'auto'` multi-tool call is the SHE-19 PR2 free-tier
+  single-call collapse** (`haikuSingleCall.ts`, behind `SL_HAIKU_SINGLE_CALL`,
+  Anthropic-only via `AnthropicProvider.multiToolCall`): it exposes the five
+  real emit-tools and lets a plain-text reply stand in for answer/converse.
 
 - **A bad dispatch tool-pick reroutes, it does not fall through.** If
   `validateBranchArgs` throws (the model picked a structural tool but supplied

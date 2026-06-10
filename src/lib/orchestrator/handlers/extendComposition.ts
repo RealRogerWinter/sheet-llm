@@ -76,7 +76,7 @@ const EmitAppendedBarsSchema = z.object({
     .optional(),
 })
 
-const EXTEND_SYSTEM_PROMPT = `You are EXTENDING an existing musical score by APPENDING new measures to the end. The user has supplied a Score and asks you to add N more bars.
+export const EXTEND_SYSTEM_PROMPT = `You are EXTENDING an existing musical score by APPENDING new measures to the end. The user has supplied a Score and asks you to add N more bars.
 
 CRITICAL RULES:
 1. You do NOT emit a new Score. You emit only the NEW measures.
@@ -176,7 +176,7 @@ function buildExtendPrompt(
  * (clearing event-level tied_to_next, clearing per-pitch flags), (b)
  * any slur spans to add, and (c) warning string(s).
  */
-interface TieBoundaryResult {
+export interface TieBoundaryResult {
   newMeasures: Measure[]
   spansToAdd: Span[]
   warnings: string[]
@@ -200,7 +200,7 @@ function lowestStepOctave(ev: Event): { step: string; octave: number } | null {
   return best ? { step: best.step, octave: best.octave } : null
 }
 
-function handleTieBoundary(score: Score, newMeasures: Measure[]): TieBoundaryResult {
+export function handleTieBoundary(score: Score, newMeasures: Measure[]): TieBoundaryResult {
   const empty: TieBoundaryResult = {
     newMeasures,
     spansToAdd: [],
@@ -306,7 +306,7 @@ function handleTieBoundary(score: Score, newMeasures: Measure[]): TieBoundaryRes
  * event: drop event-level tied_to_next if requested, clear per-pitch
  * tied_to_next on the listed indices. Pure / immutable.
  */
-function applyFinalTieClears(
+export function applyFinalTieClears(
   score: Score,
   clearEventTie: boolean,
   clearPerPitchIndices: number[],
