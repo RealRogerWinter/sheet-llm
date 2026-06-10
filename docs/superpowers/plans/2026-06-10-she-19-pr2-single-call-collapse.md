@@ -153,16 +153,42 @@ Capture: per-case parity (which cases the unified arm passes/fails vs baseline),
 
 ---
 
-# PHASE B — Shippable PR (DETAIL ONLY AFTER GREENLIGHT)
+# PHASE B — Shippable PR (greenlit 2026-06-10; approach = (2) HYBRID)
 
-> Do not execute until Roger approves the A/B results. The A/B may change the design (shape A vs B, scope), so this phase is intentionally a sketch — re-run writing-plans to detail it once the numbers are in.
+**Decision:** proceed with **approach (2)** — single call, but the unified system prompt carries each action's FULL focused emit guidance (not diluted summaries), which is what closes the lone `turnaround-after-PAC` cadence regression. A/B (retry-fair) showed 5/6 parity, ~3.4× faster, ~$2.8/1k saved; (2) adds only a marginal, cached, static-prompt token delta (INTRA already dominates the prefix).
 
-- **B1.** Promote the prototype to `src/lib/orchestrator/haikuSingleCall.ts` (production-named), behind a real read-fresh `SL_*` flag gated to **free tier only** (`getGenerationTier() === 'free'`); pro path + routing code untouched. Promote the provider `multiToolCall` properly (failover/types, or document Anthropic-only constraint).
-- **B2.** Re-insert the 3 hard constraints on the single-call result (preservation verify, replacement gate, per-action validation/retry) + a hard-failure fallback to the existing 2-call path.
-- **B3.** Re-measure caching: `count_tokens` the unified system+tool prefix on `claude-haiku-4-5` — must clear 4096 to cache. Document.
-- **B4.** TDD: mock + live eval coverage for the unified path (add `*.mock.eval.ts` cases; reuse live cases). Update `src/lib/orchestrator/README.md` + any doc whose `source_paths` covers touched files (`pnpm docs:check`).
-- **B5.** Revert all `_spike` artifacts. Review: 1 senior code-review + 1 senior security-review subagent. Typecheck `NODE_OPTIONS=--max-old-space-size=3500 npx tsc --noEmit`.
-- **B6.** Pre-PR: `git diff --stat origin/main..HEAD` + `git merge-base --is-ancestor origin/main HEAD` (rebase if main moved). Open PR; merge with `[skip ci]`.
+## Task B1: Promote `multiToolCall` into the provider layer (properly)
+**Files:** `src/lib/providers/anthropic.ts`, `src/lib/providers/types.ts`, `src/lib/providers/callWithFailover.ts` (as needed); test `src/lib/providers/anthropic.multiToolCall.test.ts`.
+- Move the spike's Anthropic-only `multiToolCall` into a proper provider method: accept `ReadonlyArray<ProviderTool<unknown>>`, send `tool_choice:{type:'auto'}`, return the `{kind:'tool'|'text', ...}` union. Reuse `buildSystemBlocks`/`tuningParams`/usage mapping.
+- Non-Anthropic providers (Groq/Ollama/openaiCompatible) must throw a clear, typed `MultiToolUnsupportedError` (or equivalent) rather than silently misbehaving — document the Anthropic-only constraint. The free-tier collapse is Anthropic-only by design (pro/other providers keep the 2-call path).
+- **TDD:** unit test the tool-vs-text branch + usage extraction with a mocked SDK.
+
+## Task B2: Production `haikuSingleCall.ts` (approach 2 prompt)
+**Files:** Create `src/lib/orchestrator/haikuSingleCall.ts`; `src/lib/orchestrator/flags.ts`.
+- Port `_spikeUnifiedCall.ts` to production. The unified system prompt = dispatcher DECISION RULES + **each action's FULL focused guidance**: import/reuse the real per-handler prompt content (`EXTEND_SYSTEM_PROMPT` incl. its cadence/ending guidance, `REGION_SYSTEM_PROMPT`, `INSERT_SYSTEM_PROMPT`, `INTRA_SYSTEM_PROMPT`, compose guidance) rather than 1-line summaries. Keep the 5-tool `tool_choice:'auto'` shape + text=answer.
+- Per-action zod validation + one-shot validation-retry (already in the spike) + restore the per-handler **warning recovery** the spike dropped (tie-boundary/severed-span/cadence/count-mismatch handling) where it affects graded invariants — at minimum for extend/region (reuse the handlers' helpers).
+- Replace the eval-only `SL_HAIKU_SINGLE_CALL` with the real read-fresh flag `isHaikuSingleCallEnabled()` (house style), and gate it to **free tier only** at the call site (B3).
+
+## Task B3: Wire into the orchestrator with free-tier gate + hard-failure fallback
+**Files:** `src/lib/orchestrator/index.ts`.
+- In the `editedScore`-present edit branch, BEFORE `toolDispatchRun`: `if (getGenerationTier() === 'free' && isHaikuSingleCallEnabled()) { try { return await finalize(runHaikuSingleCall(...)) } catch (e) { /* log + fall through to the 2-call path */ } }`. A malformed single call must NOT drop the turn — it falls back to `toolDispatchRun → runDispatchedHandler`.
+- **Critical:** route the unified result through the SAME post-handler finalize used by the 2-call path (`finalizeDispatchResult` / `maybeApplyReplacementGate` ~L109–142 + preservation verify) so the **measure-hash preservation** + **replacement-as-confirmation gate** apply to the single-call output. Do NOT duplicate those checks — reuse the existing finalize seam.
+
+## Task B4: Confirm approach (2) closes the regression (live)
+- Re-run `pnpm she15:matrix -- --models=haiku-2call,haiku-unified` with the production prompt. **Gate:** `turnaround-after-PAC` now passes (full parity, or document any residual). Record the report.
+
+## Task B5: Caching re-measure
+- `count_tokens` the unified system+tool prefix on `claude-haiku-4-5`; confirm it clears 4096 (cacheable). Note the per-score dynamic `edit_score` schema's effect on cache-hit. Document in the README + a comment.
+
+## Task B6: Tests + docs
+- Mock eval cases (`evals/cases/**/*.mock.eval.ts`) for the unified free-tier path: one per action (dispatch+emit in one call), asserting the right `appliedOps`/preservation/replacement-gate. Unit tests for the flag gate + the hard-failure fallback (unified throws → 2-call path runs).
+- Update `src/lib/orchestrator/README.md` (architecture + flag reference + the free-tier single-call mode) + any doc whose `source_paths` covers touched files; bump `last_verified`/`verified_against`; `pnpm docs:check` clean.
+
+## Task B7: Spike teardown + review + PR
+- Remove all spike artifacts: `scripts/_spike-dispatch-cost.ts`, `src/lib/orchestrator/_spikeUnifiedCall.ts`, the two `she15-eval-matrix.ts` candidate rows + the `needsGroq` tweak, and `evals/results/_spike-*`. Confirm `git status` shows only production changes.
+- Typecheck: `NODE_OPTIONS=--max-old-space-size=3500 npx tsc --noEmit` clean. Run the affected unit + mock-eval suites.
+- Review: **1 senior code-review subagent + 1 senior security-review subagent** (per [[sheet-llm-she8-review-approach]] — NOT the multi-agent skill). Address blocking findings.
+- Pre-PR: `git diff --stat origin/main..HEAD` + `git merge-base --is-ancestor origin/main HEAD` (rebase onto fresh `origin/main` if it moved — see PR1's rebase lesson). Open the PR; squash-merge with `[skip ci]`. Post a merge summary to SHE-19.
 
 ---
 
