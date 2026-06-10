@@ -4,6 +4,7 @@ import { RateLimitedError, UpstreamError, ProviderNotConfiguredError } from '@/l
 import { toAnthropicMessages } from './anthropicConversation'
 import type {
   LLMProvider,
+  MultiToolResult,
   ProviderCallOptions,
   ProviderName,
   ProviderTool,
@@ -247,6 +248,129 @@ export class AnthropicProvider implements LLMProvider {
       introText: textBlock?.text,
       usage,
     }
+  }
+
+  /**
+   * SHE-19 PR2 — Anthropic-only multi-tool call with tool_choice:{type:'auto'}.
+   * Sends ALL given tool defs and lets the model either call ONE of them
+   * (→ {kind:'tool'}, carrying the RAW unvalidated input — the caller owns the
+   * per-tool zod parse) or reply in plain text (→ {kind:'text'}). Under 'auto',
+   * a text reply is the answer_question / converse case. Mirrors `toolCall`'s
+   * system-block building, tuningParams, error mapping, truncation guard, and
+   * usage metering. Caching: the (static) tool list is marked on its LAST entry
+   * so the whole tool prefix is cached once and reused across turns.
+   *
+   * This is the single-call collapse's primitive; it lives on Anthropic alone
+   * (the `LLMProvider.multiToolCall` member is optional) so non-Anthropic
+   * providers structurally cannot be routed into it — the call site guards on
+   * the method's presence and throws `MultiToolUnsupportedError`.
+   */
+  async multiToolCall(
+    tools: ReadonlyArray<ProviderTool<unknown>>,
+    options: ProviderCallOptions,
+  ): Promise<MultiToolResult> {
+    const anthropic = this.getClient(options.apiKeyOverride)
+    // The single-call collapse this primitive serves is Haiku by design, so the
+    // default is the Haiku (`small`) id — NOT the Sonnet default the other
+    // methods use. The caller (runHaikuSingleCall) always passes an explicit
+    // modelOverride; this default only governs a direct, override-less call.
+    const model = options.modelOverride ?? 'claude-haiku-4-5-20251001'
+    const wantsCache = options.providerOptions?.anthropic?.cacheControl !== 'none'
+
+    const systemBlocks = buildSystemBlocks(options.systemPrompt, wantsCache)
+
+    const toolDefs = tools.map((tool, i) => ({
+      name: tool.name,
+      description: tool.description ?? '',
+      input_schema: tool.inputSchemaJson as Anthropic.Tool['input_schema'],
+      ...(tool.strict ? { strict: true } : {}),
+      // Cache the (static) tool list as the prefix's leading block. Mark the
+      // last tool so the cumulative tool prefix is cached once and reused.
+      ...(wantsCache && i === tools.length - 1
+        ? { cache_control: { type: 'ephemeral' as const } }
+        : {}),
+    }))
+
+    const messages = buildMessages(options)
+
+    let response
+    try {
+      const body: Record<string, unknown> = {
+        model,
+        max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
+        system: systemBlocks,
+        tools: toolDefs,
+        tool_choice: { type: 'auto' },
+        messages,
+        ...tuningParams(options, model),
+      }
+      response = await anthropic.messages.create(
+        body as unknown as Anthropic.MessageCreateParamsNonStreaming,
+        options.abortSignal ? { signal: options.abortSignal } : undefined,
+      )
+    } catch (e) {
+      if (e instanceof Anthropic.RateLimitError) {
+        throw new RateLimitedError(e.message)
+      }
+      if (e instanceof Anthropic.APIUserAbortError) {
+        throw new OutputTruncatedError(
+          'multiToolCall: request aborted by the per-request kill-switch',
+          options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : undefined,
+        )
+      }
+      if (e instanceof Anthropic.APIError) {
+        throw new UpstreamError(e.message, e.status ?? 502)
+      }
+      const msg = e instanceof Error ? e.message : 'Unknown Anthropic SDK error'
+      throw new UpstreamError(msg, 502)
+    }
+
+    if (response.stop_reason === 'max_tokens') {
+      const truncUsage = mapAnthropicUsage(response.usage)
+      recordProviderCall(model, truncUsage)
+      const used = truncUsage?.outputTokens
+      throw new OutputTruncatedError(
+        `multiToolCall: output hit the max_tokens ceiling (${options.maxTokens ?? 'default'}) before completing`,
+        {
+          ...(options.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
+          ...(used !== undefined ? { outputTokens: used } : {}),
+        },
+      )
+    }
+
+    const usage = mapAnthropicUsage(response.usage)
+    recordProviderCall(model, usage)
+
+    const toolUse = response.content.find(
+      (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use',
+    )
+    if (toolUse) {
+      return {
+        kind: 'tool',
+        name: toolUse.name,
+        input: toolUse.input,
+        toolUseId: toolUse.id,
+        model,
+        ...(usage ? { usage } : {}),
+      }
+    }
+
+    const text = response.content
+      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+      .map((b) => b.text)
+      .join('')
+    // A non-truncated response with NEITHER a tool_use block NOR any text is a
+    // degenerate result (e.g. an empty/stop-only completion). Returning it as a
+    // {kind:'text', text:''} would surface as an empty converse reply; instead
+    // throw a ProviderSchemaError — a RECOVERABLE shape failure, so the
+    // single-call site falls back to the 2-call dispatch path (not a transient
+    // RateLimited/Upstream/Truncated error, which it rethrows).
+    if (text.length === 0) {
+      throw new ProviderSchemaError(
+        'multiToolCall: model returned neither a tool call nor any text',
+      )
+    }
+    return { kind: 'text', text, model, ...(usage ? { usage } : {}) }
   }
 
   /**

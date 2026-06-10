@@ -4,10 +4,11 @@ subsystem: cross-cutting
 audience: [contributor, ai-agent]
 status: current
 last_verified: 2026-06-10
-verified_against: ccacc19
+verified_against: 6de9175
 source_paths:
   - src/lib/orchestrator/flags.ts
   - src/lib/orchestrator/generationTier.ts
+  - src/lib/orchestrator/haikuSingleCall.ts
   - src/lib/auth/account.ts
   - src/lib/billing/valueTier.ts
   - src/lib/billing/stripe.ts
@@ -113,6 +114,7 @@ each **verified against `flags.ts` at this commit**.
 | `SL_BOUNDED_EMIT_CEILING` | unset → `2600` | int (>0) | **SHE-8** free-tier bounded `max_tokens` kill-switch, env-overridable (read fresh). A self-host/desktop BYOK operator (own key, own cost) can raise it without a code change. Feeds `policyFor('free').maxOutputTokens` → the injected `TierPolicy.emitCeiling`. `generationTier.ts:resolveBoundedEmitCeiling` |
 | `SL_BOUNDED_MAX_BARS` | unset → `4` | int (>0) | **SHE-8** free-tier bounded max bars per call, env-overridable (read fresh). Feeds `policyFor('free').maxBars` → `TierPolicy.maxBars` (the edit-path extend/insert clamp). `generationTier.ts:resolveBoundedMaxBars` |
 | `SL_STREAM_ABORT` | off | bool | **M26** opt-in secondary streaming kill-switch (output-token + wall-clock abort wired into `textStream` via `providers/streamGuard.ts`). Off by default — the bounded `render_score` path is non-streaming and bounded by `max_tokens` alone. `flags.ts:isStreamAbortEnabled` |
+| `SL_HAIKU_SINGLE_CALL` | off | bool | **SHE-19 PR2** free-tier single-call collapse for EDITS. `1` → an edit on the `free` tier (with an `editedScore`) runs as ONE Haiku `tool_choice:'auto'` call (`orchestrator/haikuSingleCall.ts:runHaikuSingleCall`) that picks the action AND emits the ops, replacing the 2-call dispatcher→handler path; the result still flows through `finalizeDispatchResult` (preservation check + replacement gate apply). **Off by default, hosted-free-tier-only** (daily-quota / training-capture precedent — self-hosted/local never get it); Anthropic-only (else `MultiToolUnsupportedError`); ANY throw falls back to the 2-call path (turn never dropped). `flags.ts:isHaikuSingleCallEnabled` |
 | `ORCHESTRATOR_BUDGET_INPUT_TOKENS` | `200000` | positive int | Per-session input-token cap; usage `>=` cap blocks further turns. Non-finite / `<=0` falls back to default. `budget.ts:20` |
 | `ORCHESTRATOR_BUDGET_OUTPUT_TOKENS` | `50000` | positive int | Per-session output-token cap. Same fallback rule. `budget.ts:21` |
 | `DEADLINE_MS` | `55000` | positive int | Per-request soft deadline; handlers consult `remainingMs` and emit `deadline_exceeded` rather than overrun Vercel's 60s `maxDuration`. `deadline.ts:15` |

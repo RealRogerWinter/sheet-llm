@@ -52,7 +52,7 @@ const EmitInsertedBarsSchema = z.object({
     .optional(),
 })
 
-const INSERT_SYSTEM_PROMPT = `You are INSERTING new measures into an existing score AT A SPECIFIC POSITION. The user has supplied a Score and asks you to insert N bars after a given measure index.
+export const INSERT_SYSTEM_PROMPT = `You are INSERTING new measures into an existing score AT A SPECIFIC POSITION. The user has supplied a Score and asks you to insert N bars after a given measure index.
 
 CRITICAL RULES:
 1. You do NOT emit a new Score. You emit only the NEW measures.

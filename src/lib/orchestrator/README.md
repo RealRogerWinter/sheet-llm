@@ -212,6 +212,74 @@ proposal via the store's `interruptedProposal` slot; a 30s
 Rollback: `SL_GHOST_PREVIEW=0` reverts to the M3.5 silent-commit
 behavior. Score-mutating turns commit head immediately as before.
 
+### Free-tier single-call collapse (SHE-19 PR2)
+
+`haikuSingleCall.ts` collapses the 2-call EDIT path (dispatcher picks a
+tool → a dedicated handler makes a SECOND LLM call to author the ops)
+into **ONE Haiku `tool_choice:'auto'` call** that BOTH picks the action
+AND emits the final operations. The unified call exposes the **four
+structural edit-tools** — `edit_score`, `emit_appended_bars`,
+`emit_inserted_bars`, `emit_replacement_bars` — with their exact existing
+schemas (insert/region carry the dispatch range fields inline). Under
+`auto`, a plain-**text** reply IS the answer/converse case (no tool call,
+score unchanged).
+
+`render_score` (whole-score `regenerate_all`) is **deliberately NOT
+exposed** on this path. It is Pro-only, and exposing it on the free path
+would bypass the replacement-confirmation gate (which short-circuits
+`confirmExplicitRewrite=true` for `regenerate_all`) and the whole-score
+scope cap. A free "start over" instead routes to a full-range
+`emit_replacement_bars`, which the ratio-based replacement gate catches →
+confirmation fires. `regenerate_all` stays Pro-only on the 2-call path.
+
+**Where it sits:** `run()` checks the gate BEFORE the native dispatcher,
+so it fully replaces the 2-call path when it fires. The gate keys off the
+**per-request resolved policy** (`effectiveTierPolicy(input).useBoundedFallback`
+— true iff free), NOT the instance-wide `getGenerationTier()` env, so a
+request `route.ts` resolved to PRO never hits the free-only path:
+
+```
+input.editedScore  &&  effectiveTierPolicy(input).useBoundedFallback  &&  isHaikuSingleCallEnabled()
+```
+
+**Free-tier scope is enforced inside the apply** (mirroring
+`runDispatchedHandler`): appended/inserted bars are clamped to
+`policy.maxBars` (free=4; `perVoiceContent` clamped in lockstep) and
+`max_tokens` is bounded by `policy.emitCeiling` (free=`BOUNDED_EMIT_CEILING`).
+
+The unified result is routed through the **same `finalizeDispatchResult`
+seam** the 2-call path uses (via a synthesized minimal `DispatchDecision`),
+so the measure-hash **preservation check** and the
+**replacement-as-confirmation gate** apply to single-call output
+unchanged — `runHaikuSingleCall` itself already runs the extend handler's
+warning recovery (tie-at-boundary downgrade, V→I cadence-at-boundary
+notice, server-side preservation verify) and the region handler's
+boundary-tie / severed-span recovery, and sets `result.preservation` /
+`result.dispatchTool` so finalize keys off them exactly as before.
+
+**Off by default; hosted-free-tier-only.** `SL_HAIKU_SINGLE_CALL`
+defaults OFF, mirroring the daily-quota / training-capture **hosted-only
+precedent** — self-hosted / local installs never get it; the hosted free
+tier opts in. It is also **Anthropic-only** (the call relies on native
+`tool_choice:'auto'` tool-use, which only `AnthropicProvider.multiToolCall`
+provides); a non-Anthropic resolved provider throws
+`MultiToolUnsupportedError`.
+
+**2-call fallback (only on RECOVERABLE throws).** On a recoverable throw
+from `runHaikuSingleCall` — a malformed/empty emit (`ProviderSchemaError`
+/ `HaikuSingleCallError`), an unsupported provider
+(`MultiToolUnsupportedError`), or a validation failure that survives the
+one-shot retry (`ValidationError`) — `run()` logs and **falls through to
+the 2-call `toolDispatchRun` → `runDispatchedHandler` path** below it, so
+the turn is never dropped. **Transient upstream failures are NOT swallowed:**
+`RateLimitedError` / `UpstreamError` / `OutputTruncatedError` are
+**re-thrown** so the route's existing typed handling (429 / 5xx / 422)
+deals with them — falling back would double-spend on a fresh full 2-call
+flow that is just as likely to re-fail.
+
+Rollback: `SL_HAIKU_SINGLE_CALL=0`/unset reverts free-tier edits to the
+2-call dispatch path on the next request (read fresh, no redeploy).
+
 ### Handler validation-retry (PR-5b)
 
 The four score-producing handlers (`extendComposition`, `insertMeasures`,
@@ -239,6 +307,7 @@ through immediately. Provider-level retries are separate.
 | `SL_FORCE_FREE_TIER`          | unset   | **M26** operator kill: forces `free` for the whole instance regardless of tier/entitlement — instantly stops long-running pro generation, no redeploy. |
 | `SL_ALLOW_TIER_OVERRIDE`      | unset   | **PR-0** opt-in to honor the **client-supplied** debug `generationTier` override under `NODE_ENV=production` (staging boxes). **Dangerous in real prod** — lets callers self-select `pro`. Unset on internet-reachable deploys; auto-honored only in `development`/`test`. |
 | `SL_BOUNDED_GEN`              | **on**  | **M26** the free-tier bounded handler. `0`/`false` reverts free users to the legacy/sectional path WITHOUT opening the paywall (independent rollback of the new code path). |
+| `SL_HAIKU_SINGLE_CALL`        | off     | **SHE-19 PR2** free-tier single-call collapse. When on AND the request resolves to the `free`-tier policy (`useBoundedFallback`) AND has an `editedScore`, the edit runs as ONE Haiku `tool_choice:'auto'` call (pick action + emit ops) over the 4 structural edit-tools (no `render_score`) instead of the 2-call dispatcher→handler path; result still flows through `finalizeDispatchResult` (preservation + replacement gate). Free-tier bar budget + output ceiling enforced in-apply. **Off by default, hosted-free-tier-only** (daily-quota/training-capture precedent); Anthropic-only; a RECOVERABLE throw falls back to the 2-call path, transient (rate-limit/upstream/truncation) errors re-throw. |
 | `SL_STREAM_ABORT`            | off     | **M26** opt-in secondary streaming kill-switch (output-token + wall-clock abort wired into `textStream`). Off by default — the bounded `render_score` path is non-streaming and bounded by `max_tokens` alone; on enforces a mid-stream cutoff on the converse/text path. |
 | `ORCHESTRATOR_KILL`           | unset   | Operator kill switch — orchestrator returns null from every call, route falls through to legacy LLM. |
 | `ORCHESTRATOR_ENABLED`        | on      | Set `false` / `0` to disable the orchestrator at the route level.                                    |
@@ -357,6 +426,13 @@ needed (flags are read on every call).
 Set `SL_REPLACEMENT_GATE=0`. The orchestrator stops marking turns as
 `requiresConfirmation`; head pointers advance silently as in pre-PR-4.
 
+### Roll back the free-tier single-call collapse
+
+Set `SL_HAIKU_SINGLE_CALL=0` (or unset it). Free-tier edits revert to the
+2-call dispatcher→handler path on the next request — no redeploy. (The
+flag is off by default, so this is only needed where the hosted free tier
+opted in.)
+
 ### Kill the orchestrator entirely
 
 Set `ORCHESTRATOR_KILL=1`. Every `/api/chat` request falls through to
@@ -396,6 +472,7 @@ and the visual-regression / nightly cron setup.
 - `index.ts` — orchestrator entry point + dispatch + gate hook
 - `classifier.ts` — Haiku classifier (legacy path)
 - `toolDispatch.ts` — native tool-use dispatcher (default path)
+- `haikuSingleCall.ts` — free-tier single-call collapse (SHE-19 PR2; `SL_HAIKU_SINGLE_CALL`)
 - `handlers/extendComposition.ts`, `insertMeasures.ts`,
   `regionReplace.ts`, `editIntraMeasure.ts`, `compose.ts`
 - `preservationVerifier.ts` — server-side hash verification

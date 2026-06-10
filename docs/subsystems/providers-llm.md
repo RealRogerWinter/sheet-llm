@@ -3,8 +3,8 @@ title: LLM Providers & Failover
 subsystem: providers-llm
 audience: [contributor, ai-agent]
 status: current
-last_verified: 2026-06-03
-verified_against: c078040
+last_verified: 2026-06-10
+verified_against: 6de9175
 source_paths:
   - src/lib/providers/types.ts
   - src/lib/providers/registry.ts
@@ -42,7 +42,7 @@ older, single-Anthropic `src/lib/llm/*` path (`getLLMClient` → `realClient` /
 | --- | --- | --- |
 | `selectProvider(tier, chatId)` | `src/lib/providers/select.ts` | Resolve `{ provider, providerName, model, tier }` for a tier in a chat. The routing core. |
 | `callWithFailover(args, tool, options)` | `src/lib/providers/callWithFailover.ts` | Single-attempt `provider.toolCall` + degradation telemetry. |
-| `LLMProvider` interface | `src/lib/providers/types.ts` | The provider contract (`toolCall`, optional `textStream`). |
+| `LLMProvider` interface | `src/lib/providers/types.ts` | The provider contract (`toolCall`, optional `textStream`, optional `multiToolCall`). |
 | `getLLMClient()` | `src/lib/llm/index.ts` | Legacy path: returns `realClient` (key present) or `stubClient`. |
 
 A handler typically does:
@@ -65,13 +65,13 @@ consumer (medium tier).
 
 | Path | Role |
 | --- | --- |
-| `src/lib/providers/types.ts` | Type spine: `ProviderName`, `Tier`, `Effort` (`'low'..'max'`), `ProviderCapabilities`, `ModelEntry`, `ProviderTool<T>` (now with optional `strict` for grammar-constrained tool use), `SystemBlock`, `ProviderCallOptions` (now also `effort`, `thinking`, `abortSignal`, `outputTokenBudget`, `streamDeadlineAt`), `ProviderToolResult<T>`, `TextStreamEvent`, `LLMProvider`, and the model-output errors `ProviderSchemaError` / `ProviderRefusalError` / `OutputTruncatedError`. |
+| `src/lib/providers/types.ts` | Type spine: `ProviderName`, `Tier`, `Effort` (`'low'..'max'`), `ProviderCapabilities`, `ModelEntry`, `ProviderTool<T>` (now with optional `strict` for grammar-constrained tool use), `SystemBlock`, `ProviderCallOptions` (now also `effort`, `thinking`, `abortSignal`, `outputTokenBudget`, `streamDeadlineAt`), `ProviderToolResult<T>`, `TextStreamEvent`, `LLMProvider`, the model-output errors `ProviderSchemaError` / `ProviderRefusalError` / `OutputTruncatedError`, and (SHE-19 PR2) the optional `multiToolCall` member + `MultiToolResult` (`{kind:'tool'...}` \| `{kind:'text'...}`) + `MultiToolUnsupportedError` for the Anthropic-only `tool_choice:'auto'` multi-tool path. |
 | `src/lib/providers/registry.ts` | Declarative `REGISTRY[provider][tier] → ModelEntry`. `getModelEntry`, `PROVIDER_API_KEY_ENV`, `isProviderConfigured`. |
 | `src/lib/providers/select.ts` | Resolution + routing. `selectProvider`, module-level `instances` memo, `instantiate`. Reads `PROVIDER_<TIER>` and `PROVIDER_FALLBACK`. |
 | `src/lib/providers/callWithFailover.ts` | Single-attempt `toolCall` wrapper; on `ProviderSchemaError` (with `chatId`) calls `reportProviderFailure`, then re-throws. |
 | `src/lib/providers/degradation.ts` | In-memory failure tracker keyed `${chatId}:${tier}:${provider}`. `DEGRADATION_THRESHOLD = 2`. `reportProviderFailure`, `isProviderDegraded`, `clearDegradationForChat`, `_resetDegradation`. |
 | `src/lib/providers/sticky.ts` | In-memory per-chat per-tier provider memory. `getSticky`, `setSticky`, `clearStickyForChat` (lazily clears degradation in lockstep), `_resetSticky`. |
-| `src/lib/providers/anthropic.ts` | `AnthropicProvider`: native `tool_use` (pre-parsed `input`), per-block ephemeral `cache_control`, memoized SDK client keyed on env key with `apiKeyOverride` escape hatch, `maxRetries: 2`, `DEFAULT_MAX_TOKENS = 8000` fallback. Implements `toolCall` + `textStream`. Per-model tuning via `tuningParams`: forwards `temperature` only where accepted (`modelAcceptsTemperature` — dropped on Opus 4.7+), `effort` via `output_config.effort` (`modelSupportsEffort` — Sonnet 4.6 / Opus 4.5+ only), and `thinking` (`'disabled'`/`'adaptive'`); forwards `strict: true` for grammar-constrained tools. M26 PR-2 streaming kill-switch: `abortSignal` + `makeOutputBudgetGuard` (from `streamGuard.ts`) abort mid-stream on `outputTokenBudget`/`streamDeadlineAt`, surfaced as a clean `message-stop` (`stopReason 'max_tokens'`); an `APIUserAbortError` maps to `OutputTruncatedError`, NOT `UpstreamError`. |
+| `src/lib/providers/anthropic.ts` | `AnthropicProvider`: native `tool_use` (pre-parsed `input`), per-block ephemeral `cache_control`, memoized SDK client keyed on env key with `apiKeyOverride` escape hatch, `maxRetries: 2`, `DEFAULT_MAX_TOKENS = 8000` fallback. Implements `toolCall` + `textStream`. Per-model tuning via `tuningParams`: forwards `temperature` only where accepted (`modelAcceptsTemperature` — dropped on Opus 4.7+), `effort` via `output_config.effort` (`modelSupportsEffort` — Sonnet 4.6 / Opus 4.5+ only), and `thinking` (`'disabled'`/`'adaptive'`); forwards `strict: true` for grammar-constrained tools. M26 PR-2 streaming kill-switch: `abortSignal` + `makeOutputBudgetGuard` (from `streamGuard.ts`) abort mid-stream on `outputTokenBudget`/`streamDeadlineAt`, surfaced as a clean `message-stop` (`stopReason 'max_tokens'`); an `APIUserAbortError` maps to `OutputTruncatedError`, NOT `UpstreamError`. SHE-19 PR2 adds `multiToolCall(tools, options)`: a single `tool_choice:'auto'` call over many tools, caching the (static) tool prefix via `cache_control` on the LAST tool def, returning `{kind:'tool', name, input, toolUseId}` when the model picks a tool or `{kind:'text', text}` for a prose reply (`max_tokens` overflow → `OutputTruncatedError`). It is the only Anthropic-specific method; non-Anthropic providers omit it (callers throw `MultiToolUnsupportedError`). |
 | `src/lib/providers/openaiCompatible.ts` | `OpenAICompatibleProvider`: raw `fetch` to `${baseUrl}/chat/completions`; `tool_calls[0].function.arguments` is a JSON **string**, `JSON.parse`d then zod-validated. Base for Groq/Ollama. |
 | `src/lib/providers/groq.ts` | `GroqProvider` (subclass): `https://api.groq.com/openai/v1`, `GROQ_API_KEY`, default `openai/gpt-oss-20b`. Exports `GROQ_CAPABILITIES`. |
 | `src/lib/providers/ollama.ts` | `OllamaProvider` (subclass): keyless, `OLLAMA_BASE_URL` (default `http://localhost:11434/v1`), default `qwen2.5:14b-instruct`. `extendRequestBody` sets `body.format = tool.inputSchemaJson` (grammar-constrained sampling). |

@@ -143,3 +143,23 @@ export function isBoundedGenEnabled(): boolean {
 export function isStreamAbortEnabled(): boolean {
   return isFlagEnabled('SL_STREAM_ABORT')
 }
+
+/**
+ * SHE-19 PR2 — free-tier single-call collapse. When enabled, the orchestrator's
+ * edit branch (editedScore present) on the `free` product tier routes through
+ * `runHaikuSingleCall`: ONE Haiku `tool_choice:'auto'` call that BOTH picks the
+ * action AND emits the final operations, replacing the 2-call dispatcher→handler
+ * path (~3.4x faster, near-parity). The unified result still flows through the
+ * existing `finalizeDispatchResult` seam, so the preservation check and
+ * replacement gate apply unchanged; a malformed call falls back to the 2-call
+ * path rather than dropping the turn.
+ *
+ * **Off by default**, mirroring the daily-quota / training-capture hosted-only
+ * precedent: self-hosted / local installs never get it; the hosted free tier
+ * opts in via `SL_HAIKU_SINGLE_CALL`. Anthropic-only (a non-Anthropic resolved
+ * provider throws `MultiToolUnsupportedError` → the same fallback). Read on
+ * every call so operators can flip without redeploy.
+ */
+export function isHaikuSingleCallEnabled(): boolean {
+  return isFlagEnabled('SL_HAIKU_SINGLE_CALL')
+}

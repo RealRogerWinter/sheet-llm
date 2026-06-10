@@ -148,6 +148,35 @@ export interface ProviderUsage {
   outputTokens?: number
 }
 
+/**
+ * SHE-19 PR2 — result of a `tool_choice:'auto'` multi-tool call. Under 'auto'
+ * the model EITHER calls exactly one of the supplied tools (`kind:'tool'`,
+ * carrying the RAW unvalidated input — the caller owns the per-tool zod parse)
+ * OR replies in plain prose (`kind:'text'`, the answer_question / converse
+ * case). Anthropic-only by design; non-Anthropic providers omit `multiToolCall`
+ * (the call site guards on its presence and throws `MultiToolUnsupportedError`).
+ */
+export type MultiToolResult =
+  | {
+      kind: 'tool'
+      /** The name of the tool the model chose to call. */
+      name: string
+      /** RAW tool input as returned by the provider (NOT zod-validated). */
+      input: unknown
+      /** The tool_use id minted by the provider. */
+      toolUseId: string
+      /** Effective model id used. */
+      model: string
+      usage?: ProviderUsage
+    }
+  | {
+      kind: 'text'
+      /** The model's prose reply (no tool was called). */
+      text: string
+      model: string
+      usage?: ProviderUsage
+    }
+
 export interface ProviderToolResult<T> {
   /** Parsed + zod-validated tool input. */
   input: T
@@ -197,6 +226,18 @@ export interface LLMProvider {
    */
   toolCall<T>(tool: ProviderTool<T>, options: ProviderCallOptions): Promise<ProviderToolResult<T>>
   /**
+   * Optional: a `tool_choice:'auto'` call over MULTIPLE tools — the model
+   * either calls one of them or replies in prose. Only Anthropic implements
+   * it (SHE-19 PR2 free-tier single-call collapse depends on reliable native
+   * tool-use under 'auto'); the other providers omit it, so a caller MUST
+   * guard on its presence and throw `MultiToolUnsupportedError` otherwise
+   * rather than silently fall back to a provider that can't honor the contract.
+   */
+  multiToolCall?(
+    tools: ReadonlyArray<ProviderTool<unknown>>,
+    options: ProviderCallOptions,
+  ): Promise<MultiToolResult>
+  /**
    * Optional: stream a text-only (non-tool) completion. The iterator
    * yields message-start, then zero-or-more text-delta, then exactly
    * one of message-stop or error. The consumer owns lifecycle and
@@ -210,6 +251,22 @@ export class ProviderSchemaError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'ProviderSchemaError'
+  }
+}
+
+/**
+ * SHE-19 PR2 — thrown when a caller asks for a `multiToolCall` (the free-tier
+ * single-call collapse) but the resolved provider doesn't implement it. The
+ * collapse is Anthropic-only by design (it relies on reliable native tool-use
+ * under `tool_choice:'auto'`), so this surfaces a clear, typed failure at the
+ * call site instead of letting the request silently route through a provider
+ * that can't honor the contract. The caller logs it and falls back to the
+ * 2-call dispatch path.
+ */
+export class MultiToolUnsupportedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'MultiToolUnsupportedError'
   }
 }
 
