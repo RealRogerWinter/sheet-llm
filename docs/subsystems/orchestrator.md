@@ -4,7 +4,7 @@ subsystem: orchestrator
 audience: [contributor, ai-agent]
 status: current
 last_verified: 2026-06-10
-verified_against: 6de9175
+verified_against: ff228da
 source_paths:
   - src/lib/orchestrator/index.ts
   - src/lib/orchestrator/toolDispatch.ts
@@ -156,7 +156,11 @@ synchronous score result.
           maybeApplyReplacementGate(result, input)   → may set result.replacement + requiresConfirmation
           maybeAttachGhostProposal(result, input)    → ensureEventIds(score) then may set
                                                        result.proposal + requiresConfirmation
-                                                       (no-op if replacement already fired)
+                                                       (no-op if replacement already fired, or
+                                                        isNoOpEdit(before, after) — nothing changed)
+          noticeNoOpEdit(result, input)              → edit-intent turn (dispatchTool set) that still
+                                                       changed nothing + no confirmation pending →
+                                                       overwrite introText with the "couldn't apply" notice
           recordTurnT(input, ...)  → orchestrator_turns row (best-effort; stamps generationTier)
           return result
 
@@ -313,7 +317,7 @@ is the route's job** — once execution is inside `run()`, it always runs.
 | `SL_GHOST_PREVIEW` | **on** | AI ghost preview (M24). `0`/`false` → silent commit, no proposal. `isGhostPreviewEnabled`. |
 | `SL_SECTIONAL_GEN` | **on** | Sectional streaming generation for fresh scores (M25). `0`/`false` → falls back to single-shot `runGenerateComplex`. `isSectionalGenEnabled` (`!readExplicitFalse`). |
 | `SL_BOUNDED_GEN` | **on** | M26 free-tier bounded ≤4-bar single-call generation. `0`/`false` → reverts free users to the legacy/sectional path WITHOUT opening the paywall. `isBoundedGenEnabled` (`!readExplicitFalse`). |
-| `SL_HAIKU_SINGLE_CALL` | off | **SHE-19 PR2** free-tier single-call collapse for EDITS. `1` → an edit on the `free` tier (editedScore present) runs as ONE Haiku `tool_choice:'auto'` call (`haikuSingleCall.ts:runHaikuSingleCall`) that picks the action AND emits the ops, replacing the 2-call dispatcher→handler path; result still flows through `finalizeDispatchResult` (preservation + replacement gate). Off by default, hosted-free-tier-only; Anthropic-only; any throw falls back to the 2-call path. `isHaikuSingleCallEnabled` (`readBool`). |
+| `SL_HAIKU_SINGLE_CALL` | off | **SHE-19 PR2** free-tier single-call collapse for EDITS. `1` → an edit on the `free` tier (editedScore present) runs as ONE Haiku `tool_choice:'auto'` call (`haikuSingleCall.ts:runHaikuSingleCall`) that picks the action AND emits the ops, replacing the 2-call dispatcher→handler path; result still flows through `finalizeDispatchResult` (preservation + replacement gate). Off by default, hosted-free-tier-only; Anthropic-only; any throw falls back to the 2-call path — including a no-op edit (empty ops / echoed bars) which throws rather than silently committing the unchanged score, and a still-no-op edit after fallback surfaces the `noticeNoOpEdit` "couldn't apply" message. `isHaikuSingleCallEnabled` (`readBool`). |
 | `SL_STREAM_ABORT` | off | M26 PR-2 secondary streaming kill-switch (the `streamGuard` wired into the Anthropic `textStream`). `1` → enforce mid-stream output-token / wall-clock cut-off on converse/text. `isStreamAbortEnabled` (`readBool`). |
 | `SL_GENERATION_TIER` | free | Instance-wide product tier (`generationTier.ts:getGenerationTier`). `free` = paywall closed (bounded gen, whole-score Pro-only); `pro` = opens whole-score/sectional generation for everyone. |
 | `SL_FORCE_FREE_TIER` | unset | Operator kill switch — `1`/`true` forces `free` for the whole instance regardless of any default/entitlement (`isForceFreeTier`). Highest precedence in `resolveGenerationTier`. |

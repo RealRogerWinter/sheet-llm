@@ -3,8 +3,8 @@ title: AI Ghost Preview (M24)
 subsystem: ghost-preview
 audience: [contributor, ai-agent]
 status: current
-last_verified: 2026-06-09
-verified_against: 36afe91
+last_verified: 2026-06-10
+verified_against: ff228da
 source_paths:
   - src/lib/orchestrator/index.ts
   - src/lib/orchestrator/flags.ts
@@ -176,8 +176,13 @@ On reject, the server writes a revert row and the client advances its head point
 - **The five no-op guards** in the hook (silent commit, no proposal): flag off; no
   `input.editedScore` (compose-from-scratch — nothing to diff against); `result.replacement`
   set; `result.requiresConfirmation` already true (preview-mode `regenerate_all`); the diff
-  is a no-op (`hasAnyVoiceChange === false && retainedEventRatio === 1 && measureCount
-  unchanged && !keyChanged && !meterChanged && !titleChanged`). The
+  is a no-op (`isNoOpEdit(before, after)` in `scoreDiff.ts` — the shared predicate:
+  `hasAnyVoiceChange === false && retainedEventRatio === 1 && measureCount
+  unchanged && !keyChanged && !meterChanged && !titleChanged`; also reused by the
+  single-call collapse's no-op-edit guard and `noticeNoOpEdit`). Silent commit is
+  correct HERE only because a genuinely no-change turn (e.g. a converse answer) has
+  nothing to preview — an edit-intent turn that no-ops instead gets a "couldn't apply"
+  notice from `noticeNoOpEdit` in `finalizeDispatchResult`. The
   `hasAnyVoiceChange === false` conjunct (SHE-6) keeps a bass-clef / extra-voice-only
   edit out of the no-op bucket — `retainedEventRatio` alone is primary-staff/voice-0
   only and blind to non-primary staves/voices, so without it a bass-only edit was

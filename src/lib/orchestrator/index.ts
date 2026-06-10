@@ -1,6 +1,7 @@
 import { recordTurn, type RecordTurnFields } from './observability'
 import { runWithUsageMeter, currentMeterTotals, toMicroUsd } from '@/lib/metering/usageMeter'
 import { checkCopyright } from './copyright/filter'
+import { noticeNoOpEdit } from './noOpEditNotice'
 import { classify, ClassifierSchemaError } from './classifier'
 import { isDeadlineApproaching } from './deadline'
 import { runEditScoreLevel, EditHandlerError } from './handlers/editScoreLevel'
@@ -230,6 +231,10 @@ function maybeAttachGhostProposal(
   // and would be wrongly treated as no-change. `hasAnyVoiceChange`
   // walks every staff/voice, so gate on it: any voice changed ⇒ not a
   // no-op, even when the primary-staff retention says nothing moved.
+  // NB this is deliberately the NOTE-CONTENT diff (what the overlay can
+  // preview by event id), NOT the broader `isNoOpEdit` the edit guard
+  // uses — a barline/span/marker-only edit has nothing to highlight, so
+  // silently committing it here (no proposal) is correct.
   const noDiff =
     diff.hasAnyVoiceChange === false &&
     diff.retainedEventRatio === 1 &&
@@ -694,6 +699,12 @@ async function finalizeDispatchResult(
   const out: OrchestratorResult = { ...result, latencyMs: Date.now() - t0 }
   const replacementDecision = await maybeApplyReplacementGate(out, input)
   maybeAttachGhostProposal(out, input)
+  // Backstop: an edit-intent turn that changed nothing (single-call fell back
+  // and the 2-call path also echoed, or the 2-call path itself no-opped) gets a
+  // visible "couldn't apply that change" notice instead of a silent commit of
+  // the unchanged score. Runs AFTER the gates so a real proposal/replacement
+  // (which sets requiresConfirmation) is never overwritten.
+  noticeNoOpEdit(out, input)
   await recordTurnForResult(out, input, t0, decision, replacementDecision)
   return out
 }

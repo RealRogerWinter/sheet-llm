@@ -114,6 +114,61 @@ export function scoreDiff(before: Score | undefined, after: Score | undefined): 
 }
 
 /**
+ * True when an edit changed NOTHING — `after` is musically identical to
+ * `before` once volatile `id` fields are ignored.
+ *
+ * Unlike `scoreDiff` / `hasAnyVoiceChange` (which compare EVENT CONTENT only, to
+ * keep the preservation / wholesale-rewrite gate thresholds stable), this is a
+ * FULL structural comparison: it sees measure-level barlines/attributes
+ * (`startBarline`/`endBarline`/`barlineFermata`/`isPickup`/…) and score-level
+ * `spans` (slurs/hairpins/octave/tempo), `markers`, `jumpMarkers`,
+ * `annotations`, `tempo_bpm`, key/meter/title — all of which `edit_score` ops
+ * can change. So a slur-, barline-, or marker-only edit is correctly seen as a
+ * REAL change, not a no-op (an event-content-only check would false-positive
+ * and wrongly report "couldn't apply" / force a needless fallback).
+ *
+ * Used by the single-call collapse's no-op-edit guard (`runHaikuSingleCall`)
+ * and the no-op-edit notice (`finalizeDispatchResult`). The ghost-preview gate
+ * intentionally does NOT use this — it wants the narrower note-content diff (a
+ * barline/span/marker change has nothing to highlight by event id).
+ *
+ * `id` fields are stripped because they are backfilled non-deterministically
+ * (`ensureEventIds`/`ensureSpanIds`/…) and re-emitted bars carry fresh-or-absent
+ * ids — an id-only difference is not a musical change.
+ */
+export function isNoOpEdit(before: Score, after: Score): boolean {
+  return deepEqualIgnoringIds(before, after)
+}
+
+/** Order-insensitive deep equality that skips `id` keys and treats an explicit
+ *  `undefined` value as equivalent to an absent key (so `{a, b: undefined}` and
+ *  `{a}` match). Pure, linear in the input size. */
+function deepEqualIgnoringIds(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) {
+    return a === b
+  }
+  const aArr = Array.isArray(a)
+  const bArr = Array.isArray(b)
+  if (aArr || bArr) {
+    if (!aArr || !bArr || a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) {
+      if (!deepEqualIgnoringIds(a[i], b[i])) return false
+    }
+    return true
+  }
+  const ao = a as Record<string, unknown>
+  const bo = b as Record<string, unknown>
+  const aKeys = Object.keys(ao).filter((k) => k !== 'id' && ao[k] !== undefined)
+  const bKeys = Object.keys(bo).filter((k) => k !== 'id' && bo[k] !== undefined)
+  if (aKeys.length !== bKeys.length) return false
+  for (const k of aKeys) {
+    if (bo[k] === undefined || !deepEqualIgnoringIds(ao[k], bo[k])) return false
+  }
+  return true
+}
+
+/**
  * SHE-6 — true when any (staff, voice) pair differs between before and
  * after, by either measure count or per-measure content hash. Mirrors
  * the multi-staff walk in `ensureEventIds` / `computeAffectedEventIds`
