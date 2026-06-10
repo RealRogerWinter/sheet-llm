@@ -77,7 +77,7 @@ export async function runGenerateComplex(
   // PR-8: Standard routes to the medium tier (Sonnet); an Advanced paid Pro turn
   // routes this whole-score emit to Opus (`large`). Debug modelOverride still wins.
   const selected = selectProvider(
-    resolveModelClass({ advancedComposer: input.advancedComposer, callType: 'whole_score' }),
+    resolveModelClass({ advancedComposer: input.advancedComposer, callType: 'whole_score', complexity: input.classification.complexity }),
     input.chatId,
   )
   const result = await callWithScoreRetry(

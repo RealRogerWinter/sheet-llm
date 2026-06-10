@@ -151,7 +151,7 @@ async function runComposeAsRegen(
   // Pro turn routes this whole-score emit to Opus (`large`). Debug modelOverride
   // still wins.
   const selected = selectProvider(
-    resolveModelClass({ advancedComposer: input.advancedComposer, callType: 'whole_score' }),
+    resolveModelClass({ advancedComposer: input.advancedComposer, callType: 'whole_score', complexity: input.classification.complexity }),
     input.chatId,
   )
   const effectiveModel = input.modelOverride ?? selected.model

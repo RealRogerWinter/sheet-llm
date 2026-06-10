@@ -383,8 +383,9 @@ export async function runExtendComposition(
   // PR-8: Standard extends on the medium tier (Sonnet); an Advanced paid Pro
   // turn routes a standalone extend to Opus (`large`). The sectional generator's
   // internal extends never set `advancedComposer`, so they stay Sonnet.
+  // SHE-19: complexity threads from the classification so simple extends default to Haiku.
   const selected = selectProvider(
-    resolveModelClass({ advancedComposer: input.advancedComposer, callType: 'extend' }),
+    resolveModelClass({ advancedComposer: input.advancedComposer, callType: 'extend', complexity: input.classification.complexity }),
     input.chatId,
   )
 
