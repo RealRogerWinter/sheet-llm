@@ -1,12 +1,15 @@
 /**
  * Product / paywall tier for score generation — distinct from and ORTHOGONAL
  * to the provider model-size `Tier` (small | medium | large) in
- * `src/lib/providers/*`. This gates SCOPE and per-request ceilings, not model
- * quality: both tiers DEFAULT to the medium (Sonnet 4.6) model. (PR-8 Advanced
- * Composer is the one exception — a Pro PAID turn with the Advanced toggle on
- * routes its heavy compositional call to Opus via `resolveModelClass`; see
- * `isAdvancedComposerEnabled` below and `providers/modelClass.ts`. The free tier
- * is always Sonnet.)
+ * `src/lib/providers/*`. This gates SCOPE and per-request ceilings, NOT model
+ * quality. The MODEL is chosen by `resolveModelClass` in
+ * `providers/modelClass.ts`, which follows a Cheap→Moderate→Expensive ladder:
+ * it defaults to `small` (Haiku) for every call, escalates to `medium`
+ * (Sonnet) when the classifier signals `complexity:'complex'`, and reaches
+ * `large` (Opus) only for heavy compositional calls (`whole_score`/`extend`)
+ * when the Advanced Composer entitlement is active. The product tier (free/pro)
+ * is therefore orthogonal to the model ladder — it determines what a user
+ * may generate, not which model serves that generation.
  *
  * - `free` (default): a fresh from-scratch generation is served by ONE bounded
  *   `render_score` call (`runGenerateBounded`) — at most 4 bars of grand staff,
@@ -164,7 +167,7 @@ export function isEntitlementsDbEnabled(): boolean {
  * that only ever RAISES the user's own spend (no free-unlock), but it is
  * forced OFF for the free tier + the free piece and gated behind this flag so
  * the feature stays dark until launch. Read fresh; no redeploy. Off → the
- * toggle is ignored and every turn stays on Sonnet.
+ * toggle is ignored and `resolveModelClass` never reaches the `large` tier.
  */
 export function isAdvancedComposerEnabled(): boolean {
   return isFlagEnabled('SL_ADVANCED_COMPOSER')

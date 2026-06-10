@@ -77,9 +77,10 @@ The single entry point is `run(input)` in `index.ts`.
 
 ### The 6-tool dispatcher (PR-3; `answer_question` added later)
 
-`toolDispatch.ts` calls Claude (Sonnet, with prompt caching) with a
-schema that lists exactly six tools. The model picks the one that fits
-the user's prompt + the current Score:
+`toolDispatch.ts` calls the provider selected by `resolveModelClass`
+(defaulting to Haiku via `callType:'dispatch'`) with a schema that lists
+exactly six tools. The model picks the one that fits the user's prompt +
+the current Score:
 
 | Tool                  | Used when                                          | Handler                  |
 | --------------------- | -------------------------------------------------- | ------------------------ |

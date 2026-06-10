@@ -3,8 +3,8 @@ title: Orchestrator — AI Context Card
 subsystem: orchestrator
 audience: [ai-agent, contributor]
 status: current
-last_verified: 2026-06-09
-verified_against: 61d761a
+last_verified: 2026-06-10
+verified_against: 8c99094
 source_paths:
   - src/lib/orchestrator/index.ts
   - src/lib/orchestrator/toolDispatch.ts
@@ -15,6 +15,7 @@ source_paths:
   - src/lib/orchestrator/replacementDetect.ts
   - src/lib/orchestrator/preservationVerifier.ts
   - src/lib/orchestrator/observability.ts
+  - src/lib/providers/modelClass.ts
   - src/lib/music/scoreDiff.ts
   - src/app/api/chat/route.ts
 related:
@@ -31,9 +32,9 @@ internals: `src/lib/orchestrator/README.md`.
 
 ## Key files
 - `index.ts` — `run()` entry: deadline guards, copyright, M26 free-tier bounded-gen choke point, new-vs-legacy select, `runDispatchedHandler`, gate + ghost hooks, all `recordTurnT` (wraps `recordTurn`, stamps `generationTier`). M26: a fresh from-scratch gen on the FREE tier (default) routes to `runGenerateBounded` (≤4-bar single call) BEFORE dispatch/classify; PRO fresh gen reaches `runGenerateSectionalStream` via the classifier when `isSectionalGenEnabled()`. Free-tier `runDispatchedHandler` refuses `regenerate_all` (`pro_only`) and clamps extend/insert bars to `policy.maxBars`. **SHE-8:** all four scope/paywall reads (bounded-gen choke point, sectional fork, `regenerate_all` gate, bar clamp) now come from a caller-injected `input.tierPolicy` (`TierPolicy`) via `effectiveTierPolicy(input)` — the kernel no longer imports `policyFor`/`generationTier`. Absent ⇒ `UNCAPPED_TIER_POLICY` (OSS-safe: uncapped, never bounded); `route.ts` injects the resolved, fail-closed capped policy. `maybeAttachGhostProposal` now calls `ensureEventIds(score)` first (else amber highlights nothing). `OrchestratorScoreStream` handled like `ConverseStream` (records turn, returned directly).
-- `toolDispatch.ts` — 6-tool dispatcher (5 score-mutating + read-only `answer_question`→converse); ONE `dispatch_to_handler` tool with a FLAT top-level schema (`tool` enum + all per-tool fields hoisted, optional), `toolChoice:'required'`, medium tier, temp 0, `maxTokens:300`, conf hardcoded 0.85. `repairBranchArgs` fills safe defaults for empty branches; on a `validateBranchArgs` failure `run()` REROUTES to `edit_intra_measure` @ conf 0.6 (NOT a fall-through). `STRING_CAP`=2000. Optional `targetRegion` (D5) → structured selected-range prompt hint.
+- `toolDispatch.ts` — 6-tool dispatcher (5 score-mutating + read-only `answer_question`→converse); ONE `dispatch_to_handler` tool with a FLAT top-level schema (`tool` enum + all per-tool fields hoisted, optional), `toolChoice:'required'`, `small` tier (Haiku via `resolveModelClass({callType:'dispatch'})`), temp 0, `maxTokens:300`, conf hardcoded 0.85. `repairBranchArgs` fills safe defaults for empty branches; on a `validateBranchArgs` failure `run()` REROUTES to `edit_intra_measure` @ conf 0.6 (NOT a fall-through). `STRING_CAP`=2000. Optional `targetRegion` (D5) → structured selected-range prompt hint.
 - `flags.ts` — env accessors, read fresh every call; `isSectionalGenEnabled()` reads `SL_SECTIONAL_GEN` (default ON); `isBoundedGenEnabled()` reads `SL_BOUNDED_GEN` (default ON); `isStreamAbortEnabled()` reads `SL_STREAM_ABORT` (default OFF).
-- `generationTier.ts` — M26 product/paywall tier (`GenerationTier='free'|'pro'`), ORTHOGONAL to provider `Tier`; `policyFor`→`GenerationPolicy`, `resolveGenerationTier` (force-free > dev-only client override > `SL_GENERATION_TIER` > entitlement); SHE-8 `toTierPolicy(tier)`→`TierPolicy` is the SaaS adapter `route.ts` injects (the orchestrator no longer imports `policyFor` — this file is referenced only by `route.ts` now); `BOUNDED_EMIT_CEILING`=2600, `BOUNDED_MAX_BARS`=4. Both tiers stay on medium (Sonnet 4.6).
+- `generationTier.ts` — M26 product/paywall tier (`GenerationTier='free'|'pro'`), ORTHOGONAL to provider `Tier`. Gates SCOPE/ceilings, NOT model quality. `policyFor`→`GenerationPolicy`, `resolveGenerationTier` (force-free > dev-only client override > `SL_GENERATION_TIER` > entitlement); SHE-8 `toTierPolicy(tier)`→`TierPolicy` is the SaaS adapter `route.ts` injects (the orchestrator no longer imports `policyFor` — this file is referenced only by `route.ts` now); `BOUNDED_EMIT_CEILING`=2600, `BOUNDED_MAX_BARS`=4. The MODEL is chosen by `resolveModelClass` (SHE-19): defaults to `small` (Haiku); escalates to `medium` (Sonnet) on `complexity:'complex'`; `large` (Opus) only for `whole_score`/`extend` with the Advanced Composer entitlement.
 - `types.ts` — `OrchestratorInput/Result/Refusal/FallThrough/ConverseStream/ScoreStream`, `isOrchestratorConverseStream`, `isOrchestratorScoreStream`; `ScoreStreamEvent` (`'section'|'done'|'error'`); `ScoreLevelOperation` gained `changeClef`. M26/D5: `OrchestratorInput` gained `generationTier` + `targetRegion`; `RefusalCode` gained `'pro_only'`. SHE-8: added the `TierPolicy` interface + `OrchestratorInput.tierPolicy` (the injected scope/ceiling budget the kernel reads instead of importing `policyFor`).
 - `replacementDetect.ts` — pure `detectReplacement()`, `REWRITE_KEYWORDS`.
 - `preservationVerifier.ts` — `verifyPreservation` / `verifyAllOriginalsPreserved` (re-hash retained bars).
