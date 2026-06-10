@@ -201,6 +201,7 @@ function unifiedSystemPrompt(): string {
   `─────────────────────────────────────────────────────────────────`,
   `When you call emit_replacement_bars, follow this guidance exactly:`,
   REGION_SYSTEM_PROMPT,
+  `TRANSFORMS via emit_replacement_bars ("make this Dorian/minor/major/jazzier", "add a flat 7", "make it bluesy", "harmonize"): you MUST actually REALIZE the change in the emitted notes. The key signature stays fixed on this path, so apply the alteration with EXPLICIT ACCIDENTALS on every affected pitch (set accidental:'flat'/'sharp'/'natural'). E.g. C Ionian → Dorian = flat the 3rd and 7th: every E→E with accidental 'flat', every B→B with accidental 'flat'; natural minor also flats the 6th (A→A flat). Do NOT echo the original pitches unchanged — an emit_replacement_bars that returns the same notes has NOT performed the requested transform.`,
   ``,
   `─────────────────────────────────────────────────────────────────`,
   `When you call emit_inserted_bars, follow this guidance exactly:`,
