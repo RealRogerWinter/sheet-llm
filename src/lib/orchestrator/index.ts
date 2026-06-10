@@ -1,6 +1,7 @@
 import { recordTurn, type RecordTurnFields } from './observability'
 import { runWithUsageMeter, currentMeterTotals, toMicroUsd } from '@/lib/metering/usageMeter'
 import { checkCopyright } from './copyright/filter'
+import { noticeNoOpEdit } from './noOpEditNotice'
 import { classify, ClassifierSchemaError } from './classifier'
 import { isDeadlineApproaching } from './deadline'
 import { runEditScoreLevel, EditHandlerError } from './handlers/editScoreLevel'
@@ -29,7 +30,7 @@ import {
   type DispatchToolName,
   type ReplacementDecision,
 } from './replacementDetect'
-import { computeAffectedEventIds, scoreDiff } from '@/lib/music/scoreDiff'
+import { computeAffectedEventIds, isNoOpEdit } from '@/lib/music/scoreDiff'
 import { ensureEventIds } from '@/lib/music/eventIds'
 import {
   run as toolDispatchRun,
@@ -224,20 +225,12 @@ function maybeAttachGhostProposal(
   if (!input.editedScore) return
   if (result.replacement) return
   if (result.requiresConfirmation === true) return
-  const diff = scoreDiff(input.editedScore, result.score)
-  // SHE-6 — `retainedEventRatio` is primary-staff/voice-0 only, so a
-  // bass-clef (`secondStaff`) or extra-voice-only edit leaves it at 1
-  // and would be wrongly treated as no-change. `hasAnyVoiceChange`
-  // walks every staff/voice, so gate on it: any voice changed ⇒ not a
-  // no-op, even when the primary-staff retention says nothing moved.
-  const noDiff =
-    diff.hasAnyVoiceChange === false &&
-    diff.retainedEventRatio === 1 &&
-    diff.measureCountBefore === diff.measureCountAfter &&
-    diff.keyChanged === false &&
-    diff.meterChanged === false &&
-    diff.titleChanged === false
-  if (noDiff) return
+  // No meaningful diff to preview ⇒ silent commit is correct HERE (the
+  // separate no-op-EDIT notice in finalizeDispatchResult handles the case
+  // where the user actually asked for a change). `isNoOpEdit` keys off the
+  // all-staff/voice signal, so a bass-clef- or extra-voice-only edit is not
+  // mistaken for a no-op.
+  if (isNoOpEdit(input.editedScore, result.score)) return
   // The overlay/diff locate the changed notes BY EVENT ID. Orchestrator
   // results don't carry ids (`id` is optional and only backfilled on the
   // migrate-on-load path), so without this `computeAffectedEventIds`
@@ -694,6 +687,12 @@ async function finalizeDispatchResult(
   const out: OrchestratorResult = { ...result, latencyMs: Date.now() - t0 }
   const replacementDecision = await maybeApplyReplacementGate(out, input)
   maybeAttachGhostProposal(out, input)
+  // Backstop: an edit-intent turn that changed nothing (single-call fell back
+  // and the 2-call path also echoed, or the 2-call path itself no-opped) gets a
+  // visible "couldn't apply that change" notice instead of a silent commit of
+  // the unchanged score. Runs AFTER the gates so a real proposal/replacement
+  // (which sets requiresConfirmation) is never overwritten.
+  noticeNoOpEdit(out, input)
   await recordTurnForResult(out, input, t0, decision, replacementDecision)
   return out
 }

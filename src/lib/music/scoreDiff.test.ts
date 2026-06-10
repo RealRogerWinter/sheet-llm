@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DIFF_ALGO_VERSION, computeAffectedEventIds, scoreDiff } from './scoreDiff'
+import { DIFF_ALGO_VERSION, computeAffectedEventIds, isNoOpEdit, scoreDiff } from './scoreDiff'
 import type { Event, Measure, Score } from './types'
 
 function makeNote(step: 'C' | 'D' | 'E' | 'F' | 'G' | 'A' | 'B', octave = 4): Event {
@@ -572,5 +572,56 @@ describe('scoreDiff — retainedEventRatio is primary-staff-only (SHE-6 guard)',
       secondStaffMeasures: [makeMeasure([makeNote('E', 2)])],
     })
     expect(scoreDiff(before, after).retainedEventRatio).toBe(1)
+  })
+})
+
+describe('isNoOpEdit — an edit that changed nothing (SHE-19 follow-up)', () => {
+  it('true when after is byte-identical to before', () => {
+    const m = makeMeasure([makeNote('C'), makeNote('D'), makeNote('E'), makeNote('F')])
+    const before = makeScore({ measures: [m] })
+    const after = makeScore({ measures: [m] })
+    expect(isNoOpEdit(before, after)).toBe(true)
+  })
+
+  it('true when after echoes the same pitches with fresh objects (Haiku echo-bars)', () => {
+    const before = makeScore({ measures: [makeMeasure([makeNote('C'), makeNote('E'), makeNote('G')])] })
+    // Same content, different object identity (what an echoed region-replace emits).
+    const after = makeScore({ measures: [makeMeasure([makeNote('C'), makeNote('E'), makeNote('G')])] })
+    expect(isNoOpEdit(before, after)).toBe(true)
+  })
+
+  it('false when a single primary-staff pitch changed', () => {
+    const before = makeScore({ measures: [makeMeasure([makeNote('C'), makeNote('E'), makeNote('G')])] })
+    const after = makeScore({ measures: [makeMeasure([makeNote('C'), makeNote('E'), makeNote('A')])] }) // G -> A
+    expect(isNoOpEdit(before, after)).toBe(false)
+  })
+
+  it('false when only a bass-staff (secondStaff) voice changed', () => {
+    const trebleM = makeMeasure([makeNote('C', 5)])
+    const before = makeScore({
+      measures: [trebleM],
+      secondStaffMeasures: [makeMeasure([makeNote('C', 2)])],
+    })
+    const after = makeScore({
+      measures: [trebleM],
+      secondStaffMeasures: [makeMeasure([makeNote('E', 2)])], // bass C2 -> E2
+    })
+    expect(isNoOpEdit(before, after)).toBe(false)
+  })
+
+  it('false when bars were appended (additions)', () => {
+    const m = makeMeasure([makeNote('C'), makeNote('D'), makeNote('E'), makeNote('F')])
+    const before = makeScore({ measures: [m] })
+    const after = makeScore({
+      measures: [m, makeMeasure([makeNote('G'), makeNote('A'), makeNote('B'), makeNote('C', 5)])],
+    })
+    expect(isNoOpEdit(before, after)).toBe(false)
+  })
+
+  it('false when the key signature changed', () => {
+    const m = makeMeasure([makeNote('C')])
+    const before = makeScore({ measures: [m], key: 'C' })
+    const after = makeScore({ measures: [m], key: 'G' })
+    expect(isNoOpEdit(before, after)).toBe(false)
   })
 })

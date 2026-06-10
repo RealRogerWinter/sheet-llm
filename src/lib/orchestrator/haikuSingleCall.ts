@@ -43,6 +43,7 @@ import type { Score, Span } from '@/lib/music/types'
 import { MeasureSchema } from '@/lib/music/types'
 import { STAFF_MEASURE_PROPERTIES } from '@/lib/llm/renderScoreTool'
 import { transformScore, type Operation } from '@/lib/music/editOperations'
+import { isNoOpEdit } from '@/lib/music/scoreDiff'
 import { validateScore } from '@/lib/music/validateScore'
 import { ValidationError } from '@/lib/music/errors'
 import { detectCadenceAtFinalBarline } from '@/lib/music/cadenceDetect'
@@ -136,6 +137,27 @@ export class HaikuSingleCallError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'HaikuSingleCallError'
+  }
+}
+
+/**
+ * Guard against a SILENT no-op edit. Under `tool_choice:'auto'` Haiku sometimes
+ * "edits" without changing anything — empty `ops`, or replacement bars that echo
+ * the originals unchanged (the documented whole-piece-transform regression, e.g.
+ * "make it Dorian" returning the same notes). Applying such an emission yields a
+ * score identical to the input; returning it would surface as "the same old
+ * score" with no signal the edit failed (the downstream ghost-preview no-op gate
+ * correctly suppresses a proposal, so nothing tells the user).
+ *
+ * Throw a RECOVERABLE error so the call site (`index.ts`) falls back to the
+ * 2-call dispatch path — the Sonnet dispatcher + a focused handler — which is a
+ * clean retry that may succeed, rather than committing the unchanged score.
+ */
+function assertEditChangedScore(before: Score, after: Score, tool: string): void {
+  if (isNoOpEdit(before, after)) {
+    throw new HaikuSingleCallError(
+      `${tool} produced no change to the score (echoed bars or empty ops); falling back to 2-call dispatch`,
+    )
   }
 }
 
@@ -608,6 +630,7 @@ export async function runHaikuSingleCall(
             }
           }
           validateScore(next)
+          assertEditChangedScore(score, next, 'edit_score')
           return {
             ...base,
             score: next,
@@ -626,6 +649,7 @@ export async function runHaikuSingleCall(
             )
           }
           const applied = applyExtend(score, parsed.data, maxBars)
+          assertEditChangedScore(score, applied.score, 'emit_appended_bars')
           return {
             ...base,
             score: applied.score,
@@ -668,6 +692,7 @@ export async function runHaikuSingleCall(
           }
           const next = transformScore(score, op)
           validateScore(next)
+          assertEditChangedScore(score, next, 'emit_inserted_bars')
           return {
             ...base,
             score: next,
@@ -687,6 +712,7 @@ export async function runHaikuSingleCall(
             )
           }
           const applied = applyRegion(score, parsed.data)
+          assertEditChangedScore(score, applied.score, 'emit_replacement_bars')
           return {
             ...base,
             score: applied.score,

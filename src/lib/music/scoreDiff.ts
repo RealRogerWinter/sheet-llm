@@ -114,6 +114,31 @@ export function scoreDiff(before: Score | undefined, after: Score | undefined): 
 }
 
 /**
+ * True when `after` is musically identical to `before` — every staff/voice
+ * unchanged (by content hash + count) AND no top-level metadata (key / meter /
+ * title) change. I.e. an "edit" that changed nothing.
+ *
+ * This is THE shared definition of "no change happened" — the ghost-preview
+ * no-op gate (`maybeAttachGhostProposal`), the single-call collapse's
+ * no-op-edit guard (`runHaikuSingleCall`), and the no-op-edit notice
+ * (`finalizeDispatchResult`) all key off it, so they can never disagree on
+ * whether a turn actually changed the score. Keys off `hasAnyVoiceChange`
+ * (all staves/voices), NOT `retainedEventRatio` (primary-staff/voice-0 only),
+ * so a bass-clef- or extra-voice-only edit is correctly seen as a real change.
+ */
+export function isNoOpEdit(before: Score, after: Score): boolean {
+  const diff = scoreDiff(before, after)
+  return (
+    diff.hasAnyVoiceChange === false &&
+    diff.retainedEventRatio === 1 &&
+    diff.measureCountBefore === diff.measureCountAfter &&
+    diff.keyChanged === false &&
+    diff.meterChanged === false &&
+    diff.titleChanged === false
+  )
+}
+
+/**
  * SHE-6 — true when any (staff, voice) pair differs between before and
  * after, by either measure count or per-measure content hash. Mirrors
  * the multi-staff walk in `ensureEventIds` / `computeAffectedEventIds`
