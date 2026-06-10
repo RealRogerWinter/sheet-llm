@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { Score } from '@/lib/music/types'
-import type { OrchestratorResult } from '@/lib/orchestrator/types'
+import type { OrchestratorResult, TierPolicy } from '@/lib/orchestrator/types'
 
 /**
  * SHE-19 PR2 — gate + fallback for the FREE-TIER single-call collapse.
@@ -8,16 +8,39 @@ import type { OrchestratorResult } from '@/lib/orchestrator/types'
  * The orchestrator's edit branch routes through `runHaikuSingleCall` (ONE
  * Haiku `tool_choice:'auto'` call) ONLY when ALL of:
  *   - `input.editedScore` is present, AND
- *   - `getGenerationTier() === 'free'`, AND
+ *   - the PER-REQUEST resolved policy is the free-tier one
+ *     (`effectiveTierPolicy(input).useBoundedFallback`) — NOT the instance env, AND
  *   - `isHaikuSingleCallEnabled()` (`SL_HAIKU_SINGLE_CALL` truthy).
  * Otherwise the legacy 2-call native dispatch path (`toolDispatchRun` →
- * `runDispatchedHandler`) runs. And if the unified call THROWS, the
+ * `runDispatchedHandler`) runs. And if the unified call THROWS recoverably, the
  * orchestrator must fall back to the 2-call path rather than dropping the turn.
+ *
+ * The gate keying off the injected POLICY (not the env) is load-bearing: a
+ * request route.ts resolved to PRO must NOT hit the free-tier unified path even
+ * if the instance env tier is unset (env default 'free'). The
+ * `pro policy + free env` case below pins that.
  *
  * We mock BOTH `haikuSingleCall` and `toolDispatch` so we can observe which
  * path ran. The downstream handlers the 2-call path calls are mocked to a
  * trivial success so a fallback run still returns a valid result.
  */
+
+// The free-tier policy route.ts injects (toTierPolicy('free')): bounded.
+const FREE_POLICY: TierPolicy = {
+  allowSectional: false,
+  allowWholeScore: false,
+  maxBars: 4,
+  emitCeiling: 2_600,
+  useBoundedFallback: true,
+}
+// The pro-tier policy: not bounded, so the unified path must be skipped.
+const PRO_POLICY: TierPolicy = {
+  allowSectional: true,
+  allowWholeScore: true,
+  maxBars: 64,
+  emitCeiling: 8_000,
+  useBoundedFallback: false,
+}
 
 const BASE_SCORE: Score = {
   title: 'Base',
@@ -139,6 +162,7 @@ describe('orchestrator — SHE-19 PR2 single-call gate + fallback', () => {
       editedScore: BASE_SCORE,
       history: [],
       generationTier: 'free',
+      tierPolicy: FREE_POLICY,
     })
 
     expect(runHaikuSingleCallMock).toHaveBeenCalledTimes(1)
@@ -158,6 +182,32 @@ describe('orchestrator — SHE-19 PR2 single-call gate + fallback', () => {
       editedScore: BASE_SCORE,
       history: [],
       generationTier: 'pro',
+      tierPolicy: PRO_POLICY,
+    })
+
+    expect(runHaikuSingleCallMock).not.toHaveBeenCalled()
+    expect(toolDispatchRunMock).toHaveBeenCalledTimes(1)
+    expect(runEditIntraMeasureMock).toHaveBeenCalledTimes(1)
+    expect(isResult(result)).toBe(true)
+    if (isResult(result)) expect(result.score.title).toBe('After 2-call dispatch')
+  })
+
+  it('PRO policy with NO env tier stub → unified NOT taken (gate keys off the per-request policy, not env)', async () => {
+    // This is the fix-#1 regression: env tier unset → getGenerationTier() === 'free'.
+    // The OLD gate read that env and would wrongly take the free unified path for a
+    // request route.ts resolved to PRO. The gate now reads the injected PRO policy
+    // (useBoundedFallback=false) so the unified path is skipped.
+    // NOTE: deliberately NO vi.stubEnv('SL_GENERATION_TIER', ...).
+    vi.stubEnv('SL_HAIKU_SINGLE_CALL', '1')
+
+    const result = await run({
+      requestId: 'r-pro-noenv',
+      chatId: 'chat-pro-noenv',
+      userText: 'raise the third note',
+      editedScore: BASE_SCORE,
+      history: [],
+      generationTier: 'pro',
+      tierPolicy: PRO_POLICY,
     })
 
     expect(runHaikuSingleCallMock).not.toHaveBeenCalled()
@@ -178,6 +228,7 @@ describe('orchestrator — SHE-19 PR2 single-call gate + fallback', () => {
       editedScore: BASE_SCORE,
       history: [],
       generationTier: 'free',
+      tierPolicy: FREE_POLICY,
     })
 
     expect(runHaikuSingleCallMock).not.toHaveBeenCalled()
@@ -198,6 +249,7 @@ describe('orchestrator — SHE-19 PR2 single-call gate + fallback', () => {
       editedScore: BASE_SCORE,
       history: [],
       generationTier: 'free',
+      tierPolicy: FREE_POLICY,
     })
 
     // The unified call was attempted...
@@ -225,12 +277,36 @@ describe('orchestrator — SHE-19 PR2 single-call gate + fallback', () => {
       editedScore: BASE_SCORE,
       history: [],
       generationTier: 'free',
+      tierPolicy: FREE_POLICY,
     })
 
     expect(runHaikuSingleCallMock).toHaveBeenCalledTimes(1)
     expect(toolDispatchRunMock).toHaveBeenCalledTimes(1)
     expect(isResult(result)).toBe(true)
     if (isResult(result)) expect(result.score.title).toBe('After 2-call dispatch')
+  })
+
+  it('transient error (RateLimited) from unified → rethrown, NOT silently fallen back (no double-spend)', async () => {
+    vi.stubEnv('SL_GENERATION_TIER', 'free')
+    vi.stubEnv('SL_HAIKU_SINGLE_CALL', '1')
+    const { RateLimitedError } = await import('@/lib/llm/errors')
+    runHaikuSingleCallMock.mockRejectedValue(new RateLimitedError('429 from upstream'))
+
+    await expect(
+      run({
+        requestId: 'r-ratelimited',
+        chatId: 'chat-ratelimited',
+        userText: 'raise the third note',
+        editedScore: BASE_SCORE,
+        history: [],
+        generationTier: 'free',
+        tierPolicy: FREE_POLICY,
+      }),
+    ).rejects.toBeInstanceOf(RateLimitedError)
+
+    expect(runHaikuSingleCallMock).toHaveBeenCalledTimes(1)
+    // Did NOT fall back to a fresh full 2-call flow (which would re-spend / re-fail).
+    expect(toolDispatchRunMock).not.toHaveBeenCalled()
   })
 
   it('no editedScore (fresh generation) → unified NOT taken even on free + flag ON', async () => {
@@ -248,6 +324,7 @@ describe('orchestrator — SHE-19 PR2 single-call gate + fallback', () => {
       editedScore: undefined,
       history: [],
       generationTier: 'free',
+      tierPolicy: FREE_POLICY,
     }).catch(() => undefined)
 
     expect(runHaikuSingleCallMock).not.toHaveBeenCalled()

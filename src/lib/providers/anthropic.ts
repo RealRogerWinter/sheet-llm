@@ -270,7 +270,11 @@ export class AnthropicProvider implements LLMProvider {
     options: ProviderCallOptions,
   ): Promise<MultiToolResult> {
     const anthropic = this.getClient(options.apiKeyOverride)
-    const model = options.modelOverride ?? 'claude-sonnet-4-6'
+    // The single-call collapse this primitive serves is Haiku by design, so the
+    // default is the Haiku (`small`) id — NOT the Sonnet default the other
+    // methods use. The caller (runHaikuSingleCall) always passes an explicit
+    // modelOverride; this default only governs a direct, override-less call.
+    const model = options.modelOverride ?? 'claude-haiku-4-5-20251001'
     const wantsCache = options.providerOptions?.anthropic?.cacheControl !== 'none'
 
     const systemBlocks = buildSystemBlocks(options.systemPrompt, wantsCache)
@@ -355,6 +359,17 @@ export class AnthropicProvider implements LLMProvider {
       .filter((b): b is Anthropic.TextBlock => b.type === 'text')
       .map((b) => b.text)
       .join('')
+    // A non-truncated response with NEITHER a tool_use block NOR any text is a
+    // degenerate result (e.g. an empty/stop-only completion). Returning it as a
+    // {kind:'text', text:''} would surface as an empty converse reply; instead
+    // throw a ProviderSchemaError — a RECOVERABLE shape failure, so the
+    // single-call site falls back to the 2-call dispatch path (not a transient
+    // RateLimited/Upstream/Truncated error, which it rethrows).
+    if (text.length === 0) {
+      throw new ProviderSchemaError(
+        'multiToolCall: model returned neither a tool call nor any text',
+      )
+    }
     return { kind: 'text', text, model, ...(usage ? { usage } : {}) }
   }
 

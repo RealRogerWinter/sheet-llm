@@ -24,7 +24,6 @@ import {
   isSectionalGenEnabled,
 } from './flags'
 import { runHaikuSingleCall } from './haikuSingleCall'
-import { getGenerationTier } from './generationTier'
 import {
   detectReplacement,
   type DispatchToolName,
@@ -877,13 +876,25 @@ async function runInner(input: OrchestratorInput): Promise<OrchestratorRunOutcom
   // apply to the single-call output too. Sits BEFORE the dispatcher so it fully
   // replaces it. Default OFF (hosted free-tier opts in via env); Anthropic-only
   // (a non-Anthropic provider throws MultiToolUnsupportedError). A malformed
-  // single call MUST NOT drop the turn — on ANY error we log and fall through to
-  // the 2-call dispatch path below.
-  if (input.editedScore && getGenerationTier() === 'free' && isHaikuSingleCallEnabled()) {
+  // single call MUST NOT drop the turn — on a recoverable error we log and fall
+  // through to the 2-call dispatch path below.
+  //
+  // The free-tier gate keys off the PER-REQUEST resolved policy (`useBoundedFallback`,
+  // true iff free — same signal the bounded-gen choke point above uses), NOT the
+  // instance-wide `getGenerationTier()` env: the unified path is free-tier-only and
+  // enforces free-tier scope (no whole-score rewrite, the maxBars bar budget, the
+  // bounded output ceiling), so a request route.ts resolved to PRO must NOT hit it.
+  const unifiedPolicy = effectiveTierPolicy(input)
+  if (
+    input.editedScore &&
+    unifiedPolicy.useBoundedFallback &&
+    isHaikuSingleCallEnabled()
+  ) {
     try {
       const unified = await runHaikuSingleCall({
         userText: input.userText,
         editedScore: input.editedScore,
+        policy: unifiedPolicy,
         ...(input.chatId !== undefined ? { chatId: input.chatId } : {}),
         ...(input.modelOverride !== undefined ? { modelOverride: input.modelOverride } : {}),
         ...(input.apiKeyOverride !== undefined ? { apiKeyOverride: input.apiKeyOverride } : {}),
@@ -902,6 +913,24 @@ async function runInner(input: OrchestratorInput): Promise<OrchestratorRunOutcom
       }
       return await finalizeDispatchResult(unified, input, t0, syntheticDecision)
     } catch (e) {
+      // Only fall back on RECOVERABLE failures of the single call: an unsupported
+      // (non-Anthropic) provider, or a validation/shape failure of the emitted
+      // ops (HaikuSingleCallError / ValidationError). For those, re-running the
+      // 2-call dispatch path is a clean retry that may succeed.
+      //
+      // A TRANSIENT upstream failure (rate limit / 5xx / output truncation) must
+      // NOT silently fall back: it would spend AGAIN on a fresh full 2-call flow
+      // that is just as likely to re-fail (double-spend), and it hides the typed
+      // error the route already maps (RateLimited→429, Upstream→5xx,
+      // OutputTruncated→422). Rethrow those so the route's existing handling deals
+      // with them.
+      if (
+        e instanceof RateLimitedError ||
+        e instanceof UpstreamError ||
+        e instanceof OutputTruncatedError
+      ) {
+        throw e
+      }
       // Fall through to the 2-call dispatch path — never drop the turn.
       const errMsg = e instanceof Error ? e.message : String(e)
       if (process.env.ORCHESTRATOR_LOG_SILENT !== '1') {

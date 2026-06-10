@@ -4,10 +4,20 @@
  * Collapses the orchestrator's 2-call EDIT path (toolDispatch picks one of the
  * structural actions, then a dedicated handler makes a SECOND LLM call to author
  * the precise operations) into ONE Haiku `tool_choice:'auto'` call that BOTH
- * picks the action AND emits the final operations. Exposes the five structural
- * emit-tools with their EXACT existing schemas (region/insert additionally carry
- * the dispatch range fields so the model emits them inline). Under 'auto', a
- * plain-TEXT reply IS the answer_question / converse case.
+ * picks the action AND emits the final operations. Exposes the FOUR structural
+ * edit-tools (edit_score / emit_appended_bars / emit_inserted_bars /
+ * emit_replacement_bars) with their EXACT existing schemas (region/insert
+ * additionally carry the dispatch range fields so the model emits them inline).
+ * Under 'auto', a plain-TEXT reply IS the answer_question / converse case.
+ *
+ * FREE-TIER ONLY (the call site gates on the per-request `useBoundedFallback`
+ * policy signal). The wholesale `render_score` / `regenerate_all` rewrite is
+ * Pro-only — it is deliberately NOT exposed here (a free user who asks to "start
+ * over" routes to one of the edit tools or a full-range region_replace, which the
+ * ratio-based replacement gate catches → confirmation fires). The free-tier bar
+ * budget (`policy.maxBars`) and bounded output ceiling (`policy.emitCeiling`) are
+ * enforced inside the apply, mirroring `runDispatchedHandler`. regenerate_all
+ * stays Pro-only on the 2-call path.
  *
  * APPROACH (2) HYBRID: the unified system prompt carries the dispatcher's
  * DECISION RULES *plus each action's FULL focused emit guidance* (the real
@@ -28,27 +38,13 @@
  */
 import { z } from 'zod'
 import type { Score, Span } from '@/lib/music/types'
-import { MeasureSchema, ScoreSchema } from '@/lib/music/types'
-import {
-  STAFF_MEASURE_PROPERTIES,
-  renderScoreTool,
-  RENDER_SCORE_TOOL_NAME,
-} from '@/lib/llm/renderScoreTool'
+import { MeasureSchema } from '@/lib/music/types'
+import { STAFF_MEASURE_PROPERTIES } from '@/lib/llm/renderScoreTool'
 import { transformScore, type Operation } from '@/lib/music/editOperations'
 import { validateScore } from '@/lib/music/validateScore'
 import { ValidationError } from '@/lib/music/errors'
 import { detectCadenceAtFinalBarline } from '@/lib/music/cadenceDetect'
 import { detectSeveredSpans } from '@/lib/music/structuralOps'
-import { ensureAnnotationIds } from '@/lib/music/annotations'
-import { ensureMarkerIds } from '@/lib/music/markers'
-import {
-  ensureCodaMarkerIds,
-  ensureJumpMarkerIds,
-  ensureSegnoMarkerIds,
-  ensureSpanIds,
-  ensureVoltaIds,
-} from '@/lib/music/spans'
-import { ensureTechniqueIds } from '@/lib/music/techniques'
 import { verifyAllOriginalsPreserved } from './preservationVerifier'
 import { buildEditScoreSchemaJson, INTRA_SYSTEM_PROMPT } from './handlers/editIntraMeasure'
 import {
@@ -58,7 +54,7 @@ import {
 } from './handlers/extendComposition'
 import { REGION_SYSTEM_PROMPT, detectAndResolveBoundaryTies } from './handlers/regionReplace'
 import { INSERT_SYSTEM_PROMPT } from './handlers/insertMeasures'
-import { COMPOSE_ROLE, COMPOSE_GUIDANCE } from './handlers/compose'
+import type { TierPolicy } from './types'
 import { selectProvider } from '@/lib/providers/select'
 import { AnthropicProvider } from '@/lib/providers/anthropic'
 import {
@@ -122,7 +118,17 @@ const PER_VOICE_JSON = {
   },
 } as const
 
-const MAX_TOKENS = 8_000
+/**
+ * Default Haiku model id (the `small`-tier Anthropic model) used when neither a
+ * `modelOverride` nor a resolved provider model is supplied. Mirrors the
+ * registry's small-tier id; the design pins this path to Haiku.
+ */
+const DEFAULT_HAIKU_MODEL = 'claude-haiku-4-5-20251001'
+
+/** Matches the 2-call EDIT handlers (region/extend/insert all use 8000). The
+ *  free-tier edit bound is the BAR budget (maxBars), not an output-token cap —
+ *  BOUNDED_EMIT_CEILING (2600) is the fresh-GENERATION limit, not an edit limit. */
+const EDIT_MAX_TOKENS = 8_000
 
 export class HaikuSingleCallError extends Error {
   constructor(message: string) {
@@ -134,6 +140,14 @@ export class HaikuSingleCallError extends Error {
 export interface RunHaikuSingleCallInput {
   userText: string
   editedScore: Score
+  /**
+   * The per-request resolved tier policy. The free-tier path enforces its scope
+   * here: `maxBars` clamps extend/insert growth and `emitCeiling` bounds the
+   * max_tokens output ceiling — mirroring `runDispatchedHandler`'s free clamps.
+   * Required because this path runs ONLY on the free tier (the call site gates on
+   * `useBoundedFallback`); a missing policy means the caller mis-wired the gate.
+   */
+  policy: TierPolicy
   chatId?: string
   modelOverride?: string
   apiKeyOverride?: string
@@ -160,20 +174,21 @@ function unifiedSystemPrompt(): string {
   _unifiedSystemPrompt = [
   `You are the unified editor for sheet-llm. The user has an existing musical score and made a request. In ONE step you must BOTH decide the right action AND emit the FINAL operations for it — there is no second call.`,
   ``,
-  `You have FIVE structural tools plus a prose escape:`,
+  `You have FOUR structural edit tools plus a prose escape:`,
   `1. edit_score({ ops }) — SURGICAL edits: change/add/remove specific notes, articulations, dynamics, ornaments, barlines, markers. Emit the minimal Operation array directly.`,
   `2. emit_appended_bars({ measures, perVoiceContent? }) — ADD measures to the END ("add N more bars", "extend", "continue", "keep going", "add a coda/tag"). Emit ONLY the new bars; key/meter/clef/title/tempo are inherited.`,
   `3. emit_inserted_bars({ afterMeasureIdx, measures, perVoiceContent? }) — INSERT bars into the MIDDLE ("insert N bars after measure 3"). afterMeasureIdx is 0-based; -1 = before bar 1. Emit ONLY the new bars.`,
   `4. emit_replacement_bars({ startMeasureIdx, endMeasureIdx, measures, perVoiceContent? }) — REWRITE a contiguous run of bars ("rewrite measures 5-8", "fix the bridge"), OR enrich a RANGE of existing bars ("add a bass line to bars 5-8" → replace that range, writing the new line INTO the existing staff). Range is inclusive, 0-based (bar 5 = index 4). Emit ONLY the replacement bars.`,
-  `5. render_score(<full Score>) — ONLY when the user EXPLICITLY asked to throw the score away and start over ("start over", "scrap this and write X", "rewrite from scratch"). Emit a complete new Score.`,
+  ``,
+  `There is NO "start over / rewrite from scratch" tool here — regenerating the whole score is unavailable on this path. A "start over" / "scrap this" request is served by rewriting the existing bars in place: use emit_replacement_bars over the FULL range of existing bars (startMeasureIdx 0 .. the last bar). Do not try to throw the score away.`,
   ``,
   `DECISION RULES (which action when):`,
-  `- "add N bars" / "add a coda" / "extend" / "continue" / "keep going" → emit_appended_bars. NOT render_score, EVEN IF the user describes the new content in detail.`,
+  `- "add N bars" / "add a coda" / "extend" / "continue" / "keep going" → emit_appended_bars, EVEN IF the user describes the new content in detail.`,
   `- "add a bass line / inner voice / harmony / left-hand part" to a RANGE of existing bars → emit_replacement_bars over that range (the score already has its staves; write into the existing staff — do NOT append empty bars, do NOT add a staff).`,
   `- "change" / "fix" / "rewrite" + a SPECIFIC range → emit_replacement_bars or edit_score.`,
   `- "raise the third note", "add a fermata", "make beat 3 staccato" → edit_score.`,
-  `- "start over" / "scrap" / "throw away" → render_score (only here).`,
-  `- When in doubt between appending and rewriting the whole score, prefer appending — a wasted append is cheap; a silent wholesale replacement of the user's work is the bug we avoid.`,
+  `- "start over" / "scrap" / "rewrite from scratch" → emit_replacement_bars over the full bar range (rewrite in place).`,
+  `- When in doubt between appending and rewriting, prefer appending — a wasted append is cheap; a silent wholesale replacement of the user's work is the bug we avoid.`,
   ``,
   `If the user is only ASKING A QUESTION about the score (music theory, analysis, "what key is this", "name the chord", "why does this resolve") and wants an EXPLANATION, reply in PROSE and do NOT call a tool. A request phrased as a hypothetical edit ("what if you made it minor?", "can you add a coda?") is NOT a question — call the matching tool.`,
   ``,
@@ -192,11 +207,6 @@ function unifiedSystemPrompt(): string {
   `─────────────────────────────────────────────────────────────────`,
   `When you call edit_score, follow the op vocabulary exactly:`,
   INTRA_SYSTEM_PROMPT,
-  ``,
-  `─────────────────────────────────────────────────────────────────`,
-  `When you call render_score (full rewrite only), follow this guidance:`,
-  COMPOSE_ROLE,
-  COMPOSE_GUIDANCE,
   ].join('\n')
   return _unifiedSystemPrompt
 }
@@ -255,21 +265,10 @@ function classificationFor(kind: Classification['kind'], confidence = 0.85): Cla
   return { kind, scope: 'short', complexity: 'complex', confidence }
 }
 
-/** Backfill ids on a regenerate_all Score exactly as scoreRetry does. */
-function backfillIds(score: Score): Score {
-  ensureTechniqueIds(score)
-  ensureAnnotationIds(score)
-  ensureMarkerIds(score)
-  ensureSpanIds(score)
-  ensureVoltaIds(score)
-  ensureJumpMarkerIds(score)
-  ensureSegnoMarkerIds(score)
-  ensureCodaMarkerIds(score)
-  return score
-}
-
-/** The five emit-tools with their EXACT schemas; insert/region add the range
- *  fields so the model emits them inline (no separate dispatch). */
+/** The four structural edit-tools with their EXACT schemas; insert/region add
+ *  the range fields so the model emits them inline (no separate dispatch).
+ *  render_score (whole-score rewrite) is deliberately NOT exposed — it is
+ *  Pro-only and would bypass the replacement-confirmation gate on the free path. */
 function buildTools(score: Score): Array<ProviderTool<unknown>> {
   return [
     {
@@ -339,14 +338,24 @@ function buildTools(score: Score): Array<ProviderTool<unknown>> {
         },
       },
     },
-    {
-      name: RENDER_SCORE_TOOL_NAME,
-      description:
-        'Emit a COMPLETE new Score. Use ONLY when the user explicitly asked to start over.',
-      inputSchema: ScoreSchema as unknown as ProviderTool<unknown>['inputSchema'],
-      inputSchemaJson: renderScoreTool.input_schema as unknown as Record<string, unknown>,
-    },
   ]
+}
+
+type PerVoiceContent = z.infer<typeof EmitAppendedBarsSchema>['perVoiceContent']
+
+/**
+ * Clamp the bar-aligned `perVoiceContent` to `maxBars` bars so it stays in lock-
+ * step with a clamped primary `measures` array (each inner voice carries one
+ * Measure per appended/inserted bar). Returns undefined unchanged.
+ */
+function clampPerVoiceContent(
+  pvc: PerVoiceContent,
+  maxBars: number,
+): PerVoiceContent {
+  if (pvc === undefined) return undefined
+  return pvc.map((staff) => ({
+    voices: staff.voices.map((voice) => voice.slice(0, maxBars)),
+  }))
 }
 
 /**
@@ -359,6 +368,7 @@ function buildTools(score: Score): Array<ProviderTool<unknown>> {
 function applyExtend(
   score: Score,
   parsed: z.infer<typeof EmitAppendedBarsSchema>,
+  maxBars: number,
 ): {
   score: Score
   appliedOps: Operation[]
@@ -366,8 +376,22 @@ function applyExtend(
   cadenceAtBoundary: boolean
   preservation: { ok: boolean; mismatchCount: number }
 } {
-  const emittedMeasures = parsed.measures
   const warnings: string[] = []
+
+  // Free-tier bar budget: clamp appended bars to maxBars, mirroring
+  // runDispatchedHandler's extend clamp (index.ts). A model that ignores the
+  // prompt budget still cannot exceed it. perVoiceContent is bar-aligned (each
+  // voice is one Measure per appended bar), so clamp it to the same length.
+  let emittedMeasures = parsed.measures
+  let perVoiceContent = parsed.perVoiceContent
+  if (emittedMeasures.length > maxBars) {
+    const requested = emittedMeasures.length
+    emittedMeasures = emittedMeasures.slice(0, maxBars)
+    perVoiceContent = clampPerVoiceContent(perVoiceContent, maxBars)
+    warnings.push(
+      `Free tier adds up to ${maxBars} bars at a time — added ${maxBars} of the ${requested} emitted. Switch to Pro for longer sections.`,
+    )
+  }
 
   // Tie-boundary downgrade BEFORE the op, against the (potentially tie-stripped)
   // working score — same order the extend handler uses.
@@ -393,7 +417,7 @@ function applyExtend(
   const op: Operation = {
     kind: 'appendMeasures',
     measures: emittedMeasures,
-    ...(parsed.perVoiceContent !== undefined ? { perVoiceContent: parsed.perVoiceContent } : {}),
+    ...(perVoiceContent !== undefined ? { perVoiceContent } : {}),
   }
   let next = transformScore(workingScore, op)
 
@@ -497,15 +521,29 @@ export async function runHaikuSingleCall(
     )
   }
   const provider = selected.provider
-  const model = input.modelOverride ?? selected.model
+  const model = input.modelOverride ?? selected.model ?? DEFAULT_HAIKU_MODEL
   const tools = buildTools(score)
+  const maxBars = input.policy.maxBars
+
+  // max_tokens matches the 2-call EDIT handlers (region/extend/insert all use
+  // 8000), NOT the bounded-GENERATION ceiling (BOUNDED_EMIT_CEILING=2600). That
+  // ceiling bounds fresh free-tier generation, not edits — clamping it here
+  // truncated whole-region rewrites (e.g. "make this Dorian"). The free-tier
+  // cost bound on edits is the BAR budget (maxBars), enforced by the apply
+  // clamps + budgetNote below — not an output-token ceiling.
+  const maxTokens = EDIT_MAX_TOKENS
 
   // Validation-retry loop (mirrors the handlers): ONE retry. If apply /
   // validateScore throws a ValidationError on attempt 1, re-issue the SAME
   // multiToolCall with the failure threaded into the user text and re-apply. On
   // the 2nd failure — or any non-ValidationError — throw. The text/answer path
   // can't fail validation, so it returns without consuming a retry.
-  const baseUserText = `${input.userText}\n\n${buildScoreSummary(score)}`
+  //
+  // Tell the model the free-tier bar budget up front (the apply also CLAMPS, so a
+  // model that ignores it still can't exceed the budget — this just avoids wasting
+  // output authoring bars that would be dropped).
+  const budgetNote = `BUDGET: when adding bars (emit_appended_bars / emit_inserted_bars), emit AT MOST ${maxBars} new bar${maxBars === 1 ? '' : 's'}.`
+  const baseUserText = `${input.userText}\n\n${budgetNote}\n\n${buildScoreSummary(score)}`
   let lastValidationError: string | undefined
   let attempt = 0
   while (true) {
@@ -518,7 +556,7 @@ export async function runHaikuSingleCall(
     const result: MultiToolResult = await provider.multiToolCall(tools, {
       systemPrompt: unifiedSystemPrompt(),
       userText,
-      maxTokens: MAX_TOKENS,
+      maxTokens,
       temperature: 0,
       modelOverride: model,
       ...(input.apiKeyOverride !== undefined ? { apiKeyOverride: input.apiKeyOverride } : {}),
@@ -584,7 +622,7 @@ export async function runHaikuSingleCall(
               `emit_appended_bars args invalid: ${parsed.error.issues.map((i) => i.message).join('; ')}`,
             )
           }
-          const applied = applyExtend(score, parsed.data)
+          const applied = applyExtend(score, parsed.data, maxBars)
           return {
             ...base,
             score: applied.score,
@@ -605,13 +643,25 @@ export async function runHaikuSingleCall(
               `emit_inserted_bars args invalid: ${parsed.error.issues.map((i) => i.message).join('; ')}`,
             )
           }
+          // Free-tier bar budget: clamp inserted bars to maxBars, mirroring
+          // runDispatchedHandler's insert clamp (index.ts). perVoiceContent is
+          // bar-aligned so clamp it to the same length.
+          const insertWarnings: string[] = []
+          let insertedMeasures = parsed.data.measures
+          let insertPvc = parsed.data.perVoiceContent
+          if (insertedMeasures.length > maxBars) {
+            const requested = insertedMeasures.length
+            insertedMeasures = insertedMeasures.slice(0, maxBars)
+            insertPvc = clampPerVoiceContent(insertPvc, maxBars)
+            insertWarnings.push(
+              `Free tier inserts up to ${maxBars} bars at a time — inserted ${maxBars} of the ${requested} emitted. Switch to Pro for more.`,
+            )
+          }
           const op: Operation = {
             kind: 'insertMeasuresAfter',
             afterMeasureIdx: parsed.data.afterMeasureIdx,
-            measures: parsed.data.measures,
-            ...(parsed.data.perVoiceContent !== undefined
-              ? { perVoiceContent: parsed.data.perVoiceContent }
-              : {}),
+            measures: insertedMeasures,
+            ...(insertPvc !== undefined ? { perVoiceContent: insertPvc } : {}),
           }
           const next = transformScore(score, op)
           validateScore(next)
@@ -621,6 +671,7 @@ export async function runHaikuSingleCall(
             classification: classificationFor('compose'),
             appliedOps: [op],
             dispatchTool: 'insert_measures',
+            ...(insertWarnings.length > 0 ? { warnings: insertWarnings } : {}),
             ...(usage ? { usage } : {}),
           }
         }
@@ -640,18 +691,6 @@ export async function runHaikuSingleCall(
             appliedOps: applied.appliedOps,
             dispatchTool: 'region_replace',
             ...(applied.warnings.length > 0 ? { warnings: applied.warnings } : {}),
-            ...(usage ? { usage } : {}),
-          }
-        }
-
-        case RENDER_SCORE_TOOL_NAME: {
-          const validated = validateScore(result.input)
-          const next = backfillIds(validated)
-          return {
-            ...base,
-            score: next,
-            classification: classificationFor('compose'),
-            dispatchTool: 'regenerate_all',
             ...(usage ? { usage } : {}),
           }
         }
