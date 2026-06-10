@@ -236,10 +236,10 @@ describe('renderScoreTool', () => {
       expect((eht as { type: string }).type).toBe('boolean')
     })
 
-    it('keeps step, octave, accidental as the required pitch fields', () => {
+    it('requires only step + octave on a pitch — accidental is optional (natural when omitted)', () => {
       const properties = renderScoreTool.input_schema.properties as Record<string, unknown>
       const pitchItems = (properties.measures as { items: { properties: { events: { items: { properties: { pitches: { items: { required: string[] } } } } } } } }).items.properties.events.items.properties.pitches.items
-      expect(pitchItems.required).toEqual(['step', 'octave', 'accidental'])
+      expect(pitchItems.required).toEqual(['step', 'octave'])
     })
   })
 

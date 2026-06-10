@@ -80,6 +80,89 @@ interface OpenAIStreamChunk {
 }
 
 /**
+ * Return the first brace-balanced `{...}` substring (string-literal aware), or
+ * null if there is no `{` or the object never closes (e.g. truncated output).
+ */
+export function extractFirstJsonObject(s: string): string | null {
+  const start = s.indexOf('{')
+  if (start < 0) return null
+  let depth = 0
+  let inStr = false
+  let esc = false
+  for (let i = start; i < s.length; i++) {
+    const c = s[i]
+    if (inStr) {
+      if (esc) esc = false
+      else if (c === '\\') esc = true
+      else if (c === '"') inStr = false
+      continue
+    }
+    if (c === '"') inStr = true
+    else if (c === '{') depth++
+    else if (c === '}') {
+      depth--
+      if (depth === 0) return s.slice(start, i + 1)
+    }
+  }
+  return null
+}
+
+/**
+ * Recover a tool call's arguments from a Groq `tool_use_failed` (400) error body.
+ *
+ * When a model (notably llama-3.1-8b) emits its tool call in the wrong envelope —
+ * e.g. the Hermes-style `<function=NAME>{json}` as text instead of a proper
+ * `tool_calls` entry — Groq rejects the turn with a 400 whose
+ * `error.failed_generation` echoes the model's raw attempt. The intended
+ * arguments are frequently valid JSON, so we extract and return them; the caller
+ * re-validates against the tool's Zod schema before trusting them. Returns the
+ * parsed-but-unvalidated args, or null when nothing recoverable is present.
+ */
+export function recoverToolArgsFromFailedGeneration(errorBody: string): unknown | null {
+  let err: unknown
+  try {
+    err = JSON.parse(errorBody)
+  } catch {
+    return null
+  }
+  if (!err || typeof err !== 'object') return null
+  const e = (err as { error?: { code?: unknown; failed_generation?: unknown } }).error
+  if (!e || e.code !== 'tool_use_failed' || typeof e.failed_generation !== 'string') {
+    return null
+  }
+
+  // Strip a leading `<function=NAME>` envelope if present, then take the first
+  // balanced JSON object from whatever remains (tolerating a trailing
+  // `</function>` or other trailing junk).
+  const tag = e.failed_generation.match(/<function\s*=\s*[^>\s]+\s*>/)
+  const region = tag ? e.failed_generation.slice((tag.index ?? 0) + tag[0].length) : e.failed_generation
+  const jsonText = extractFirstJsonObject(region)
+  if (jsonText === null) return null
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(jsonText)
+  } catch {
+    return null
+  }
+
+  // Unwrap an OpenAI-style `{ name, arguments }` / `{ parameters }` envelope when
+  // the model wrapped its args rather than emitting them bare.
+  if (parsed && typeof parsed === 'object') {
+    const p = parsed as { arguments?: unknown; parameters?: unknown }
+    if (typeof p.arguments === 'string') {
+      try {
+        return JSON.parse(p.arguments)
+      } catch {
+        return null
+      }
+    }
+    if (p.parameters && typeof p.parameters === 'object') return p.parameters
+  }
+  return parsed
+}
+
+/**
  * Generic provider for any OpenAI Chat Completions-compatible endpoint:
  * Groq (`https://api.groq.com/openai/v1`), Ollama
  * (`http://localhost:11434/v1`), OpenAI itself, xAI, etc.
@@ -148,6 +231,23 @@ export class OpenAICompatibleProvider implements LLMProvider {
         throw new RateLimitedError(`${this.name}: rate limited`)
       }
       const text = await response.text().catch(() => '')
+      // Groq returns a 400 `tool_use_failed` when the model emitted its tool
+      // call in the wrong envelope (e.g. llama's `<function=NAME>{json}` text).
+      // The intended args are echoed in `error.failed_generation` and are often
+      // valid — recover them (re-validated below) instead of failing the turn.
+      const recovered = recoverToolArgsFromFailedGeneration(text)
+      if (recovered !== null) {
+        const validated = tool.inputSchema.safeParse(recovered)
+        if (validated.success) {
+          recordProviderCall(model, undefined)
+          return {
+            input: validated.data,
+            toolUseId: `${this.name}_recovered_${crypto.randomUUID().replace(/-/g, '').slice(0, 22)}`,
+            model,
+            stopReason: 'tool_use_recovered',
+          }
+        }
+      }
       throw new UpstreamError(
         `${this.name} ${response.status}: ${text.slice(0, 300)}`,
         response.status,
