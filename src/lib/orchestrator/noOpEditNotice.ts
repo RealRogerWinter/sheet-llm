@@ -10,7 +10,11 @@ export const NO_OP_EDIT_NOTICE =
   "I couldn't apply that change — try rephrasing it, e.g. name the bars or the specific notes you want changed."
 
 /**
- * SHE-19 follow-up — path-agnostic backstop for the "same old score" bug.
+ * SHE-19 follow-up — backstop for the "same old score" bug, shared by both
+ * paths that converge on `finalizeDispatchResult`: the native 2-call dispatch
+ * path AND the single-call collapse (after its no-op fallback). (The legacy
+ * classifier rollback path — only reached with `SL_NEW_TOOL_DISPATCH=0` — does
+ * not flow through here and is left untouched.)
  *
  * When a turn INTENDED a structural edit (`dispatchTool` is set — a converse /
  * answer turn leaves it undefined) but the resulting score is identical to the

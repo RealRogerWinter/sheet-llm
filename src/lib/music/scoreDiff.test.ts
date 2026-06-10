@@ -624,4 +624,48 @@ describe('isNoOpEdit — an edit that changed nothing (SHE-19 follow-up)', () =>
     const after = makeScore({ measures: [m], key: 'G' })
     expect(isNoOpEdit(before, after)).toBe(false)
   })
+
+  // These edits touch fields scoreDiff/canonEvent deliberately ignore (barlines,
+  // spans, markers) — an event-content-only no-op check would FALSE-POSITIVE on
+  // them and wrongly report "couldn't apply".
+  it('false when only an end-barline changed (edit_score setEndBarline)', () => {
+    const before = makeScore({ measures: [makeMeasure([makeNote('C')])] })
+    const after = makeScore({ measures: [{ events: [makeNote('C')], endBarline: 'final' } as Measure] })
+    expect(isNoOpEdit(before, after)).toBe(false)
+  })
+
+  it('false when a slur span was added (edit_score insertSlur)', () => {
+    const before = makeScore({ measures: [makeMeasure([makeNote('C'), makeNote('D')])] })
+    const after: Score = {
+      ...makeScore({ measures: [makeMeasure([makeNote('C'), makeNote('D')])] }),
+      spans: [{ type: 'slur', startEventId: 'a', endEventId: 'b' }] as unknown as Score['spans'],
+    }
+    expect(isNoOpEdit(before, after)).toBe(false)
+  })
+
+  it('false when a marker was added (edit_score insertMarker)', () => {
+    const before = makeScore({ measures: [makeMeasure([makeNote('C')])] })
+    const after: Score = {
+      ...makeScore({ measures: [makeMeasure([makeNote('C')])] }),
+      markers: [{ measureIdx: 0, tempo_text: 'Allegro' }] as unknown as Score['markers'],
+    }
+    expect(isNoOpEdit(before, after)).toBe(false)
+  })
+
+  it('true when scores differ ONLY by event ids (echo carries client ids; emit does not)', () => {
+    const before: Score = {
+      key: 'C',
+      meter: '4/4',
+      measures: [
+        {
+          events: [
+            { ...makeNote('C'), id: 'evt-aaaaaa' } as Event,
+            { ...makeNote('E'), id: 'evt-bbbbbb' } as Event,
+          ],
+        },
+      ],
+    }
+    const after = makeScore({ measures: [makeMeasure([makeNote('C'), makeNote('E')])] }) // no ids
+    expect(isNoOpEdit(before, after)).toBe(true)
+  })
 })
