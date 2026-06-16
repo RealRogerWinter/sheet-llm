@@ -153,12 +153,31 @@ jobs:
     steps:
       - checkout
       - run:
+          name: Set up Buildx (docker-container driver — required for registry layer cache)
+          command: |
+            # The default `docker` driver only supports inline cache, which records
+            # ONLY final-image layers. This Dockerfile is multi-stage: the slow layers
+            # (apt build-essential, pnpm install, pnpm build, Litestream) live in the
+            # `build` stage and never reach the runtime image. The docker-container
+            # driver + a registry cache with mode=max caches ALL stages, so those
+            # layers survive across pipelines.
+            docker buildx create --use --name slbuilder --driver docker-container --bootstrap
+            docker buildx version
+      - run:
           name: Build + scan + push image to GHCR (public)
           command: |
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
             IMG=ghcr.io/realrogerwinter/sheet-llm
-            export DOCKER_BUILDKIT=1
-            docker build -t "$IMG:$CIRCLE_SHA1" -t "$IMG:latest" .
+            # Registry-backed layer cache. mode=max caches every stage (incl. `build`);
+            # cache blobs live in a dedicated :buildcache tag, separate from the shipped
+            # image tags. --load brings the result into the local daemon so Trivy can
+            # gate it BEFORE any image tag is pushed. The cache-to push (blobs only,
+            # not a runnable image tag) happens during build, which is fine.
+            docker buildx build \
+              --cache-from "type=registry,ref=$IMG:buildcache" \
+              --cache-to   "type=registry,ref=$IMG:buildcache,mode=max" \
+              --load \
+              -t "$IMG:$CIRCLE_SHA1" -t "$IMG:latest" .
             # Scan the freshly built image for OS/library CVEs; FAIL (and do NOT
             # push) on a fixable CRITICAL. Unfixed/accepted CVEs are excluded.
             curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/v0.71.0/contrib/install.sh \
