@@ -190,11 +190,18 @@ export default function TurnstileGate() {
   // challenge. The widget container is always mounted + interactable so the
   // challenge is solvable even if the interactive callbacks never fire.
   const showBox = challengeActive || status === 'error'
+  // Once we hold clearance and no challenge is active, hide the (always-mounted)
+  // widget: in `interaction-only` mode Cloudflare leaves the solved widget's
+  // "Success!" state rendered, which otherwise lingers centered on screen until
+  // a refresh. We keep it mounted (not unmounted) so the periodic silent refresh
+  // still runs; a later interactive refresh re-shows it via challengeActive.
+  const cleared = status === 'cleared' && !challengeActive
   return (
     <div
       className={styles.overlay}
       data-active={challengeActive ? 'true' : undefined}
       data-show={showBox ? 'true' : undefined}
+      data-cleared={cleared ? 'true' : undefined}
     >
       <div className={styles.backdrop} aria-hidden="true" />
       <div

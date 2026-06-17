@@ -40,6 +40,15 @@
   pointer-events: auto;
 }
 
+/* Cleared (clearance held, no active challenge): hide the still-mounted widget
+ * so Cloudflare's lingering "Success!" state can't sit centered on screen until
+ * a refresh, and let clicks pass through. visibility (not display:none) keeps the
+ * iframe laid out so the periodic silent refresh keeps running. */
+.overlay[data-cleared='true'] .box {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 /* Frame the box as a card while an interactive challenge (or an error) is up. */
 .overlay[data-show='true'] .box {
   padding: 20px;
