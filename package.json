@@ -22,6 +22,7 @@
     "eval:visual": "vitest run -c vitest.evals.visual.config.ts",
     "eval:baselines:capture": "tsx scripts/capture-visual-baselines.ts",
     "she15:matrix": "tsx scripts/she15-eval-matrix.ts",
+    "she15:converse": "tsx scripts/she15-converse-capture.ts",
     "test:e2e": "playwright test",
     "format": "prettier --write .",
     "abcjs:spike": "node scripts/abcjs-spike.mjs",
