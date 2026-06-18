@@ -153,6 +153,15 @@ export function buildLiveCase(spec: LiveCaseSpec): void {
       }
 
       const outcome = runner.outcome as OrchestratorRunOutcome
+      if (process.env.SL_EVAL_DEBUG_OUTCOME === '1') {
+        console.error(
+          `[debug outcome] case="${spec.id}" runner.model=${runner.model ?? '<null>'} kind=${runner.kind} attempts=${runner.attempts} lastError=${runner.lastError?.message ?? '<none>'}`,
+        )
+        console.error(
+          `[debug outcome] keys=${outcome && typeof outcome === 'object' ? Object.keys(outcome).join(',') : typeof outcome}`,
+        )
+        console.error(`[debug outcome] ${JSON.stringify(outcome, null, 2)?.slice(0, 3000)}`)
+      }
       if (
         !outcome ||
         typeof outcome !== 'object' ||
