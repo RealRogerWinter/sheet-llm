@@ -54,9 +54,17 @@ jobs:
     steps:
       - attach_workspace: { at: ~/app }
       - setup_pnpm
+      - restore_cache:
+          keys:
+            - "eslint-v1-{{ .Branch }}-{{ checksum \"pnpm-lock.yaml\" }}-{{ checksum \"eslint.config.mjs\" }}"
+            - "eslint-v1-{{ .Branch }}-{{ checksum \"pnpm-lock.yaml\" }}-"
+            - "eslint-v1-{{ .Branch }}-"
       - run:
           name: ESLint (blocking)
-          command: pnpm lint
+          command: pnpm lint -- --cache --cache-location ~/app/.eslintcache
+      - save_cache:
+          key: "eslint-v1-{{ .Branch }}-{{ checksum \"pnpm-lock.yaml\" }}-{{ checksum \"eslint.config.mjs\" }}"
+          paths: ["~/app/.eslintcache"]
       - run:
           name: Build-graph boundary (SHE-8 — core/orchestrator must not import billing/auth)
           command: pnpm lint:boundaries
@@ -69,11 +77,18 @@ jobs:
     steps:
       - attach_workspace: { at: ~/app }
       - setup_pnpm
+      - restore_cache:
+          keys:
+            - "tsbuildinfo-v1-{{ .Branch }}-{{ checksum \"pnpm-lock.yaml\" }}"
+            - "tsbuildinfo-v1-{{ .Branch }}-"
       - run: pnpm typecheck
+      - save_cache:
+          key: "tsbuildinfo-v1-{{ .Branch }}-{{ checksum \"pnpm-lock.yaml\" }}"
+          paths: ["~/app/tsconfig.tsbuildinfo"]
 
   test:
     executor: node
-    resource_class: xlarge
+    resource_class: large
     parallelism: 4
     steps:
       - attach_workspace: { at: ~/app }
@@ -126,12 +141,21 @@ jobs:
       # Dockerfile, never node_modules — the lockfile is authoritative for deps and
       # crawling node_modules only adds secret-scan noise and runtime.
       - checkout
+      - restore_cache:
+          keys: ["trivy-bin-v0.71.0"]
       - run:
-          name: Install Trivy (pinned)
+          name: Install Trivy (pinned, cached)
           command: |
-            curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/v0.71.0/contrib/install.sh \
-              | sudo sh -s -- -b /usr/local/bin v0.71.0
+            if [ ! -f ~/.trivy-bin/trivy ]; then
+              mkdir -p ~/.trivy-bin
+              curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/v0.71.0/contrib/install.sh \
+                | sh -s -- -b ~/.trivy-bin v0.71.0
+            fi
+            sudo cp ~/.trivy-bin/trivy /usr/local/bin/trivy
             trivy --version
+      - save_cache:
+          key: "trivy-bin-v0.71.0"
+          paths: ["~/.trivy-bin"]
       - run:
           name: "Trivy ledger (deps + Dockerfile + secrets, HIGH+CRITICAL — informational artifact)"
           command: |
@@ -163,6 +187,18 @@ jobs:
             # layers survive across pipelines.
             docker buildx create --use --name slbuilder --driver docker-container --bootstrap
             docker buildx version
+      - restore_cache:
+          keys: ["trivy-bin-v0.71.0"]
+      - run:
+          name: Install Trivy (pinned, cached)
+          command: |
+            if [ ! -f ~/.trivy-bin/trivy ]; then
+              mkdir -p ~/.trivy-bin
+              curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/v0.71.0/contrib/install.sh \
+                | sh -s -- -b ~/.trivy-bin v0.71.0
+            fi
+            sudo cp ~/.trivy-bin/trivy /usr/local/bin/trivy
+            trivy --version
       - run:
           name: Build + scan + push image to GHCR (public)
           command: |
@@ -180,8 +216,6 @@ jobs:
               -t "$IMG:$CIRCLE_SHA1" -t "$IMG:latest" .
             # Scan the freshly built image for OS/library CVEs; FAIL (and do NOT
             # push) on a fixable CRITICAL. Unfixed/accepted CVEs are excluded.
-            curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/v0.71.0/contrib/install.sh \
-              | sudo sh -s -- -b /usr/local/bin v0.71.0
             trivy image --severity CRITICAL --ignore-unfixed --exit-code 1 \
               --no-progress "$IMG:$CIRCLE_SHA1"
             docker push "$IMG:$CIRCLE_SHA1"
@@ -219,7 +253,7 @@ workflows:
       - security_scan
       - build_and_push:
           context: ghcr-push
-          requires: [typecheck, test, checks, security_scan]
+          requires: [lint, typecheck, test, checks, security_scan]
           filters: { branches: { only: main } }
       - hold:
           type: approval
